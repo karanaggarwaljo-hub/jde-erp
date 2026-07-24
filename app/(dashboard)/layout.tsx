@@ -1,0 +1,18 @@
+import Sidebar from '@/components/Sidebar';
+import Topbar from '@/components/Topbar';
+
+export default function DashboardGroupLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="erp-root">
+      <Sidebar />
+      <div className="erp-main">
+        <Topbar />
+        <main className="erp-content">{children}</main>
+      </div>
+    </div>
+  );
+}

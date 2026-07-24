@@ -20,6 +20,10 @@
 # production
 /build
 
+# temp text logs
+*.txt
+update_doc.py
+
 # misc
 .DS_Store
 *.pem
