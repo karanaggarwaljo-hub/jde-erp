@@ -13,9 +13,6 @@ import {
   FileText,
   BarChart3,
   Settings,
-  Bell,
-  Search,
-  Sparkles,
   LogOut
 } from 'lucide-react';
 
@@ -65,10 +62,10 @@ export default function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <div className="sidebar-item" style={{ color: '#EF4444' }}>
+        <Link href="/login" className="sidebar-item" style={{ color: '#EF4444' }}>
           <LogOut className="sidebar-item-icon" />
           <span>Sign Out</span>
-        </div>
+        </Link>
       </div>
     </aside>
   );

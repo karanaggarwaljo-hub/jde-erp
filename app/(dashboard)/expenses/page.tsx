@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Receipt, Plus, Filter, Calendar, CreditCard, DollarSign } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 export default function ExpensesPage() {
   const [expenses, setExpenses] = useState([
@@ -13,6 +13,7 @@ export default function ExpensesPage() {
   ]);
 
   const [showModal, setShowModal] = useState(false);
+  const [feedback, setFeedback] = useState('');
   const [newExp, setNewExp] = useState({
     category: 'transport',
     description: '',
@@ -38,6 +39,8 @@ export default function ExpensesPage() {
       ...expenses,
     ]);
     setShowModal(false);
+    setFeedback(`Expense ${newExp.description} saved.`);
+    setNewExp({ category: 'transport', description: '', amount: '', paid_by: 'Karan Aggarwal', mode: 'upi' });
   };
 
   return (
@@ -51,6 +54,8 @@ export default function ExpensesPage() {
           <Plus size={16} /> Log New Expense
         </button>
       </div>
+
+      {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
 
       {/* Summary KPI Cards */}
       <div className="grid-3 mb-6">

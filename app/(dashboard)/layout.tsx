@@ -1,5 +1,6 @@
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
+import DailyBriefingModal from '@/components/DailyBriefingModal';
 
 export default function DashboardGroupLayout({
   children,
@@ -13,6 +14,7 @@ export default function DashboardGroupLayout({
         <Topbar />
         <main className="erp-content">{children}</main>
       </div>
+      <DailyBriefingModal />
     </div>
   );
 }
