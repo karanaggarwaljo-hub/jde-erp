@@ -133,7 +133,7 @@ export default function InventoryPage() {
     setFeedback('');
     setImporting(true);
     try {
-      const imported = await parseInventoryFile(file);
+      const { products: imported, guessedFields } = await parseInventoryFile(file);
       if (imported.length === 0) {
         throw new Error('Couldn’t find a part name/description column in this file. Recognized headers include things like "Name", "Item Name", "Description", or "Part Number" — check your column titles, or share them and we can adjust the import.');
       }
@@ -145,7 +145,10 @@ export default function InventoryPage() {
         });
       }
       await reload();
-      setFeedback(`Imported ${imported.length} part(s) from ${file.name}.`);
+      const guessNote = guessedFields.length > 0
+        ? ` Your file's column titles didn't clearly label ${guessedFields.join(', ')}, so those were guessed from the numbers — please spot-check a few rows.`
+        : '';
+      setFeedback(`Imported ${imported.length} part(s) from ${file.name}.${guessNote}`);
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to read the file.');
     } finally {

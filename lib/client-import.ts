@@ -47,6 +47,58 @@ function guessTextColumn(rows: Array<Record<string, unknown>>): string | undefin
   return bestScore > 0 ? bestKey : undefined;
 }
 
+type NumericColumnStats = { key: string; avg: number; integerFraction: number; nonEmptyCount: number };
+
+function numericColumnStats(rows: Array<Record<string, unknown>>, key: string): NumericColumnStats | null {
+  let sum = 0;
+  let integerCount = 0;
+  let nonEmptyCount = 0;
+  let numericCount = 0;
+  for (const row of rows) {
+    const raw = row[key];
+    if (raw === undefined || raw === null || String(raw).trim() === '') continue;
+    nonEmptyCount++;
+    const n = Number(raw);
+    if (Number.isNaN(n)) continue;
+    numericCount++;
+    sum += n;
+    if (Number.isInteger(n)) integerCount++;
+  }
+  if (nonEmptyCount === 0 || numericCount / nonEmptyCount < 0.6) return null;
+  return { key, avg: sum / numericCount, integerFraction: integerCount / numericCount, nonEmptyCount };
+}
+
+/**
+ * When the file's own headers don't tell us which column is quantity vs. cost vs. selling
+ * price, infer it from the numbers themselves: quantity columns are almost always whole
+ * numbers, and of the two price-like columns left, the seller normally charges more than
+ * they paid, so the higher-average column is the selling price.
+ */
+function guessNumericRoles(
+  rows: Array<Record<string, unknown>>,
+  claimedKeys: Set<string>
+): { stock?: string; cost?: string; sale?: string } {
+  const allKeys = rows.length > 0 ? Object.keys(rows[0]) : [];
+  const candidates = allKeys
+    .filter((k) => !claimedKeys.has(k))
+    .map((k) => numericColumnStats(rows, k))
+    .filter((s): s is NumericColumnStats => s !== null);
+
+  if (candidates.length === 0) return {};
+
+  const byIntegerness = [...candidates].sort((a, b) => b.integerFraction - a.integerFraction || a.avg - b.avg);
+  const stock = byIntegerness[0];
+  const priceCandidates = candidates.filter((c) => c.key !== stock?.key).sort((a, b) => a.avg - b.avg);
+
+  if (priceCandidates.length >= 2) {
+    return { stock: stock?.key, cost: priceCandidates[0].key, sale: priceCandidates[priceCandidates.length - 1].key };
+  }
+  if (priceCandidates.length === 1) {
+    return { stock: stock?.key, sale: priceCandidates[0].key };
+  }
+  return { stock: stock?.key };
+}
+
 export async function parseSpreadsheetFile(file: File): Promise<ImportedLine[]> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: 'array' });
@@ -102,7 +154,9 @@ const PRODUCT_KEYS = {
   location: ['location', 'loc', 'rack', 'bin', 'shelf', 'warehouse'],
 } as const;
 
-export async function parseInventoryFile(file: File): Promise<ImportedProduct[]> {
+export type InventoryImportResult = { products: ImportedProduct[]; guessedFields: string[] };
+
+export async function parseInventoryFile(file: File): Promise<InventoryImportResult> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: 'array' });
   const firstSheetName = workbook.SheetNames[0];
@@ -121,6 +175,38 @@ export async function parseInventoryFile(file: File): Promise<ImportedProduct[]>
   const hasStructuredName = Boolean(findKey(sampleRow, PRODUCT_KEYS.name) || findKey(sampleRow, PRODUCT_KEYS.part_number));
   const fallbackNameKey = hasStructuredName ? undefined : guessTextColumn(rows);
 
+  // Resolve every header-matchable column once up front, then use whatever numeric columns
+  // are left over to guess quantity/cost/sale price when the headers themselves don't say.
+  const headerKeys = {
+    part_number: findKey(sampleRow, PRODUCT_KEYS.part_number),
+    oem_number: findKey(sampleRow, PRODUCT_KEYS.oem_number),
+    name: findKey(sampleRow, PRODUCT_KEYS.name) ?? fallbackNameKey,
+    brand: findKey(sampleRow, PRODUCT_KEYS.brand),
+    category: findKey(sampleRow, PRODUCT_KEYS.category),
+    compatibility: findKey(sampleRow, PRODUCT_KEYS.compatibility),
+    cost_price: findKey(sampleRow, PRODUCT_KEYS.cost_price),
+    mrp: findKey(sampleRow, PRODUCT_KEYS.mrp),
+    sale_price: findKey(sampleRow, PRODUCT_KEYS.sale_price),
+    discount: findKey(sampleRow, PRODUCT_KEYS.discount),
+    current_stock: findKey(sampleRow, PRODUCT_KEYS.current_stock),
+    min_stock: findKey(sampleRow, PRODUCT_KEYS.min_stock),
+    location: findKey(sampleRow, PRODUCT_KEYS.location),
+  };
+
+  const claimedKeys = new Set(Object.values(headerKeys).filter((k): k is string => Boolean(k)));
+  const needsGuessing = !headerKeys.current_stock || !headerKeys.cost_price || !headerKeys.sale_price;
+  const guessed = needsGuessing ? guessNumericRoles(rows, claimedKeys) : {};
+
+  const guessedFields: string[] = [];
+  if (!headerKeys.current_stock && guessed.stock) guessedFields.push('stock quantity');
+  if (!headerKeys.cost_price && guessed.cost) guessedFields.push('cost price');
+  if (!headerKeys.sale_price && guessed.sale) guessedFields.push('selling price');
+
+  const numberAt = (row: Record<string, unknown>, key: string | undefined) => {
+    if (!key) return 0;
+    return Number(row[key]) || 0;
+  };
+
   const products: ImportedProduct[] = [];
   for (const row of rows) {
     let name = get(row, PRODUCT_KEYS.name);
@@ -130,12 +216,14 @@ export async function parseInventoryFile(file: File): Promise<ImportedProduct[]>
     }
     if (!name && !partNumber) continue;
 
-    const mrpValue = Number(get(row, PRODUCT_KEYS.mrp)) || 0;
-    const discountPercent = Number(get(row, PRODUCT_KEYS.discount)) || 0;
-    let costPrice = Number(get(row, PRODUCT_KEYS.cost_price)) || 0;
+    const mrpValue = numberAt(row, headerKeys.mrp);
+    const discountPercent = numberAt(row, headerKeys.discount);
+    let costPrice = headerKeys.cost_price ? numberAt(row, headerKeys.cost_price) : numberAt(row, guessed.cost);
     if (!costPrice && discountPercent && mrpValue) {
       costPrice = Math.round(mrpValue * (1 - discountPercent / 100) * 100) / 100;
     }
+    const salePrice = headerKeys.sale_price ? numberAt(row, headerKeys.sale_price) : numberAt(row, guessed.sale);
+    const currentStock = headerKeys.current_stock ? numberAt(row, headerKeys.current_stock) : numberAt(row, guessed.stock);
 
     products.push({
       part_number: partNumber,
@@ -146,13 +234,13 @@ export async function parseInventoryFile(file: File): Promise<ImportedProduct[]>
       compatibility: get(row, PRODUCT_KEYS.compatibility),
       cost_price: costPrice,
       mrp: mrpValue,
-      sale_price: Number(get(row, PRODUCT_KEYS.sale_price)) || 0,
-      current_stock: Number(get(row, PRODUCT_KEYS.current_stock)) || 0,
+      sale_price: salePrice,
+      current_stock: currentStock,
       min_stock: Number(get(row, PRODUCT_KEYS.min_stock)) || 0,
       location: get(row, PRODUCT_KEYS.location),
     });
   }
-  return products;
+  return { products, guessedFields };
 }
 
 export function fileToBase64(file: File): Promise<string> {
