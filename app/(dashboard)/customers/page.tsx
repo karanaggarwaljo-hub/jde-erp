@@ -2,29 +2,34 @@
 
 import { FormEvent, useState } from 'react';
 import { Plus, Phone, Mail, MapPin } from 'lucide-react';
-
-const initialCustomers = [
-  { id: '1', name: 'Sharma Auto Works', phone: '9876543210', email: 'sharma.auto@email.com', gstin: '07AAAAA0000A1Z5', address: 'Plot 42, Mayapuri Phase II, New Delhi', type: 'dealer', credit_limit: 50000, balance: 18400 },
-  { id: '2', name: 'City Motors Garage', phone: '9123456789', email: 'citymotors@email.com', gstin: '07BBBBB1111B2Z6', address: 'Shop 12, Kashmere Gate, New Delhi', type: 'wholesale', credit_limit: 75000, balance: 22500 },
-  { id: '3', name: 'Kumar Spare Parts', phone: '9012345678', email: 'kumar.spare@email.com', gstin: '07CCCCC2222C3Z7', address: 'Main Road, Gurgaon', type: 'retail', credit_limit: 20000, balance: 8200 },
-  { id: '4', name: 'Patel Auto Center', phone: '8901234567', email: 'patel.auto@email.com', gstin: '07DDDDD3333D4Z8', address: 'Sector 18, Noida', type: 'dealer', credit_limit: 100000, balance: 0 },
-];
+import { useCompanyTable } from '@/lib/useCompanyTable';
 
 const emptyForm = { name: '', phone: '', email: '', gstin: '', address: '', type: 'retail', credit_limit: 50000 };
 
-type Customer = typeof initialCustomers[number];
+type Customer = {
+  id: string;
+  company_id: string;
+  name: string;
+  phone: string;
+  email: string;
+  gstin: string;
+  address: string;
+  type: string;
+  credit_limit: number;
+  balance: number;
+};
 
 export default function CustomersPage() {
-  const [customers, setCustomers] = useState(initialCustomers);
+  const { rows: customers, loading, create, update } = useCompanyTable<Customer>('customers');
   const [showModal, setShowModal] = useState(false);
   const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [feedback, setFeedback] = useState('');
   const [form, setForm] = useState(emptyForm);
 
-  const saveCustomer = (event: FormEvent) => {
+  const saveCustomer = async (event: FormEvent) => {
     event.preventDefault();
-    setCustomers((current) => [{ id: String(Date.now()), ...form, balance: 0 }, ...current]);
+    await create({ ...form, balance: 0 });
     setShowModal(false);
     setFeedback(`${form.name} added to the customer directory.`);
     setForm(emptyForm);
@@ -35,11 +40,11 @@ export default function CustomersPage() {
     setPaymentAmount(customer.balance);
   };
 
-  const recordPayment = (event: FormEvent) => {
+  const recordPayment = async (event: FormEvent) => {
     event.preventDefault();
     if (!paymentCustomer) return;
     const received = Math.min(Math.max(paymentAmount, 0), paymentCustomer.balance);
-    setCustomers((current) => current.map((customer) => customer.id === paymentCustomer.id ? { ...customer, balance: customer.balance - received } : customer));
+    await update(paymentCustomer.id, { balance: paymentCustomer.balance - received });
     setFeedback(`₹${received.toLocaleString()} payment received from ${paymentCustomer.name}.`);
     setPaymentCustomer(null);
   };
@@ -52,6 +57,11 @@ export default function CustomersPage() {
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
 
       <div className="grid-4 mb-6">
+        {customers.length === 0 && (
+          <div className="card" style={{ gridColumn: '1 / -1', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
+            {loading ? 'Loading customers…' : 'No customers yet — add your first customer to get started.'}
+          </div>
+        )}
         {customers.map((customer) => <div key={customer.id} className="card flex flex-col justify-between">
           <div><div className="flex justify-between items-start mb-2"><span className="badge badge-info">{customer.type.toUpperCase()}</span><span className="customer-gstin">GSTIN: {customer.gstin || 'Not provided'}</span></div>
             <h3 className="directory-card-title">{customer.name}</h3>

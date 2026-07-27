@@ -45,7 +45,8 @@ export default function AIInsightsCard() {
   };
 
   useEffect(() => {
-    fetchInsights();
+    const timer = setTimeout(fetchInsights, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   return (

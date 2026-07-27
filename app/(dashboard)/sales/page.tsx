@@ -3,45 +3,58 @@
 import { FormEvent, useState } from 'react';
 import { Plus, Printer, Send, FileText } from 'lucide-react';
 import { printCurrentPage } from '@/lib/client-export';
+import { useCompanyTable } from '@/lib/useCompanyTable';
 
 type SalesTab = 'invoices' | 'quotations' | 'orders' | 'returns';
 type InvoiceLine = { part: string; qty: number; price: number };
 
-const partOptions = [
-  { value: 'SP-001 - Brake Pad Set Front', price: 1100, category: 'Brakes' },
-  { value: 'SP-002 - Air Filter Premium', price: 580, category: 'Filters' },
-  { value: 'SP-003 - Oil Filter', price: 300, category: 'Filters' },
-];
+type Product = { id: string; company_id: string; part_number: string; name: string; category: string; sale_price: number };
+type Customer = { id: string; company_id: string; name: string };
+type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string };
+type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
+
+function todayIso() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function nextId(rows: Array<{ id: string }>, prefix: string) {
+  const maxNum = rows.reduce((max, row) => {
+    const match = row.id.match(/(\d+)$/);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 1000);
+  return `${prefix}-${maxNum + 1}`;
+}
 
 export default function SalesPage() {
+  const { rows: products } = useCompanyTable<Product>('products');
+  const { rows: customers } = useCompanyTable<Customer>('customers');
+  const { rows: invoices, loading: invoicesLoading, create: createInvoice } = useCompanyTable<Invoice>('invoices');
+  const { rows: quotations, loading: quotationsLoading } = useCompanyTable<Quotation>('quotations');
+
+  const partOptions = products.map((product) => ({
+    value: `${product.part_number} - ${product.name}`,
+    price: product.sale_price,
+    category: product.category,
+  }));
+
   const [activeTab, setActiveTab] = useState<SalesTab>('invoices');
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [customer, setCustomer] = useState('Sharma Auto Works');
-  const [invoiceDate, setInvoiceDate] = useState('2026-07-23');
-  const [lines, setLines] = useState<InvoiceLine[]>([{ part: partOptions[0].value, qty: 2, price: partOptions[0].price }]);
+  const [customer, setCustomer] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState(todayIso());
+  const [lines, setLines] = useState<InvoiceLine[]>([]);
   const [discountPercent, setDiscountPercent] = useState(0);
-  const [invoices, setInvoices] = useState([
-    { id: 'INV-1042', customer: 'Sharma Auto Works', date: '2026-07-23', items: 3, total: 18400, paid: 18400, status: 'paid', mode: 'UPI' },
-    { id: 'INV-1041', customer: 'City Motors Garage', date: '2026-07-22', items: 5, total: 42500, paid: 20000, status: 'partial', mode: 'Bank Transfer' },
-    { id: 'INV-1040', customer: 'Kumar Spare Parts', date: '2026-07-21', items: 2, total: 8200, paid: 0, status: 'unpaid', mode: 'Credit' },
-    { id: 'INV-1039', customer: 'Patel Auto Center', date: '2026-07-20', items: 8, total: 95000, paid: 95000, status: 'paid', mode: 'Cheque' },
-  ]);
-
-  const quotations = [
-    { id: 'QT-1015', customer: 'Kumar Spare Parts', date: '2026-07-23', validity: '2026-07-30', total: 12500, status: 'sent' },
-    { id: 'QT-1014', customer: 'City Motors Garage', date: '2026-07-22', validity: '2026-07-29', total: 68000, status: 'accepted' },
-  ];
 
   const subtotal = lines.reduce((sum, line) => sum + line.qty * line.price, 0);
   const discountAmount = subtotal * (discountPercent / 100);
   const total = subtotal - discountAmount;
   const includedGst = total - total / 1.18;
 
-  const openInvoice = (presetCustomer = 'Sharma Auto Works') => {
-    setCustomer(presetCustomer);
-    setLines([{ part: partOptions[0].value, qty: 1, price: partOptions[0].price }]);
+  const openInvoice = (presetCustomer?: string) => {
+    setCustomer(presetCustomer ?? customers[0]?.name ?? '');
+    setLines(partOptions.length > 0 ? [{ part: partOptions[0].value, qty: 1, price: partOptions[0].price }] : []);
     setDiscountPercent(0);
+    setInvoiceDate(todayIso());
     setShowInvoiceModal(true);
   };
 
@@ -49,11 +62,11 @@ export default function SalesPage() {
     setLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, ...patch } : line));
   };
 
-  const generateInvoice = (event: FormEvent) => {
+  const generateInvoice = async (event: FormEvent) => {
     event.preventDefault();
-    const nextNumber = 1043 + invoices.length - 4;
-    const invoice = {
-      id: `INV-${nextNumber}`,
+    const id = nextId(invoices, 'INV');
+    await createInvoice({
+      id,
       customer,
       date: invoiceDate,
       items: lines.reduce((sum, line) => sum + line.qty, 0),
@@ -61,18 +74,17 @@ export default function SalesPage() {
       paid: 0,
       status: 'unpaid',
       mode: 'Credit',
-    };
-    setInvoices((current) => [invoice, ...current]);
+    });
     setShowInvoiceModal(false);
     setActiveTab('invoices');
-    setFeedback(`${invoice.id} generated for ${customer}.`);
+    setFeedback(`${id} generated for ${customer}.`);
   };
 
   return (
     <div>
       <div className="page-header">
         <div><h1 className="page-title">Sales Management</h1><p className="page-subtitle">Manage Quotations → Sales Orders → Invoices → Payments & Returns</p></div>
-        <button className="btn btn-primary" onClick={() => openInvoice()}><Plus size={16} /> Create Sales Invoice</button>
+        <button className="btn btn-primary" onClick={() => openInvoice()} disabled={customers.length === 0}><Plus size={16} /> Create Sales Invoice</button>
       </div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
@@ -98,7 +110,11 @@ export default function SalesPage() {
                 <button className="btn btn-ghost btn-sm" aria-label={`Send ${invoice.id}`} title="Send WhatsApp/Email" onClick={() => setFeedback(`${invoice.id} queued for WhatsApp and email delivery.`)}><Send size={14} /></button>
               </div></td>
             </tr>;
-          })}</tbody>
+          })}
+          {invoices.length === 0 && (
+            <tr><td colSpan={9}><div className="empty-state"><p className="empty-state-title">{invoicesLoading ? 'Loading invoices…' : 'No invoices yet'}</p><p className="empty-state-desc">{invoicesLoading ? 'Fetching records for the active company.' : 'Create your first sales invoice to get started.'}</p></div></td></tr>
+          )}
+          </tbody>
         </table></div>
       )}
 
@@ -109,7 +125,11 @@ export default function SalesPage() {
             <td style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>{quote.id}</td><td style={{ fontWeight: 600 }}>{quote.customer}</td><td className="text-muted">{quote.date}</td><td>{quote.validity}</td><td className="text-right font-semibold">₹{quote.total.toLocaleString()}</td>
             <td><span className={`badge ${quote.status === 'accepted' ? 'badge-success' : 'badge-info'}`}>{quote.status.toUpperCase()}</span></td>
             <td className="text-center"><button className="btn btn-secondary btn-sm" onClick={() => openInvoice(quote.customer)}>Convert to Invoice →</button></td>
-          </tr>)}</tbody>
+          </tr>)}
+          {quotations.length === 0 && (
+            <tr><td colSpan={7}><div className="empty-state"><p className="empty-state-title">{quotationsLoading ? 'Loading quotations…' : 'No quotations yet'}</p><p className="empty-state-desc">{quotationsLoading ? 'Fetching records for the active company.' : 'This company has no quotations on file.'}</p></div></td></tr>
+          )}
+          </tbody>
         </table></div>
       )}
 
@@ -122,9 +142,10 @@ export default function SalesPage() {
           <form onSubmit={generateInvoice}>
             <div className="modal-header"><h3 id="invoice-modal-title" className="modal-title">Create Sales Invoice</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setShowInvoiceModal(false)}>✕</button></div>
             <div className="modal-body flex flex-col gap-4">
-              <div className="form-grid-2"><div className="form-group"><label className="form-label">Customer *</label><select className="form-input form-select" value={customer} onChange={(event) => setCustomer(event.target.value)}><option>Sharma Auto Works</option><option>City Motors Garage</option><option>Kumar Spare Parts</option><option>Patel Auto Center</option></select></div>
+              <div className="form-grid-2"><div className="form-group"><label className="form-label">Customer *</label><select className="form-input form-select" value={customer} onChange={(event) => setCustomer(event.target.value)}>{customers.map((c) => <option key={c.id}>{c.name}</option>)}</select></div>
                 <div className="form-group"><label className="form-label">Invoice Date</label><input type="date" className="form-input" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} /></div></div>
               <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Invoice Line Items</h4>
+                {partOptions.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Add parts in Inventory before creating an invoice.</p>}
                 {lines.map((line, index) => {
                   const category = partOptions.find((part) => part.value === line.part)?.category ?? '-';
                   return <div key={index} className="form-grid-4 mb-2">
@@ -134,7 +155,7 @@ export default function SalesPage() {
                     <div className="form-group"><label className="form-label">Unit Price (₹)</label><input type="number" min="0" className="form-input" value={line.price} onChange={(event) => updateLine(index, { price: Number(event.target.value) })} /></div>
                   </div>;
                 })}
-                <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setLines((current) => [...current, { part: partOptions[0].value, qty: 1, price: partOptions[0].price }])}>+ Add Item Row</button>
+                {partOptions.length > 0 && <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setLines((current) => [...current, { part: partOptions[0].value, qty: 1, price: partOptions[0].price }])}>+ Add Item Row</button>}
               </div>
               <div className="form-grid-2">
                 <div className="form-group"><label className="form-label">Discount (%)</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={discountPercent} onChange={(event) => setDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} /></div>
@@ -147,7 +168,7 @@ export default function SalesPage() {
                 <div><strong>Total Payable: </strong><span className="invoice-total">₹{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
               </div>
             </div>
-            <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowInvoiceModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total}>Generate & Save Invoice</button></div>
+            <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowInvoiceModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || !customer}>Generate & Save Invoice</button></div>
           </form>
         </div></div>
       )}

@@ -2,29 +2,26 @@
 
 import { FormEvent, useState } from 'react';
 import { Plus, Search, Phone, Mail } from 'lucide-react';
+import { useCompanyTable } from '@/lib/useCompanyTable';
 
-type Supplier = { id: string; name: string; phone: string; email: string; gstin: string; terms: number; balance: number };
+type Supplier = { id: string; company_id: string; name: string; category: string; phone: string; email: string; gstin: string; terms: number; balance: number };
 
-const initialSuppliers: Supplier[] = [
-  { id: '1', name: 'Bosch India Ltd', phone: '9111222333', email: 'bosch.india@supplier.com', gstin: '07AAAAA1111A1Z1', terms: 30, balance: 45000 },
-  { id: '2', name: 'Denso Auto Parts', phone: '9222333444', email: 'denso.auto@supplier.com', gstin: '07BBBBB2222B2Z2', terms: 45, balance: 18500 },
-  { id: '3', name: 'NGK Spark Plugs', phone: '9333444555', email: 'ngk.india@supplier.com', gstin: '07CCCCC3333C3Z3', terms: 30, balance: 0 },
-  { id: '4', name: 'LUK Clutch Systems', phone: '9444555666', email: 'luk.india@supplier.com', gstin: '07DDDDD4444D4Z4', terms: 60, balance: 28000 },
-];
+const categoryOptions = ['Engine', 'Brakes', 'Filters', 'Clutch', 'Suspension', 'Electrical'];
 
 export default function SuppliersPage() {
-  const [suppliers, setSuppliers] = useState(initialSuppliers);
+  const { rows: suppliers, loading, create, update } = useCompanyTable<Supplier>('suppliers');
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [paymentSupplier, setPaymentSupplier] = useState<Supplier | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [feedback, setFeedback] = useState('');
-  const [form, setForm] = useState({ name: '', phone: '', email: '', gstin: '', terms: 30 });
+  const [form, setForm] = useState({ name: '', category: categoryOptions[0], phone: '', email: '', gstin: '', terms: 30 });
 
   const filteredSuppliers = suppliers.filter((supplier) => {
     const query = search.toLowerCase();
     return (
       supplier.name.toLowerCase().includes(query) ||
+      supplier.category.toLowerCase().includes(query) ||
       supplier.phone.toLowerCase().includes(query) ||
       supplier.email.toLowerCase().includes(query) ||
       supplier.gstin.toLowerCase().includes(query)
@@ -33,12 +30,12 @@ export default function SuppliersPage() {
 
   const totalPayables = suppliers.reduce((total, supplier) => total + supplier.balance, 0);
 
-  const saveSupplier = (event: FormEvent) => {
+  const saveSupplier = async (event: FormEvent) => {
     event.preventDefault();
-    setSuppliers((current) => [{ id: String(Date.now()), ...form, balance: 0 }, ...current]);
+    await create({ ...form, balance: 0 });
     setShowModal(false);
     setFeedback(`${form.name} added to the supplier directory.`);
-    setForm({ name: '', phone: '', email: '', gstin: '', terms: 30 });
+    setForm({ name: '', category: categoryOptions[0], phone: '', email: '', gstin: '', terms: 30 });
   };
 
   const openPayment = (supplier: Supplier) => {
@@ -46,11 +43,11 @@ export default function SuppliersPage() {
     setPaymentAmount(supplier.balance);
   };
 
-  const recordPayment = (event: FormEvent) => {
+  const recordPayment = async (event: FormEvent) => {
     event.preventDefault();
     if (!paymentSupplier) return;
     const paid = Math.min(Math.max(paymentAmount, 0), paymentSupplier.balance);
-    setSuppliers((current) => current.map((supplier) => supplier.id === paymentSupplier.id ? { ...supplier, balance: supplier.balance - paid } : supplier));
+    await update(paymentSupplier.id, { balance: paymentSupplier.balance - paid });
     setFeedback(`₹${paid.toLocaleString()} payment recorded for ${paymentSupplier.name}.`);
     setPaymentSupplier(null);
   };
@@ -88,6 +85,7 @@ export default function SuppliersPage() {
         <thead>
           <tr>
             <th>Supplier</th>
+            <th>Category</th>
             <th>GSTIN</th>
             <th>Contact</th>
             <th>Terms</th>
@@ -99,6 +97,7 @@ export default function SuppliersPage() {
           {filteredSuppliers.map((supplier) => (
             <tr key={supplier.id}>
               <td style={{ fontWeight: 600 }}>{supplier.name}</td>
+              <td><span className="badge badge-info">{supplier.category}</span></td>
               <td style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: '12px' }}>{supplier.gstin || 'Not provided'}</td>
               <td>
                 <div className="flex items-center gap-2" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -118,7 +117,7 @@ export default function SuppliersPage() {
             </tr>
           ))}
           {filteredSuppliers.length === 0 && (
-            <tr><td colSpan={6}><div className="empty-state"><p className="empty-state-title">No suppliers found</p><p className="empty-state-desc">Try another search term.</p></div></td></tr>
+            <tr><td colSpan={7}><div className="empty-state"><p className="empty-state-title">{loading ? 'Loading suppliers…' : 'No suppliers found'}</p><p className="empty-state-desc">{loading ? 'Fetching vendors for the active company.' : 'Try another search term, or this company simply has no suppliers yet.'}</p></div></td></tr>
           )}
         </tbody>
       </table>
@@ -127,8 +126,9 @@ export default function SuppliersPage() {
     {showModal && <div className="modal-overlay"><div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="supplier-modal-title"><form onSubmit={saveSupplier}>
       <div className="modal-header"><h3 id="supplier-modal-title" className="modal-title">Add Supplier Profile</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setShowModal(false)}>✕</button></div>
       <div className="modal-body flex flex-col gap-4"><div className="form-group"><label className="form-label">Supplier Company Name *</label><input className="form-input" required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></div>
+        <div className="form-grid-2"><div className="form-group"><label className="form-label">Category</label><select className="form-input form-select" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{categoryOptions.map((c) => <option key={c}>{c}</option>)}</select></div><div className="form-group"><label className="form-label">Credit Terms (Days)</label><input type="number" min="0" className="form-input" value={form.terms} onChange={(event) => setForm({ ...form, terms: Number(event.target.value) })} /></div></div>
         <div className="form-grid-2"><div className="form-group"><label className="form-label">Phone</label><input className="form-input" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></div><div className="form-group"><label className="form-label">Email</label><input type="email" className="form-input" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></div></div>
-        <div className="form-grid-2"><div className="form-group"><label className="form-label">GSTIN</label><input className="form-input" value={form.gstin} onChange={(event) => setForm({ ...form, gstin: event.target.value })} /></div><div className="form-group"><label className="form-label">Credit Terms (Days)</label><input type="number" min="0" className="form-input" value={form.terms} onChange={(event) => setForm({ ...form, terms: Number(event.target.value) })} /></div></div>
+        <div className="form-group"><label className="form-label">GSTIN</label><input className="form-input" value={form.gstin} onChange={(event) => setForm({ ...form, gstin: event.target.value })} /></div>
       </div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button><button type="submit" className="btn btn-primary">Save Supplier</button></div>
     </form></div></div>}
 

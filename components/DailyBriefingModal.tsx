@@ -69,13 +69,17 @@ export default function DailyBriefingModal() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     if (window.localStorage.getItem(STORAGE_KEY) !== todayStr()) {
       window.localStorage.setItem(STORAGE_KEY, todayStr());
-      openModal();
+      timer = setTimeout(openModal, 0);
     }
     const handler = () => openModal();
     window.addEventListener('open-daily-briefing', handler);
-    return () => window.removeEventListener('open-daily-briefing', handler);
+    return () => {
+      window.removeEventListener('open-daily-briefing', handler);
+      if (timer) clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

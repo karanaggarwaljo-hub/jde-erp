@@ -32,8 +32,8 @@ const BRIEFING_JSON_SCHEMA = {
 
 const SYSTEM_PROMPT =
   'You are the daily briefing generator for an auto spare parts trading ERP (Jai Durga Enterprises). ' +
-  'You are given a JSON digest of deterministic figures already computed by the ERP: overdue receivables to collect today, ' +
-  'supplier payments due today, low-stock items, and yesterday\'s sales total. ' +
+  'You are given a JSON digest of deterministic figures already computed by the ERP: outstanding customer receivables, ' +
+  'outstanding supplier payables, low-stock items, and yesterday\'s sales total. ' +
   'Pick at most 3 priorities, ranked by impact, and write a short explanation for each that cites only figures present in the digest. ' +
   'Never invent a number, customer, supplier, or product that is not in the digest. If a category has zero items, do not create a priority for it. ' +
   'If everything is empty, return an empty priorities array. Currency is INR (₹).';

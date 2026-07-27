@@ -1,6 +1,7 @@
 import Sidebar from '@/components/Sidebar';
 import Topbar from '@/components/Topbar';
 import DailyBriefingModal from '@/components/DailyBriefingModal';
+import { CompanyProvider } from '@/components/CompanyProvider';
 
 export default function DashboardGroupLayout({
   children,
@@ -8,13 +9,15 @@ export default function DashboardGroupLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="erp-root">
-      <Sidebar />
-      <div className="erp-main">
-        <Topbar />
-        <main className="erp-content">{children}</main>
+    <CompanyProvider>
+      <div className="erp-root">
+        <Sidebar />
+        <div className="erp-main">
+          <Topbar />
+          <main className="erp-content">{children}</main>
+        </div>
+        <DailyBriefingModal />
       </div>
-      <DailyBriefingModal />
-    </div>
+    </CompanyProvider>
   );
 }

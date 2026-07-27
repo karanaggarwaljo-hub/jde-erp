@@ -38,9 +38,9 @@ const FORECAST_JSON_SCHEMA = {
 
 const SYSTEM_PROMPT =
   'You are an inventory planner for an auto spare parts trading ERP (Jai Durga Enterprises). ' +
-  'You are given a JSON digest of active products with current stock, minimum stock thresholds, cost, and units sold ' +
-  'in the last 60 days (from the stock ledger). Recommend which products to reorder and how much. ' +
-  'If has_sales_velocity_data is false, base recommendations only on current_stock vs min_stock and set confidence to "low" ' +
+  'You are given a JSON digest of active products with current stock, minimum stock thresholds, and cost. ' +
+  'Recommend which products to reorder and how much. ' +
+  'has_sales_velocity_data is always false in this digest — base recommendations only on current_stock vs min_stock and set confidence to "low" ' +
   '— do not invent a sales trend or a specific days-until-stockout figure you cannot derive from the digest. ' +
   'Prioritize products at or below their minimum stock. Currency is INR (₹).';
 

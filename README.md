@@ -1,132 +1,76 @@
-# JDE ERP — AI-Powered Business Operating System (AI-BOS)
+# JDE ERP — Jai Durga Enterprises
 
-> **Enterprise Resource Planning & Predictive Supply Chain Operating System for Heavy-Equipment Spare-Parts Businesses.**
-> **Product Owner**: Karan Aggarwal  
-> **Business**: Jai Durga Enterprises  
+An ERP web app for an auto spare parts trading business: inventory, sales, purchases, customers, suppliers, expenses, reports, and AI-assisted analytics — built for multi-company use, so you can run more than one business through the same app with fully separated data.
 
----
+## Tech Stack
 
-## 🌟 Executive Overview
+- **Frontend/Backend**: Next.js 16 (App Router) + React 19 + TypeScript, single Next.js server handling both UI and API routes.
+- **Database**: Supabase (managed Postgres). All data access happens server-side through Next.js API routes using a service-role key — the browser never talks to Supabase directly, and there's no user-facing auth layer today.
+- **AI**: Google Gemini (`@google/genai`) powers the Business Insights, Stock Reorder Forecast, and Daily Briefing features on `/dashboard` and `/analytics`. These degrade gracefully (a plain error message, not a crash) if no API key is configured or the free-tier quota is exhausted.
 
-**JDE ERP (AI-BOS)** is a cloud-native ERP platform engineered specifically for spare-parts distribution enterprises. Unlike legacy ERP systems that function merely as passive transaction ledgers, JDE ERP acts as an **autonomous operational co-pilot**—predicting stockouts, automating complex multi-entity transaction flows, generating real-time financial reporting, and assisting business owners in proactive decision-making from any device.
+## Modules
 
-### Key Performance Benchmarks
-- **Sub-second Universal Search**: `<500ms` lookup across Part Numbers, OEM Numbers, Invoices, and Customers.
-- **Fast Dashboard Load**: `<2s` real-time KPI rendering.
-- **Sub-second Page Transitions**: Next.js 16 App Router with Turbopack compilation.
-
----
-
-## 🚀 Key Features & 14 Core Modules
-
-| Module | Route | Key Capabilities |
+| Module | Route | What it does |
 |---|---|---|
-| **Executive Dashboard** | `/dashboard` | Executive KPIs (Today's Sales, Purchases, Gross Profit, Cash Balance, Inventory Value, Receivables, Payables, Low Stock), weekly trend charts, critical low-stock alert feed, and real-time activity tracking. |
-| **Spare Parts Inventory** | `/inventory` | Catalog management with Part Number, OEM Number, Alternate Part #, Brand, Category, Vehicle Compatibility, Warehouse Rack Location, MRP, Cost Price, Sale Price, and Min-Stock thresholds. |
-| **Sales & Billing Workflow** | `/sales` | Complete sales lifecycle: Quotations → Sales Orders → Tax Invoices → Payment Collection → Deliveries → Returns & Credit Notes. Includes auto GST calculations (CGST/SGST/IGST). |
-| **Purchases & Procurement** | `/purchases` | Supply chain workflow: Purchase Requests → Purchase Orders (PO) → Goods Received Notes (GRN) → Supplier Invoices → Supplier Payments. |
-| **Customer Directory** | `/customers` | Customer profiles, GSTIN numbers, credit limit monitors, credit terms (days), and accounts receivable ledgers. |
-| **Supplier Directory** | `/suppliers` | Vendor management, GSTIN records, payment terms (30/45/60 days), and accounts payable ledgers. |
-| **Expense Logger** | `/expenses` | Operational expenditure logging across Rent, Freight, Salaries, Utilities, Maintenance, and Office supplies with payment mode tracking. |
-| **Financial Reports** | `/reports` | Real-time Profit & Loss (P&L) statements, stock valuation summaries, GSTR-1 & GSTR-3B tax summaries, with Excel/CSV export and print triggers. |
-| **Analytics & AI Forecasting** | `/analytics` | Predictive stock replenishment recommendations, top 5 best-selling parts ranking, and category revenue distribution mix. |
-| **Roles & Permissions** | `/settings` | Fine-grained access control across 5 user roles (*Owner, Manager, Salesman, Accountant, Warehouse Staff*). |
-| **Company Settings** | `/settings` | Company profile configuration, tax rates, GSTIN, and document prefix rules (`INV`, `PO`, `QT`). |
-| **Notification Center** | Topbar | Real-time alert badges for low-stock warnings, overdue receivables, and pending PO receipts. |
-| **Universal Search** | Topbar (`Ctrl+K`) | Instant cross-entity search bar referencing Part #, OEM #, Customer names, and Invoices. |
-| **Audit Logging** | `/settings` | Transactional audit trails capturing User ID, action performed, table name, timestamp, and IP address for compliance. |
+| Executive Dashboard | `/dashboard` | Real per-company KPIs (sales, purchases, receivables, payables, low stock), a sales-vs-purchases chart, and a recent activity feed — all computed live from your data, not sample numbers. |
+| Spare Parts Inventory | `/inventory` | Catalog with part number, OEM number, brand, category, pricing, stock levels. Supports bulk import from a CSV/Excel file with flexible column-header matching. |
+| Sales | `/sales` | Quotations and invoices against your real customer and inventory data. |
+| Purchases | `/purchases` | Purchase orders and goods-received notes, with CSV/Excel/PDF/photo import (Gemini extracts line items from scanned documents). |
+| Customers / Suppliers | `/customers`, `/suppliers` | Directories with credit limits, GSTIN, and outstanding balances. |
+| Expenses | `/expenses` | Operational expense log by category. |
+| Reports | `/reports` | P&L, sales summary, stock valuation, and a GST summary (assumes 18% inclusive tax unless your figures say otherwise). |
+| Analytics | `/analytics` | AI-generated business insights and reorder recommendations, plus real stock-value rankings. |
+| Settings | `/settings` | Company management (create/switch/delete companies — each company's data is fully isolated), user roles, and local backup snapshots. |
 
----
+## Multi-Company Data Isolation
 
-## 🏗️ Tech Stack & Architecture
+Every business table has a `company_id` column, and exactly one company is "active" at a time (Settings → Companies). Every page reads and writes only the active company's data. Switching companies switches the entire app's view instantly — nothing is ever mixed between companies.
 
-```
-                                  +---------------------------------------+
-                                  |         Next.js 16 (App Router)       |
-                                  |     React 19 + TypeScript + CSS Tokens|
-                                  +-------------------+-------------------+
-                                                      |
-                                           HTTPS / WebSockets
-                                                      |
-                                  +-------------------v-------------------+
-                                  |        Supabase BaaS / Backend        |
-                                  |   Managed PostgreSQL + RLS + Auth    |
-                                  +-------------------+-------------------+
-                                                      |
-                                                      v
-                                  +---------------------------------------+
-                                  |       FastAPI Microservice Layer      |
-                                  |     Demand Forecasting & AI Models    |
-                                  +---------------------------------------+
-```
-
-- **Frontend**: Next.js 16 (App Router) + React 19 + TypeScript.
-- **Design System**: Bespoke dark-mode aesthetic with amber/gold primary accent (`#F59E0B`), glassmorphism cards, CSS variables, and Google Fonts (Inter).
-- **Database**: PostgreSQL (managed via Supabase) with 20 relational tables, custom migrations, auto-numbering sequences, performance indexes, and Row-Level Security (RLS).
-- **Backend Services**: Supabase SSR + FastAPI microservices for AI analytics.
-
----
-
-## 🗄️ Database Schema
-
-The system includes **20 core database tables**:
-
-- `erp_profiles` — User accounts & role assignments
-- `erp_company_settings` — Organization details & invoice prefixes
-- `erp_products` — Spare parts catalog & stock threshold levels
-- `erp_stock_ledger` — Immutable stock transaction logs
-- `erp_customers` & `erp_suppliers` — Ledger accounts & credit limits
-- `erp_quotations`, `erp_sales_orders`, `erp_invoices` — Sales records
-- `erp_payments_received`, `erp_deliveries`, `erp_returns` — Sales execution
-- `erp_purchase_requests`, `erp_purchase_orders`, `erp_goods_received` — Procurement
-- `erp_purchase_invoices`, `erp_payments_made` — Payables
-- `erp_expenses` — Operational overhead logs
-- `erp_audit_logs` — System compliance logs
-- `erp_notifications` — Real-time alerts
-
----
-
-## ⚡ Quick Start Guide
+## Setup
 
 ### Prerequisites
-- **Node.js**: v18.0.0 or higher
-- **npm**: v9.0.0 or higher
 
-### Installation
+- Node.js 20 or newer
+- A Supabase project (the schema below assumes one already exists with the `jde_*` tables created — see "Database schema" below if starting from scratch)
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/karanaggarwaljo-hub/jde-erp.git
-   cd jde-erp
-   ```
+### Steps
+
+1. **Get the code onto the machine** — copy the project folder, or `git clone` if it's in a repo.
 
 2. **Install dependencies**:
    ```bash
    npm install
    ```
 
-3. **Configure Environment Variables**:
-   Create a `.env.local` file in the root directory:
-   ```env
-   NEXT_PUBLIC_SUPABASE_URL=https://your-supabase-project.supabase.co
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
-   ```
-
-4. **Run the Development Server**:
+3. **Configure environment variables** — copy `.env.example` to `.env.local` and fill in real values:
    ```bash
-   npm run dev
+   cp .env.example .env.local
    ```
-   Open [http://localhost:3000](http://localhost:3000) in your browser.
+   - `NEXT_PUBLIC_SUPABASE_URL` — your Supabase project URL.
+   - `SUPABASE_SERVICE_ROLE_KEY` — from Supabase dashboard → Project Settings → API → `service_role` secret. **Never commit this or expose it to the browser.**
+   - `GEMINI_API_KEY` — optional, only needed for the AI features. Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
-5. **Build for Production**:
+4. **Run it**:
    ```bash
-   npm run build
-   npm run start
+   npm run dev        # development
+   # or
+   npm run build && npm run start   # production
    ```
+   Open [http://localhost:3000](http://localhost:3000).
 
----
+### Running on a second computer
 
-## 📄 License & Ownership
+Since all data lives in Supabase (not a local file), there's nothing to copy or sync — just repeat the setup steps above on the other machine using the **same** `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` values, and it will see the exact same companies and data. Each computer runs its own copy of the Next.js server; they all read/write the same Supabase project.
 
-Developed for **Jai Durga Enterprises**. All rights reserved.  
+### Database schema
+
+The app expects these tables in your Supabase project's `public` schema, all prefixed `jde_`: `companies`, `products`, `customers`, `suppliers`, `invoices`, `quotations`, `purchase_orders`, `grns`, `expenses`, `users` — plus two RPC functions, `jde_activate_company` and `jde_delete_company`, used for atomic company-switch/delete operations. Row-level security is enabled on every table with no policies, so only the service-role key (used server-side only) can access the data.
+
+### Backups
+
+A JSON snapshot of every table is saved to `data/backups/` once per day automatically while the app is running (and on-demand from Settings → Data Backups). Snapshots older than 7 days are pruned automatically. This is a local safety net in addition to whatever backup/PITR your Supabase plan provides — it never touches your live data.
+
+## License & Ownership
+
+Developed for **Jai Durga Enterprises**. All rights reserved.
 Product Owner: **Karan Aggarwal**

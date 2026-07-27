@@ -2,15 +2,12 @@
 
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
+import { useCompanyTable } from '@/lib/useCompanyTable';
+
+type Expense = { id: string; company_id: string; category: string; description: string; amount: number; date: string; paid_by: string; mode: string };
 
 export default function ExpensesPage() {
-  const [expenses, setExpenses] = useState([
-    { id: 'EXP-101', category: 'rent', description: 'Warehouse & Office Rent (July 2026)', amount: 45000, date: '2026-07-01', paid_by: 'Karan Aggarwal', mode: 'bank_transfer' },
-    { id: 'EXP-102', category: 'transport', description: 'Freight charges for Bosch order', amount: 3200, date: '2026-07-15', paid_by: 'Warehouse Staff', mode: 'cash' },
-    { id: 'EXP-103', category: 'utilities', description: 'Electricity Bill - Shop & Storage', amount: 8400, date: '2026-07-18', paid_by: 'Manager', mode: 'upi' },
-    { id: 'EXP-104', category: 'salaries', description: 'Staff Salaries Advance', amount: 25000, date: '2026-07-20', paid_by: 'Karan Aggarwal', mode: 'bank_transfer' },
-    { id: 'EXP-105', category: 'office', description: 'Printer paper & packaging tape', amount: 1450, date: '2026-07-22', paid_by: 'Accountant', mode: 'cash' },
-  ]);
+  const { rows: expenses, loading, create } = useCompanyTable<Expense>('expenses');
 
   const [showModal, setShowModal] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -24,20 +21,29 @@ export default function ExpensesPage() {
 
   const totalExpense = expenses.reduce((acc, curr) => acc + curr.amount, 0);
 
-  const handleAdd = (e: React.FormEvent) => {
+  const categoryTotals = new Map<string, number>();
+  for (const exp of expenses) categoryTotals.set(exp.category, (categoryTotals.get(exp.category) ?? 0) + exp.amount);
+  const largestCategory = Array.from(categoryTotals.entries()).sort((a, b) => b[1] - a[1])[0];
+
+  const nextExpenseId = () => {
+    const maxNum = expenses.reduce((max, exp) => {
+      const match = exp.id.match(/(\d+)$/);
+      return match ? Math.max(max, Number(match[1])) : max;
+    }, 100);
+    return `EXP-${maxNum + 1}`;
+  };
+
+  const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    setExpenses([
-      {
-        id: `EXP-10${expenses.length + 1}`,
-        category: newExp.category,
-        description: newExp.description,
-        amount: Number(newExp.amount),
-        date: new Date().toISOString().split('T')[0],
-        paid_by: newExp.paid_by,
-        mode: newExp.mode,
-      },
-      ...expenses,
-    ]);
+    await create({
+      id: nextExpenseId(),
+      category: newExp.category,
+      description: newExp.description,
+      amount: Number(newExp.amount),
+      date: new Date().toISOString().split('T')[0],
+      paid_by: newExp.paid_by,
+      mode: newExp.mode,
+    });
     setShowModal(false);
     setFeedback(`Expense ${newExp.description} saved.`);
     setNewExp({ category: 'transport', description: '', amount: '', paid_by: 'Karan Aggarwal', mode: 'upi' });
@@ -65,7 +71,7 @@ export default function ExpensesPage() {
         </div>
         <div className="card">
           <span className="kpi-label">Largest Expense Category</span>
-          <div className="kpi-value" style={{ marginTop: '8px', fontSize: '18px' }}>Rent & Facility (₹45,000)</div>
+          <div className="kpi-value" style={{ marginTop: '8px', fontSize: '18px' }}>{largestCategory ? `${largestCategory[0]} (₹${largestCategory[1].toLocaleString()})` : 'No expenses yet'}</div>
         </div>
         <div className="card">
           <span className="kpi-label">Log Entries</span>
@@ -101,6 +107,9 @@ export default function ExpensesPage() {
                 <td className="text-right font-semibold text-danger">₹{exp.amount.toLocaleString()}</td>
               </tr>
             ))}
+            {expenses.length === 0 && (
+              <tr><td colSpan={7}><div className="empty-state"><p className="empty-state-title">{loading ? 'Loading expenses…' : 'No expenses logged yet'}</p><p className="empty-state-desc">{loading ? 'Fetching records for the active company.' : 'Log your first expense to get started.'}</p></div></td></tr>
+            )}
           </tbody>
         </table>
       </div>

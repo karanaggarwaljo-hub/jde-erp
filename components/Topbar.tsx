@@ -4,6 +4,11 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Bell, Sparkles, Sunrise, ChevronDown, Settings, LogOut } from 'lucide-react';
+import { useCompanyTable } from '@/lib/useCompanyTable';
+
+type Product = { current_stock: number; min_stock: number };
+type Customer = { balance: number };
+type Supplier = { balance: number };
 
 const searchTargets = [
   { label: 'Dashboard', detail: 'Executive overview', href: '/dashboard', keywords: 'dashboard overview performance' },
@@ -25,6 +30,20 @@ export default function Topbar() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+
+  const { rows: products } = useCompanyTable<Product>('products');
+  const { rows: customers } = useCompanyTable<Customer>('customers');
+  const { rows: suppliers } = useCompanyTable<Supplier>('suppliers');
+
+  const lowStockCount = products.filter((p) => Number(p.min_stock) > 0 && Number(p.current_stock) <= Number(p.min_stock)).length;
+  const overdueCustomerCount = customers.filter((c) => Number(c.balance) > 0).length;
+  const payableSupplierCount = suppliers.filter((s) => Number(s.balance) > 0).length;
+
+  const notifications = [
+    ...(lowStockCount > 0 ? [{ href: '/inventory', text: `${lowStockCount} part(s) need reordering`, tag: 'Inventory' }] : []),
+    ...(overdueCustomerCount > 0 ? [{ href: '/customers', text: `${overdueCustomerCount} customer payment(s) outstanding`, tag: 'Receivables' }] : []),
+    ...(payableSupplierCount > 0 ? [{ href: '/purchases', text: `${payableSupplierCount} supplier payment(s) outstanding`, tag: 'Payables' }] : []),
+  ];
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -110,14 +129,15 @@ export default function Topbar() {
         <div className="topbar-menu-wrap">
           <button className="btn btn-ghost btn-icon" aria-label="Notifications" aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((open) => !open); setProfileOpen(false); }}>
             <Bell size={18} />
-            <span className="sidebar-badge notification-count">3</span>
+            {notifications.length > 0 && <span className="sidebar-badge notification-count">{notifications.length}</span>}
           </button>
           {notificationsOpen && (
             <div className="topbar-popover notification-popover">
               <strong>Notifications</strong>
-              <Link href="/inventory" onClick={() => setNotificationsOpen(false)}>3 critical parts need reordering <small>Inventory</small></Link>
-              <Link href="/customers" onClick={() => setNotificationsOpen(false)}>4 customer payments are overdue <small>Receivables</small></Link>
-              <Link href="/purchases" onClick={() => setNotificationsOpen(false)}>2 supplier payments are due today <small>Payables</small></Link>
+              {notifications.length === 0 && <p className="popover-empty">Nothing needs attention right now.</p>}
+              {notifications.map((n) => (
+                <Link key={n.href} href={n.href} onClick={() => setNotificationsOpen(false)}>{n.text} <small>{n.tag}</small></Link>
+              ))}
             </div>
           )}
         </div>

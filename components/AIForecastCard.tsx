@@ -49,7 +49,8 @@ export default function AIForecastCard() {
   };
 
   useEffect(() => {
-    fetchForecast();
+    const timer = setTimeout(fetchForecast, 0);
+    return () => clearTimeout(timer);
   }, []);
 
   return (

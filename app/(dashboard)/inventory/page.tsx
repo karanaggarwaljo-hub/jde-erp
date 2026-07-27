@@ -1,10 +1,13 @@
 'use client';
 
-import { useState } from 'react';
-import { Plus, Search, Filter, Edit, Trash2, AlertTriangle } from 'lucide-react';
+import { ChangeEvent, useState } from 'react';
+import { Plus, Search, Filter, Edit, Trash2, AlertTriangle, Upload } from 'lucide-react';
+import { useCompanyTable } from '@/lib/useCompanyTable';
+import { parseInventoryFile } from '@/lib/client-import';
 
 type Product = {
   id: string;
+  company_id: string;
   part_number: string;
   oem_number: string;
   name: string;
@@ -19,24 +22,18 @@ type Product = {
   location: string;
 };
 
-const initialProducts: Product[] = [
-  { id: '1', part_number: 'SP-001', oem_number: 'TOY-12345', name: 'Brake Pad Set - Front', brand: 'Bosch', category: 'Brakes', compatibility: 'Toyota Innova 2015-2023', cost_price: 850, mrp: 1200, sale_price: 1100, current_stock: 45, min_stock: 10, location: 'A-01' },
-  { id: '2', part_number: 'SP-002', oem_number: 'HON-67890', name: 'Air Filter - Premium', brand: 'Denso', category: 'Filters', compatibility: 'Honda City 2018-2023', cost_price: 320, mrp: 650, sale_price: 580, current_stock: 78, min_stock: 15, location: 'B-03' },
-  { id: '3', part_number: 'SP-003', oem_number: 'MAR-11111', name: 'Oil Filter', brand: 'Mann', category: 'Filters', compatibility: 'Maruti Suzuki Swift 2017-2023', cost_price: 180, mrp: 350, sale_price: 300, current_stock: 120, min_stock: 20, location: 'B-04' },
-  { id: '4', part_number: 'SP-004', oem_number: 'TOY-22222', name: 'Clutch Plate', brand: 'LUK', category: 'Clutch', compatibility: 'Toyota Fortuner 2016-2023', cost_price: 2800, mrp: 4500, sale_price: 4200, current_stock: 8, min_stock: 5, location: 'C-02' },
-  { id: '5', part_number: 'SP-005', oem_number: 'HON-33333', name: 'Spark Plug Set (4pcs)', brand: 'NGK', category: 'Engine', compatibility: 'Honda Jazz 2015-2023', cost_price: 650, mrp: 1100, sale_price: 980, current_stock: 35, min_stock: 10, location: 'D-01' },
-  { id: '6', part_number: 'SP-006', oem_number: 'MAR-44444', name: 'Alternator Belt', brand: 'Gates', category: 'Engine', compatibility: 'Maruti Suzuki Baleno 2015-2023', cost_price: 290, mrp: 550, sale_price: 490, current_stock: 3, min_stock: 8, location: 'D-02' },
-  { id: '7', part_number: 'SP-007', oem_number: 'HYU-55555', name: 'Shock Absorber - Rear', brand: 'Gabriel', category: 'Suspension', compatibility: 'Hyundai Creta 2018-2023', cost_price: 1850, mrp: 3200, sale_price: 2900, current_stock: 12, min_stock: 5, location: 'E-01' },
-];
+const DEFAULT_CATEGORIES = ['Engine', 'Brakes', 'Filters', 'Clutch', 'Suspension', 'Electrical'];
 
 export default function InventoryPage() {
-  const [products, setProducts] = useState(initialProducts);
+  const { rows: products, loading, create, update, remove, reload, activeCompany } = useCompanyTable<Product>('products');
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Product | null>(null);
   const [feedback, setFeedback] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState('');
 
   const [formData, setFormData] = useState({
     part_number: '',
@@ -52,6 +49,8 @@ export default function InventoryPage() {
     min_stock: '',
     location: '',
   });
+
+  const categoryOptions = Array.from(new Set([...DEFAULT_CATEGORIES, ...products.map((p) => p.category).filter(Boolean)])).sort();
 
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -81,29 +80,20 @@ export default function InventoryPage() {
     setShowModal(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const payload = {
+      ...formData,
+      cost_price: Number(formData.cost_price),
+      mrp: Number(formData.mrp),
+      sale_price: Number(formData.sale_price),
+      current_stock: Number(formData.current_stock),
+      min_stock: Number(formData.min_stock),
+    };
     if (editingProduct) {
-      setProducts(products.map(p => p.id === editingProduct.id ? {
-        ...p,
-        ...formData,
-        cost_price: Number(formData.cost_price),
-        mrp: Number(formData.mrp),
-        sale_price: Number(formData.sale_price),
-        current_stock: Number(formData.current_stock),
-        min_stock: Number(formData.min_stock),
-      } : p));
+      await update(editingProduct.id, payload);
     } else {
-      const newP = {
-        id: String(Date.now()),
-        ...formData,
-        cost_price: Number(formData.cost_price),
-        mrp: Number(formData.mrp),
-        sale_price: Number(formData.sale_price),
-        current_stock: Number(formData.current_stock),
-        min_stock: Number(formData.min_stock),
-      };
-      setProducts([newP, ...products]);
+      await create(payload);
     }
     setShowModal(false);
     setFeedback(editingProduct ? 'Part updated successfully.' : 'New part added to inventory.');
@@ -128,11 +118,39 @@ export default function InventoryPage() {
     setShowModal(true);
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteCandidate) return;
-    setProducts((current) => current.filter((product) => product.id !== deleteCandidate.id));
+    await remove(deleteCandidate.id);
     setFeedback(`${deleteCandidate.part_number} removed from inventory.`);
     setDeleteCandidate(null);
+  };
+
+  const handleFileImport = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setImportError('');
+    setFeedback('');
+    setImporting(true);
+    try {
+      const imported = await parseInventoryFile(file);
+      if (imported.length === 0) {
+        throw new Error('Couldn’t find a part name/description column in this file. Recognized headers include things like "Name", "Item Name", "Description", or "Part Number" — check your column titles, or share them and we can adjust the import.');
+      }
+      for (const product of imported) {
+        await fetch('/api/local/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...product, company_id: activeCompany?.id }),
+        });
+      }
+      await reload();
+      setFeedback(`Imported ${imported.length} part(s) from ${file.name}.`);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to read the file.');
+    } finally {
+      setImporting(false);
+    }
   };
 
   return (
@@ -143,12 +161,19 @@ export default function InventoryPage() {
           <h1 className="page-title">Spare Parts Inventory</h1>
           <p className="page-subtitle">Track stock levels, OEM cross-references, locations & pricing</p>
         </div>
-        <button className="btn btn-primary" onClick={handleOpenAdd}>
-          <Plus size={16} /> Add New Part
-        </button>
+        <div className="flex gap-2">
+          <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
+            <Upload size={16} /> {importing ? 'Importing…' : 'Import from File'}
+            <input type="file" accept=".csv,.xls,.xlsx" hidden disabled={importing} onChange={handleFileImport} />
+          </label>
+          <button className="btn btn-primary" onClick={handleOpenAdd}>
+            <Plus size={16} /> Add New Part
+          </button>
+        </div>
       </div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
+      {importError && <div className="alert alert-danger mb-4" role="alert">{importError}</div>}
 
       {/* Filter & Search Bar */}
       <div className="card mb-6 p-4">
@@ -172,11 +197,7 @@ export default function InventoryPage() {
               onChange={(e) => setCategoryFilter(e.target.value)}
             >
               <option value="all">All Categories</option>
-              <option value="Brakes">Brakes</option>
-              <option value="Filters">Filters</option>
-              <option value="Engine">Engine</option>
-              <option value="Clutch">Clutch</option>
-              <option value="Suspension">Suspension</option>
+              {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
             </select>
           </div>
         </div>
@@ -200,7 +221,7 @@ export default function InventoryPage() {
           </thead>
           <tbody>
             {filteredProducts.map((p) => {
-              const isLow = p.current_stock <= p.min_stock;
+              const isLow = p.min_stock > 0 && p.current_stock <= p.min_stock;
               return (
                 <tr key={p.id}>
                   <td>
@@ -238,7 +259,7 @@ export default function InventoryPage() {
               );
             })}
             {filteredProducts.length === 0 && (
-              <tr><td colSpan={9}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">No parts found</p><p className="empty-state-desc">Try another search term or category.</p></div></td></tr>
+              <tr><td colSpan={9}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term or category, or this company simply has no parts yet.'}</p></div></td></tr>
             )}
           </tbody>
         </table>
@@ -277,14 +298,16 @@ export default function InventoryPage() {
                   </div>
                   <div className="form-group">
                     <label className="form-label">Category</label>
-                    <select className="form-input form-select" value={formData.category} onChange={e => setFormData({ ...formData, category: e.target.value })}>
-                      <option value="Engine">Engine</option>
-                      <option value="Brakes">Brakes</option>
-                      <option value="Filters">Filters</option>
-                      <option value="Clutch">Clutch</option>
-                      <option value="Suspension">Suspension</option>
-                      <option value="Electrical">Electrical</option>
-                    </select>
+                    <input
+                      className="form-input"
+                      list="category-options"
+                      placeholder="Pick or type a new category"
+                      value={formData.category}
+                      onChange={e => setFormData({ ...formData, category: e.target.value })}
+                    />
+                    <datalist id="category-options">
+                      {categoryOptions.map((category) => <option key={category} value={category} />)}
+                    </datalist>
                   </div>
                 </div>
 

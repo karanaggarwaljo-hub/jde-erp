@@ -1,4 +1,12 @@
-import { createClient } from '@/lib/supabase/server';
+import { listRows, getActiveCompanyId } from '@/lib/db';
+
+type Product = { name: string; part_number: string; brand: string; category: string; current_stock: number; min_stock: number; cost_price: number };
+type Customer = { credit_limit: number; balance: number };
+type Supplier = { name: string; balance: number };
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string };
+type Quotation = { status: string };
+type PurchaseOrder = { date: string; total: number; status: string };
+type Expense = { category: string; amount: number; date: string };
 
 function daysAgo(n: number): string {
   const d = new Date();
@@ -6,106 +14,88 @@ function daysAgo(n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function sum(rows: Array<{ [key: string]: unknown }>, field: string): number {
   return rows.reduce((total, row) => total + (Number(row[field]) || 0), 0);
 }
 
+function countByStatus(rows: Array<{ status: string }>): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const r of rows) {
+    const s = r.status ?? 'unknown';
+    counts[s] = (counts[s] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export async function buildBusinessDigest() {
-  const supabase = await createClient();
+  const companyId = await getActiveCompanyId();
+  const products = (await listRows('products', companyId)) as unknown as Product[];
+  const customers = (await listRows('customers', companyId)) as unknown as Customer[];
+  const suppliers = (await listRows('suppliers', companyId)) as unknown as Supplier[];
+  const invoices = (await listRows('invoices', companyId)) as unknown as Invoice[];
+  const purchaseOrders = (await listRows('purchase_orders', companyId)) as unknown as PurchaseOrder[];
+  const expenses = (await listRows('expenses', companyId)) as unknown as Expense[];
+  const quotations = (await listRows('quotations', companyId)) as unknown as Quotation[];
 
-  const [
-    { data: products },
-    { data: customers },
-    { data: suppliers },
-    { data: invoices },
-    { data: purchaseInvoices },
-    { data: expenses },
-    { data: salesOrders },
-    { data: purchaseOrders },
-    { data: quotations },
-  ] = await Promise.all([
-    supabase.from('erp_products').select('name, part_number, brand, category, current_stock, min_stock, cost_price, sale_price, is_active'),
-    supabase.from('erp_customers').select('id, customer_type, credit_limit, opening_balance, is_active'),
-    supabase.from('erp_suppliers').select('id, opening_balance, is_active'),
-    supabase.from('erp_invoices').select('date, total, paid_amount, balance_due, status').gte('date', daysAgo(90)),
-    supabase.from('erp_purchase_invoices').select('date, total, paid_amount, balance_due, status').gte('date', daysAgo(90)),
-    supabase.from('erp_expenses').select('category, amount, expense_date').gte('expense_date', daysAgo(90)),
-    supabase.from('erp_sales_orders').select('status, total, date'),
-    supabase.from('erp_purchase_orders').select('status, total, date'),
-    supabase.from('erp_quotations').select('status, total, date'),
-  ]);
+  const invoices90 = invoices.filter((i) => i.date >= daysAgo(90));
+  const invoices30 = invoices.filter((i) => i.date >= daysAgo(30));
+  const invoices7 = invoices.filter((i) => i.date >= daysAgo(7));
+  const po90 = purchaseOrders.filter((p) => p.date >= daysAgo(90));
+  const po30 = purchaseOrders.filter((p) => p.date >= daysAgo(30));
+  const expenses90 = expenses.filter((e) => e.date >= daysAgo(90));
 
-  const activeProducts = (products ?? []).filter((p) => p.is_active !== false);
-  const lowStock = activeProducts
-    .filter((p) => Number(p.current_stock) <= Number(p.min_stock))
-    .map((p) => ({
-      name: p.name,
-      part_number: p.part_number,
-      brand: p.brand,
-      current_stock: p.current_stock,
-      min_stock: p.min_stock,
-    }));
+  const lowStock = products
+    .filter((p) => Number(p.min_stock) > 0 && Number(p.current_stock) <= Number(p.min_stock))
+    .map((p) => ({ name: p.name, part_number: p.part_number, brand: p.brand, current_stock: p.current_stock, min_stock: p.min_stock }));
 
-  const stockValue = activeProducts.reduce((t, p) => t + (Number(p.current_stock) || 0) * (Number(p.cost_price) || 0), 0);
-
-  const salesLast30 = (invoices ?? []).filter((i) => i.date >= daysAgo(30));
-  const salesLast7 = (invoices ?? []).filter((i) => i.date >= daysAgo(7));
-  const purchasesLast30 = (purchaseInvoices ?? []).filter((i) => i.date >= daysAgo(30));
+  const stockValue = products.reduce((t, p) => t + (Number(p.current_stock) || 0) * (Number(p.cost_price) || 0), 0);
 
   const expenseByCategory: Record<string, number> = {};
-  for (const e of expenses ?? []) {
+  for (const e of expenses90) {
     const cat = String(e.category ?? 'other');
     expenseByCategory[cat] = (expenseByCategory[cat] ?? 0) + (Number(e.amount) || 0);
   }
-
-  const countByStatus = (rows: Array<{ status: string | null }> | null) => {
-    const counts: Record<string, number> = {};
-    for (const r of rows ?? []) {
-      const s = r.status ?? 'unknown';
-      counts[s] = (counts[s] ?? 0) + 1;
-    }
-    return counts;
-  };
 
   return {
     generated_at: new Date().toISOString(),
     window_days: 90,
     inventory: {
-      active_product_count: activeProducts.length,
-      total_stock_units: activeProducts.reduce((t, p) => t + (Number(p.current_stock) || 0), 0),
+      active_product_count: products.length,
+      total_stock_units: products.reduce((t, p) => t + (Number(p.current_stock) || 0), 0),
       stock_value_at_cost: Math.round(stockValue),
       low_stock_count: lowStock.length,
       low_stock_items: lowStock.slice(0, 15),
     },
     customers: {
-      total: (customers ?? []).length,
-      active: (customers ?? []).filter((c) => c.is_active !== false).length,
-      total_credit_limit: sum(customers ?? [], 'credit_limit'),
-      total_opening_receivables: sum(customers ?? [], 'opening_balance'),
+      total: customers.length,
+      total_credit_limit: sum(customers, 'credit_limit'),
+      total_outstanding_receivables: sum(customers, 'balance'),
     },
     suppliers: {
-      total: (suppliers ?? []).length,
-      total_opening_payables: sum(suppliers ?? [], 'opening_balance'),
+      total: suppliers.length,
+      total_outstanding_payables: sum(suppliers, 'balance'),
     },
     sales: {
-      invoice_count_90d: (invoices ?? []).length,
-      revenue_90d: sum(invoices ?? [], 'total'),
-      revenue_30d: sum(salesLast30, 'total'),
-      revenue_7d: sum(salesLast7, 'total'),
-      outstanding_receivables: sum(invoices ?? [], 'balance_due'),
-      invoice_status_breakdown: countByStatus(invoices as Array<{ status: string | null }> | null),
-      sales_order_status_breakdown: countByStatus(salesOrders as Array<{ status: string | null }> | null),
-      open_quotations: (quotations ?? []).filter((q) => q.status === 'sent' || q.status === 'draft').length,
+      invoice_count_90d: invoices90.length,
+      revenue_90d: sum(invoices90, 'total'),
+      revenue_30d: sum(invoices30, 'total'),
+      revenue_7d: sum(invoices7, 'total'),
+      outstanding_receivables: invoices.reduce((t, i) => t + (Number(i.total) - Number(i.paid)), 0),
+      invoice_status_breakdown: countByStatus(invoices90),
+      open_quotations: quotations.filter((q) => q.status !== 'accepted' && q.status !== 'rejected').length,
     },
     purchases: {
-      invoice_count_90d: (purchaseInvoices ?? []).length,
-      spend_90d: sum(purchaseInvoices ?? [], 'total'),
-      spend_30d: sum(purchasesLast30, 'total'),
-      outstanding_payables: sum(purchaseInvoices ?? [], 'balance_due'),
-      purchase_order_status_breakdown: countByStatus(purchaseOrders as Array<{ status: string | null }> | null),
+      order_count_90d: po90.length,
+      spend_90d: sum(po90, 'total'),
+      spend_30d: sum(po30, 'total'),
+      purchase_order_status_breakdown: countByStatus(po90),
     },
     expenses: {
-      total_90d: sum(expenses ?? [], 'amount'),
+      total_90d: sum(expenses90, 'amount'),
       by_category_90d: expenseByCategory,
     },
   };
@@ -114,27 +104,10 @@ export async function buildBusinessDigest() {
 export type BusinessDigest = Awaited<ReturnType<typeof buildBusinessDigest>>;
 
 export async function buildReorderDigest() {
-  const supabase = await createClient();
+  const companyId = await getActiveCompanyId();
+  const products = (await listRows('products', companyId)) as unknown as Product[];
 
-  const [{ data: products }, { data: ledgerEntries }] = await Promise.all([
-    supabase
-      .from('erp_products')
-      .select('id, name, part_number, brand, category, current_stock, min_stock, cost_price, sale_price, is_active')
-      .eq('is_active', true),
-    supabase
-      .from('erp_stock_ledger')
-      .select('product_id, transaction_type, quantity, created_at')
-      .eq('transaction_type', 'sale')
-      .gte('created_at', daysAgo(60)),
-  ]);
-
-  const salesByProduct: Record<string, number> = {};
-  for (const entry of ledgerEntries ?? []) {
-    const id = String(entry.product_id);
-    salesByProduct[id] = (salesByProduct[id] ?? 0) + Math.abs(Number(entry.quantity) || 0);
-  }
-
-  const items = (products ?? []).map((p) => ({
+  const items = products.map((p) => ({
     part_number: p.part_number,
     name: p.name,
     brand: p.brand,
@@ -142,13 +115,11 @@ export async function buildReorderDigest() {
     current_stock: p.current_stock,
     min_stock: p.min_stock,
     cost_price: p.cost_price,
-    units_sold_last_60d: salesByProduct[String(p.id)] ?? 0,
   }));
 
   return {
     generated_at: new Date().toISOString(),
-    window_days: 60,
-    has_sales_velocity_data: (ledgerEntries ?? []).length > 0,
+    has_sales_velocity_data: false,
     active_product_count: items.length,
     products: items,
   };
@@ -156,65 +127,42 @@ export async function buildReorderDigest() {
 
 export type ReorderDigest = Awaited<ReturnType<typeof buildReorderDigest>>;
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export async function buildDailyBriefingDigest() {
-  const supabase = await createClient();
+  const companyId = await getActiveCompanyId();
   const today = todayStr();
   const yesterday = daysAgo(1);
 
-  const [
-    { data: yesterdaySales },
-    { data: overdueReceivables },
-    { data: payablesDue },
-    { data: products },
-  ] = await Promise.all([
-    supabase.from('erp_invoices').select('invoice_number, total').eq('date', yesterday),
-    supabase
-      .from('erp_invoices')
-      .select('invoice_number, balance_due, due_date, customer:erp_customers(name)')
-      .gt('balance_due', 0)
-      .lte('due_date', today),
-    supabase
-      .from('erp_purchase_invoices')
-      .select('invoice_number, balance_due, due_date, supplier:erp_suppliers(name)')
-      .gt('balance_due', 0)
-      .lte('due_date', today),
-    supabase
-      .from('erp_products')
-      .select('name, part_number, current_stock, min_stock')
-      .eq('is_active', true),
-  ]);
+  const invoices = (await listRows('invoices', companyId)) as unknown as Invoice[];
+  const suppliers = (await listRows('suppliers', companyId)) as unknown as Supplier[];
+  const products = (await listRows('products', companyId)) as unknown as Product[];
 
-  const lowStock = (products ?? []).filter((p) => Number(p.current_stock) <= Number(p.min_stock));
+  const yesterdaySales = invoices.filter((i) => i.date === yesterday);
+  const outstandingInvoices = invoices.filter((i) => Number(i.total) - Number(i.paid) > 0);
+  const payableSuppliers = suppliers.filter((s) => Number(s.balance) > 0);
+  const lowStock = products.filter((p) => Number(p.min_stock) > 0 && Number(p.current_stock) <= Number(p.min_stock));
 
   return {
     date: today,
     yesterday_sales: {
       date: yesterday,
-      invoice_count: (yesterdaySales ?? []).length,
-      total: sum(yesterdaySales ?? [], 'total'),
+      invoice_count: yesterdaySales.length,
+      total: sum(yesterdaySales, 'total'),
     },
-    receivables_due_today: {
-      count: (overdueReceivables ?? []).length,
-      total: sum(overdueReceivables ?? [], 'balance_due'),
-      items: (overdueReceivables ?? []).slice(0, 10).map((r) => ({
-        invoice_number: r.invoice_number,
-        customer_name: (r.customer as unknown as { name: string } | null)?.name ?? 'Unknown customer',
-        balance_due: r.balance_due,
-        due_date: r.due_date,
+    outstanding_receivables: {
+      count: outstandingInvoices.length,
+      total: outstandingInvoices.reduce((t, i) => t + (Number(i.total) - Number(i.paid)), 0),
+      items: outstandingInvoices.slice(0, 10).map((i) => ({
+        invoice_number: i.id,
+        customer_name: i.customer,
+        balance_due: Number(i.total) - Number(i.paid),
       })),
     },
-    payables_due_today: {
-      count: (payablesDue ?? []).length,
-      total: sum(payablesDue ?? [], 'balance_due'),
-      items: (payablesDue ?? []).slice(0, 10).map((p) => ({
-        invoice_number: p.invoice_number,
-        supplier_name: (p.supplier as unknown as { name: string } | null)?.name ?? 'Unknown supplier',
-        balance_due: p.balance_due,
-        due_date: p.due_date,
+    outstanding_payables: {
+      count: payableSuppliers.length,
+      total: sum(payableSuppliers, 'balance'),
+      items: payableSuppliers.slice(0, 10).map((s) => ({
+        supplier_name: s.name,
+        balance_due: s.balance,
       })),
     },
     low_stock: {
