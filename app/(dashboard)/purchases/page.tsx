@@ -5,7 +5,8 @@ import { Plus, FileCheck, Upload } from 'lucide-react';
 import { parseSpreadsheetFile, fileToBase64, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
-type PurchaseTab = 'po' | 'grn' | 'invoices';
+type PurchaseTab = 'purchases' | 'invoices';
+type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 type POLine = { description: string; quantity: number; unit_price: number };
 
 type Product = { id: string; company_id: string; part_number: string; name: string; category: string; cost_price: number; current_stock: number };
@@ -16,12 +17,6 @@ type PoItem = { id: string; po_id: string; product_id: string | null; part_numbe
 
 function todayIso() {
   return new Date().toISOString().split('T')[0];
-}
-
-function daysFromNowIso(days: number) {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
 }
 
 function nextId(rows: Array<{ id: string }>, prefix: string) {
@@ -40,52 +35,83 @@ function isScannableFile(file: File) {
   return SCANNABLE_TYPES.includes(file.type);
 }
 
+function cleanedGuess(text: string): string {
+  return text.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
+}
+
 export default function PurchasesPage() {
   const { rows: products, update: updateProduct } = useCompanyTable<Product>('products');
-  const { rows: suppliers, update: updateSupplier } = useCompanyTable<Supplier>('suppliers');
+  const { rows: suppliers, create: createSupplier, update: updateSupplier } = useCompanyTable<Supplier>('suppliers');
   const { rows: purchaseOrders, loading: poLoading, create: createPurchaseOrder, update: updatePurchaseOrder } = useCompanyTable<PurchaseOrder>('purchase_orders');
-  const { rows: grns, loading: grnLoading, create: createGrn } = useCompanyTable<Grn>('grns');
+  const { rows: grns, create: createGrn } = useCompanyTable<Grn>('grns');
   const { rows: poItems, create: createPoItem } = useCompanyTable<PoItem>('po_items');
 
   const partOptions = products.map((product) => ({
     value: `${product.part_number} - ${product.name}`,
     price: product.cost_price,
     category: product.category,
+    stock: product.current_stock,
   }));
   const supplierOptions = suppliers.map((s) => s.name);
 
-  const [activeTab, setActiveTab] = useState<PurchaseTab>('po');
-  const [showPOModal, setShowPOModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<PurchaseTab>('purchases');
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [supplier, setSupplier] = useState('');
-  const [poDate, setPoDate] = useState(todayIso());
-  const [expectedDate, setExpectedDate] = useState(todayIso());
+  const [supplierName, setSupplierName] = useState('');
+  const [purchaseDate, setPurchaseDate] = useState(todayIso());
+  const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('unpaid');
+  const [amountPaid, setAmountPaid] = useState(0);
   const [lines, setLines] = useState<POLine[]>([]);
 
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
-  const [importPreview, setImportPreview] = useState<{ fileName: string; lines: ImportedLine[]; supplier: string; supplierGuessed: boolean } | null>(null);
+  const [importPreview, setImportPreview] = useState<{ fileName: string; lines: ImportedLine[]; supplier: string } | null>(null);
 
   const total = lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
+  const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
 
-  const openPOModal = () => {
-    setSupplier(supplierOptions[0] ?? '');
-    setPoDate(todayIso());
-    setExpectedDate(todayIso());
+  const openPurchaseModal = () => {
+    setSupplierName('');
+    setPurchaseDate(todayIso());
+    setPaymentStatus('unpaid');
+    setAmountPaid(0);
     setLines(partOptions.length > 0 ? [{ description: partOptions[0].value, quantity: 1, unit_price: partOptions[0].price }] : []);
     setImportError('');
-    setShowPOModal(true);
+    setShowPurchaseModal(true);
   };
 
   const updateLine = (index: number, patch: Partial<POLine>) => {
     setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   };
 
-  const createPO = async (event: FormEvent) => {
-    event.preventDefault();
-    const id = nextId(purchaseOrders, 'PO');
-    await createPurchaseOrder({ id, supplier, date: poDate, expected: expectedDate, items: lines.length, total, paid: 0, status: 'sent' });
+  async function resolveSupplier(name: string): Promise<Supplier> {
+    const existing = suppliers.find((s) => s.name.toLowerCase() === name.trim().toLowerCase());
+    if (existing) return existing;
+    return createSupplier({ name: name.trim(), category: '', phone: '', email: '', gstin: '', terms: 30, balance: 0 }) as Promise<Supplier>;
+  }
 
+  async function receiveStock(poId: string, supplierName: string, items: Array<{ product_id: string | null; qty: number }>) {
+    const grnId = nextId(grns, 'GRN');
+    await createGrn({ id: grnId, po_number: poId, supplier: supplierName, received_at: new Date().toLocaleString('en-IN'), status: 'verified' });
+
+    for (const item of items) {
+      if (!item.product_id) continue;
+      const product = products.find((p) => p.id === item.product_id);
+      if (product) {
+        await updateProduct(product.id, { current_stock: Number(product.current_stock) + Number(item.qty) });
+      }
+    }
+  }
+
+  const recordPurchase = async (event: FormEvent) => {
+    event.preventDefault();
+    const supplierRow = await resolveSupplier(supplierName);
+    const id = nextId(purchaseOrders, 'PO');
+    const paid = paidAmount;
+
+    await createPurchaseOrder({ id, supplier: supplierRow.name, date: purchaseDate, items: lines.length, total, paid, status: 'received' });
+
+    const lineItems = [];
     for (const line of lines) {
       const matchedProduct = products.find((p) => `${p.part_number} - ${p.name}` === line.description);
       await createPoItem({
@@ -97,40 +123,41 @@ export default function PurchasesPage() {
         unit_cost: line.unit_price,
         line_total: line.quantity * line.unit_price,
       });
+      lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity });
     }
 
-    setShowPOModal(false);
-    setFeedback(`${id} sent to ${supplier} for ${lines.length} line item(s).`);
-    setActiveTab('po');
+    await receiveStock(id, supplierRow.name, lineItems);
+
+    // Newly created purchase — its amount has never been counted anywhere before, so it's safe to add to payables.
+    const due = total - paid;
+    if (due > 0) {
+      await updateSupplier(supplierRow.id, { balance: Number(supplierRow.balance) + due });
+    }
+
+    setShowPurchaseModal(false);
+    setFeedback(`${id} recorded — ${lines.length} item(s) added to stock from ${supplierRow.name}.`);
+    setActiveTab('purchases');
   };
 
-  const recordGrn = async (poId: string) => {
+  const markReceived = async (poId: string) => {
     const order = purchaseOrders.find((po) => po.id === poId);
     if (!order) return;
-    const grnId = nextId(grns, 'GRN');
     await updatePurchaseOrder(poId, { status: 'received' });
-    await createGrn({ id: grnId, po_number: poId, supplier: order.supplier, received_at: new Date().toLocaleString('en-IN'), status: 'verified' });
-
-    for (const item of poItems.filter((poItem) => poItem.po_id === poId)) {
-      if (!item.product_id) continue;
-      const product = products.find((p) => p.id === item.product_id);
-      if (product) {
-        await updateProduct(product.id, { current_stock: Number(product.current_stock) + Number(item.qty) });
-      }
-    }
-
-    const matchedSupplier = suppliers.find((s) => s.name === order.supplier);
-    if (matchedSupplier) {
-      await updateSupplier(matchedSupplier.id, { balance: Number(matchedSupplier.balance) + Number(order.total) });
-    }
-
-    setFeedback(`${grnId} recorded and ${poId} marked received.`);
+    // This is a pre-existing pending order created before per-purchase stock tracking existed — its
+    // amount is presumed already reflected in the supplier's balance, so only stock catches up here.
+    await receiveStock(
+      poId,
+      order.supplier,
+      poItems.filter((item) => item.po_id === poId).map((item) => ({ product_id: item.product_id, qty: item.qty }))
+    );
+    setFeedback(`${poId} marked received and added to stock.`);
   };
 
   const guessSupplierFromText = (text: string | undefined | null): string | undefined => {
     if (!text) return undefined;
     const guess = text.toLowerCase();
-    return supplierOptions.find((s) => s.toLowerCase().includes(guess) || guess.includes(s.toLowerCase()));
+    const matched = supplierOptions.find((s) => s.toLowerCase().includes(guess) || guess.includes(s.toLowerCase()));
+    return matched ?? cleanedGuess(text) ?? undefined;
   };
 
   const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -147,8 +174,7 @@ export default function PurchasesPage() {
         if (imported.length === 0) {
           throw new Error('No rows with a recognizable description, quantity, or price column were found in this file.');
         }
-        const guessed = guessSupplierFromText(file.name);
-        setImportPreview({ fileName: file.name, lines: imported, supplier: guessed ?? supplierOptions[0] ?? '', supplierGuessed: Boolean(guessed) });
+        setImportPreview({ fileName: file.name, lines: imported, supplier: guessSupplierFromText(file.name) ?? '' });
       } else if (isScannableFile(file)) {
         const base64 = await fileToBase64(file);
         const res = await fetch('/api/purchases/import-scan', {
@@ -163,8 +189,7 @@ export default function PurchasesPage() {
         if (items.length === 0) {
           throw new Error('No line items could be read from this document.');
         }
-        const guessed = guessSupplierFromText(data.supplier_name);
-        setImportPreview({ fileName: file.name, lines: items, supplier: guessed ?? supplierOptions[0] ?? '', supplierGuessed: Boolean(guessed) });
+        setImportPreview({ fileName: file.name, lines: items, supplier: guessSupplierFromText(data.supplier_name) ?? '' });
       } else {
         throw new Error('Unsupported file type. Upload a CSV/Excel file, or a PDF/photo of a supplier document.');
       }
@@ -176,20 +201,13 @@ export default function PurchasesPage() {
   };
 
   const confirmImportedPO = async () => {
-    if (!importPreview) return;
+    if (!importPreview || !importPreview.supplier.trim()) return;
+    const supplierRow = await resolveSupplier(importPreview.supplier);
     const importedTotal = importPreview.lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
     const id = nextId(purchaseOrders, 'PO');
-    await createPurchaseOrder({
-      id,
-      supplier: importPreview.supplier,
-      date: todayIso(),
-      expected: daysFromNowIso(7),
-      items: importPreview.lines.length,
-      total: importedTotal,
-      paid: 0,
-      status: 'sent',
-    });
+    await createPurchaseOrder({ id, supplier: supplierRow.name, date: todayIso(), items: importPreview.lines.length, total: importedTotal, paid: 0, status: 'received' });
 
+    const lineItems = [];
     for (const line of importPreview.lines) {
       const matchedProduct = products.find((p) => `${p.part_number} - ${p.name}` === line.description);
       await createPoItem({
@@ -201,80 +219,87 @@ export default function PurchasesPage() {
         unit_cost: line.unit_price,
         line_total: line.quantity * line.unit_price,
       });
+      lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity });
     }
 
-    setFeedback(`${id} created from ${importPreview.fileName} — ${importPreview.lines.length} item(s), ₹${importedTotal.toLocaleString()} for ${importPreview.supplier}.`);
+    await receiveStock(id, supplierRow.name, lineItems);
+    if (importedTotal > 0) {
+      await updateSupplier(supplierRow.id, { balance: Number(supplierRow.balance) + importedTotal });
+    }
+
+    setFeedback(`${id} recorded from ${importPreview.fileName} — ${importPreview.lines.length} item(s), ₹${importedTotal.toLocaleString()} from ${supplierRow.name}.`);
     setImportPreview(null);
-    setActiveTab('po');
+    setActiveTab('purchases');
   };
 
   return (
     <div>
-      <div className="page-header"><div><h1 className="page-title">Purchases & Procurement</h1><p className="page-subtitle">Track Purchase Requests → Purchase Orders → Goods Received Notes (GRN) → Supplier Payments</p></div>
+      <div className="page-header"><div><h1 className="page-title">Purchases</h1><p className="page-subtitle">Record what you bought — stock and what you owe the supplier update immediately</p></div>
         <div className="flex gap-2">
-          <label className="btn btn-secondary" style={{ cursor: importing || suppliers.length === 0 ? 'not-allowed' : 'pointer' }}>
+          <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
             <Upload size={16} /> {importing ? 'Reading file…' : 'Import from File'}
-            <input type="file" accept=".csv,.xls,.xlsx,.pdf,image/*" hidden disabled={importing || suppliers.length === 0} onChange={handleImportFile} />
+            <input type="file" accept=".csv,.xls,.xlsx,.pdf,image/*" hidden disabled={importing} onChange={handleImportFile} />
           </label>
-          <button className="btn btn-primary" onClick={openPOModal} disabled={suppliers.length === 0}><Plus size={16} /> Create Purchase Order</button>
+          <button className="btn btn-primary" onClick={openPurchaseModal}><Plus size={16} /> Record Purchase</button>
         </div>
       </div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
       {importError && <div className="alert alert-danger mb-4" role="alert">{importError}</div>}
-      {suppliers.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>Add a supplier first before creating a purchase order.</p>}
 
       <div className="tabs mb-6">
-        <button className={`tab ${activeTab === 'po' ? 'active' : ''}`} onClick={() => setActiveTab('po')}>Purchase Orders ({purchaseOrders.length})</button>
-        <button className={`tab ${activeTab === 'grn' ? 'active' : ''}`} onClick={() => setActiveTab('grn')}>Goods Received Notes (GRN) ({grns.length})</button>
+        <button className={`tab ${activeTab === 'purchases' ? 'active' : ''}`} onClick={() => setActiveTab('purchases')}>Purchases ({purchaseOrders.length})</button>
         <button className={`tab ${activeTab === 'invoices' ? 'active' : ''}`} onClick={() => setActiveTab('invoices')}>Supplier Invoices</button>
       </div>
 
-      {activeTab === 'po' && <div className="table-wrap"><table className="erp-table">
-        <thead><tr><th>PO Number</th><th>Supplier Name</th><th>PO Date</th><th>Expected Delivery</th><th>Line Items</th><th className="text-right">Total (₹)</th><th>Status</th><th className="text-center">Actions</th></tr></thead>
-        <tbody>{purchaseOrders.map((po) => <tr key={po.id}>
-          <td style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>{po.id}</td><td style={{ fontWeight: 600 }}>{po.supplier}</td><td className="text-muted">{po.date}</td><td>{po.expected}</td><td>{po.items} Items</td><td className="text-right font-semibold">₹{po.total.toLocaleString()}</td>
-          <td><span className={`badge ${po.status === 'received' ? 'badge-success' : po.status === 'sent' ? 'badge-info' : 'badge-warning'}`}>{po.status.toUpperCase()}</span></td>
-          <td className="text-center">{po.status === 'sent' && <button className="btn btn-secondary btn-sm" onClick={() => recordGrn(po.id)}>Record GRN</button>}</td>
-        </tr>)}
+      {activeTab === 'purchases' && <div className="table-wrap"><table className="erp-table">
+        <thead><tr><th>Purchase #</th><th>Supplier</th><th>Date</th><th>Items</th><th className="text-right">Total (₹)</th><th className="text-right">Paid (₹)</th><th className="text-right">Balance (₹)</th><th>Payment</th><th>Status</th><th className="text-center">Actions</th></tr></thead>
+        <tbody>{purchaseOrders.map((po) => {
+          const balance = Number(po.total) - Number(po.paid);
+          const paymentBadge = Number(po.paid) >= Number(po.total) ? 'badge-success' : Number(po.paid) > 0 ? 'badge-warning' : 'badge-danger';
+          const paymentLabel = Number(po.paid) >= Number(po.total) ? 'PAID' : Number(po.paid) > 0 ? 'PARTIAL' : 'UNPAID';
+          return <tr key={po.id}>
+            <td style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>{po.id}</td><td style={{ fontWeight: 600 }}>{po.supplier}</td><td className="text-muted">{po.date}</td><td>{po.items} Items</td>
+            <td className="text-right font-semibold">₹{Number(po.total).toLocaleString()}</td><td className="text-right text-success">₹{Number(po.paid).toLocaleString()}</td><td className="text-right text-danger">₹{balance.toLocaleString()}</td>
+            <td><span className={`badge ${paymentBadge}`}>{paymentLabel}</span></td>
+            <td><span className={`badge ${po.status === 'received' ? 'badge-success' : 'badge-warning'}`}>{po.status.toUpperCase()}</span></td>
+            <td className="text-center">{po.status !== 'received' && <button className="btn btn-secondary btn-sm" onClick={() => markReceived(po.id)}>Mark Received</button>}</td>
+          </tr>;
+        })}
         {purchaseOrders.length === 0 && (
-          <tr><td colSpan={8}><div className="empty-state"><p className="empty-state-title">{poLoading ? 'Loading purchase orders…' : 'No purchase orders yet'}</p><p className="empty-state-desc">{poLoading ? 'Fetching records for the active company.' : 'Create your first purchase order to get started.'}</p></div></td></tr>
+          <tr><td colSpan={10}><div className="empty-state"><p className="empty-state-title">{poLoading ? 'Loading purchases…' : 'No purchases yet'}</p><p className="empty-state-desc">{poLoading ? 'Fetching records for the active company.' : 'Record your first purchase to get started.'}</p></div></td></tr>
         )}
         </tbody>
       </table></div>}
 
-      {activeTab === 'grn' && <div className="table-wrap"><table className="erp-table">
-        <thead><tr><th>GRN Number</th><th>Ref PO</th><th>Supplier</th><th>Received Time</th><th>Status</th></tr></thead>
-        <tbody>{grns.map((grn) => <tr key={grn.id}><td style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>{grn.id}</td><td style={{ fontWeight: 600 }}>{grn.po_number}</td><td>{grn.supplier}</td><td className="text-muted">{grn.received_at}</td><td><span className="badge badge-success">{grn.status.toUpperCase()}</span></td></tr>)}
-        {grns.length === 0 && (
-          <tr><td colSpan={5}><div className="empty-state"><p className="empty-state-title">{grnLoading ? 'Loading GRNs…' : 'No goods received yet'}</p><p className="empty-state-desc">{grnLoading ? 'Fetching records for the active company.' : 'GRNs will appear here once a purchase order is received.'}</p></div></td></tr>
-        )}
-        </tbody>
-      </table></div>}
-
-      {activeTab === 'invoices' && <div className="card empty-state"><FileCheck size={32} /><p className="empty-state-title">No unmatched supplier invoices</p><p className="empty-state-desc">Invoices will appear here when uploaded or received against a purchase order.</p></div>}
+      {activeTab === 'invoices' && <div className="card empty-state"><FileCheck size={32} /><p className="empty-state-title">No unmatched supplier invoices</p><p className="empty-state-desc">Invoices will appear here when uploaded or received against a purchase.</p></div>}
 
       {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '480px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
-        <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Create Purchase Order from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setImportPreview(null)}>✕</button></div>
+        <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Record Purchase from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setImportPreview(null)}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
           <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
             Read <strong>{importPreview.lines.length} item(s)</strong> from <strong>{importPreview.fileName}</strong>, total ₹{importPreview.lines.reduce((s, l) => s + l.quantity * l.unit_price, 0).toLocaleString()}.
           </p>
           <div className="form-group">
-            <label className="form-label">Supplier {importPreview.supplierGuessed ? '(detected from file)' : '(please confirm)'}</label>
-            <select className="form-input form-select" value={importPreview.supplier} onChange={(event) => setImportPreview({ ...importPreview, supplier: event.target.value })}>
-              {supplierOptions.map((s) => <option key={s}>{s}</option>)}
-            </select>
+            <label className="form-label">Supplier</label>
+            <input list="purchase-supplier-options" className="form-input" placeholder="Type or select a supplier" value={importPreview.supplier} onChange={(event) => setImportPreview({ ...importPreview, supplier: event.target.value })} />
+            <datalist id="purchase-supplier-options">{supplierOptions.map((s) => <option key={s} value={s} />)}</datalist>
           </div>
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setImportPreview(null)}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier}>Create Purchase Order</button></div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setImportPreview(null)}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier.trim()}>Record Purchase</button></div>
       </div></div>}
 
-      {showPOModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="po-modal-title"><form onSubmit={createPO}>
-        <div className="modal-header"><h3 id="po-modal-title" className="modal-title">New Purchase Order</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setShowPOModal(false)}>✕</button></div>
+      {showPurchaseModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="purchase-modal-title"><form onSubmit={recordPurchase}>
+        <div className="modal-header"><h3 id="purchase-modal-title" className="modal-title">Record Purchase</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setShowPurchaseModal(false)}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
-          <div className="form-group"><label className="form-label">Select Supplier *</label><select className="form-input form-select" value={supplier} onChange={(event) => setSupplier(event.target.value)}>{supplierOptions.map((s) => <option key={s}>{s}</option>)}</select></div>
-          <div className="form-grid-2"><div className="form-group"><label className="form-label">PO Date</label><input type="date" className="form-input" value={poDate} onChange={(event) => setPoDate(event.target.value)} /></div><div className="form-group"><label className="form-label">Expected Delivery</label><input type="date" className="form-input" value={expectedDate} onChange={(event) => setExpectedDate(event.target.value)} /></div></div>
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Supplier *</label>
+              <input list="purchase-supplier-options" className="form-input" required placeholder="Type or select a supplier" value={supplierName} onChange={(event) => setSupplierName(event.target.value)} />
+              <datalist id="purchase-supplier-options">{supplierOptions.map((s) => <option key={s} value={s} />)}</datalist>
+            </div>
+            <div className="form-group"><label className="form-label">Date</label><input type="date" className="form-input" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} /></div>
+          </div>
 
           <div className="card card-sm bg-surface">
             <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Item Details</h4>
@@ -284,13 +309,17 @@ export default function PurchasesPage() {
             </datalist>
 
             {lines.map((line, index) => {
-              const category = partOptions.find((option) => option.value === line.description)?.category ?? '-';
+              const matched = partOptions.find((option) => option.value === line.description);
               return (
                 <div key={index} className="form-grid-4 mb-2">
-                  <div className="form-group"><label className="form-label">Description</label><input list="po-part-options" className="form-input" value={line.description} onChange={(event) => updateLine(index, { description: event.target.value })} /></div>
-                  <div className="form-group"><label className="form-label">Category</label><input type="text" className="form-input" value={category} disabled /></div>
+                  <div className="form-group">
+                    <label className="form-label">Product</label>
+                    <input list="po-part-options" className="form-input" value={line.description} onChange={(event) => updateLine(index, { description: event.target.value })} />
+                    {matched && <small style={{ color: 'var(--text-muted)' }}>Stock: {matched.stock}</small>}
+                  </div>
+                  <div className="form-group"><label className="form-label">Category</label><input type="text" className="form-input" value={matched?.category ?? '-'} disabled /></div>
                   <div className="form-group"><label className="form-label">Quantity</label><input type="number" min="1" className="form-input" value={line.quantity} onChange={(event) => updateLine(index, { quantity: Number(event.target.value) })} /></div>
-                  <div className="form-group"><label className="form-label">Unit Price (₹)</label><input type="number" min="0" className="form-input" value={line.unit_price} onChange={(event) => updateLine(index, { unit_price: Number(event.target.value) })} /></div>
+                  <div className="form-group"><label className="form-label">Unit Cost (₹)</label><input type="number" min="0" className="form-input" value={line.unit_price} onChange={(event) => updateLine(index, { unit_price: Number(event.target.value) })} /></div>
                 </div>
               );
             })}
@@ -301,12 +330,27 @@ export default function PurchasesPage() {
             </div>
           </div>
 
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label">Payment to Supplier</label>
+              <select className="form-input form-select" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)}>
+                <option value="paid">Paid in Full</option>
+                <option value="partial">Partially Paid</option>
+                <option value="unpaid">Unpaid (Credit)</option>
+              </select>
+            </div>
+            {paymentStatus === 'partial' && (
+              <div className="form-group"><label className="form-label">Amount Paid (₹)</label><input type="number" min="0" max={total} className="form-input" value={amountPaid} onChange={(event) => setAmountPaid(Number(event.target.value))} /></div>
+            )}
+          </div>
+
           <div className="flex justify-between items-center invoice-summary">
             <div><span className="text-muted">Line Items: </span><strong>{lines.length}</strong></div>
+            <div><span className="text-muted">Paid: </span><strong className="text-success">₹{paidAmount.toLocaleString()}</strong></div>
             <div><strong>Total: </strong><span className="invoice-total">₹{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
           </div>
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowPOModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || !supplier}>Send PO to Supplier</button></div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowPurchaseModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || !supplierName.trim()}>Save Purchase</button></div>
       </form></div></div>}
     </div>
   );
