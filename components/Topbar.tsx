@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Bell, Sparkles, Sunrise, ChevronDown, Settings, LogOut } from 'lucide-react';
+import { Search, Bell, Sunrise, ChevronDown, Settings, LogOut } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
 type Product = { current_stock: number; min_stock: number };
@@ -74,6 +74,10 @@ export default function Topbar() {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+  }, [searchOpen]);
+
   const results = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return searchTargets.slice(0, 5);
@@ -93,37 +97,40 @@ export default function Topbar() {
 
   return (
     <header className="erp-topbar" ref={topbarRef}>
-      <form className="search-bar topbar-search" onSubmit={handleSearch}>
-        <Search className="search-bar-icon" size={16} />
-        <input
-          ref={searchRef}
-          aria-label="Universal search"
-          type="text"
-          placeholder="Universal search (Part #, Customer, Invoice, OEM...)"
-          value={query}
-          onChange={(event) => { setQuery(event.target.value); setSearchOpen(true); }}
-          onFocus={() => setSearchOpen(true)}
-        />
-        <span className="keyboard-hint">Ctrl + K</span>
-        {searchOpen && (
-          <div className="topbar-popover search-results" role="listbox" aria-label="Search results">
-            {results.length ? results.map((result) => (
-              <button key={result.href} type="button" className="search-result" onClick={() => goToResult(result.href)}>
-                <span>{result.label}</span><small>{result.detail}</small>
-              </button>
-            )) : <p className="popover-empty">No matching ERP section</p>}
+      {searchOpen && (
+        <div className="search-overlay" onClick={() => { setSearchOpen(false); setQuery(''); }}>
+          <div className="search-overlay-box" onClick={(event) => event.stopPropagation()}>
+            <form className="search-overlay-input-wrap" onSubmit={handleSearch}>
+              <Search className="search-bar-icon" size={16} />
+              <input
+                ref={searchRef}
+                aria-label="Universal search"
+                type="text"
+                placeholder="Search Part #, Customer, Invoice, OEM..."
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <span className="keyboard-hint">Esc</span>
+            </form>
+            <div className="search-overlay-results" role="listbox" aria-label="Search results">
+              {results.length ? results.map((result) => (
+                <button key={result.href} type="button" className="search-result" onClick={() => goToResult(result.href)}>
+                  <span>{result.label}</span><small>{result.detail}</small>
+                </button>
+              )) : <p className="popover-empty">No matching ERP section</p>}
+            </div>
+            <div className="search-overlay-hint">Ctrl + K to search from anywhere</div>
           </div>
-        )}
-      </form>
+        </div>
+      )}
 
       <div className="topbar-actions">
-        <button className="btn btn-ghost btn-icon" aria-label="Open daily briefing" onClick={() => window.dispatchEvent(new Event('open-daily-briefing'))}>
-          <Sunrise size={18} />
+        <button className="btn btn-ghost btn-icon" aria-label="Search everything" onClick={() => setSearchOpen(true)}>
+          <Search size={18} />
         </button>
 
-        <button className="btn btn-secondary btn-sm" style={{ gap: '6px', borderColor: 'rgba(245,158,11,0.3)' }} onClick={() => router.push('/analytics')}>
-          <Sparkles size={14} color="var(--brand-primary)" />
-          <span style={{ color: 'var(--brand-primary)', fontWeight: 600 }}>AI Forecast</span>
+        <button className="btn btn-ghost btn-icon" aria-label="Open daily briefing" onClick={() => window.dispatchEvent(new Event('open-daily-briefing'))}>
+          <Sunrise size={18} />
         </button>
 
         <div className="topbar-menu-wrap">

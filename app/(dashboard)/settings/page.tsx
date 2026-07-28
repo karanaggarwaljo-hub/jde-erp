@@ -26,12 +26,6 @@ export default function SettingsPage() {
   const [deleteCompanyCandidate, setDeleteCompanyCandidate] = useState<Company | null>(null);
   const [deleteCompanyError, setDeleteCompanyError] = useState('');
 
-  const auditLogs = [
-    { user: 'Karan Aggarwal', action: 'Created Invoice #INV-1042', table: 'erp_invoices', time: '2026-07-23 04:15 PM' },
-    { user: 'Rajesh Sharma', action: 'Updated stock for SP-001 (+45)', table: 'erp_stock_ledger', time: '2026-07-23 11:30 AM' },
-    { user: 'Vikram Singh', action: 'Created Quotation #QT-1015', table: 'erp_quotations', time: '2026-07-23 10:00 AM' },
-  ];
-
   const inviteUser = async (event: FormEvent) => {
     event.preventDefault();
     await createUser({ ...invite, status: 'invited' });
@@ -144,7 +138,7 @@ export default function SettingsPage() {
       </div>
     )}
 
-    {activeTab === 'audit' && <div className="table-wrap"><table className="erp-table"><thead><tr><th>Timestamp</th><th>User</th><th>Action Performed</th><th>Table</th></tr></thead><tbody>{auditLogs.map((log) => <tr key={`${log.time}-${log.action}`}><td className="text-muted text-sm">{log.time}</td><td className="font-semibold">{log.user}</td><td>{log.action}</td><td className="audit-table-name">{log.table}</td></tr>)}</tbody></table></div>}
+    {activeTab === 'audit' && <div className="card empty-state"><p className="empty-state-title">Audit logging isn&apos;t wired up yet</p><p className="empty-state-desc">User actions aren&apos;t being recorded to a log at this time, so there&apos;s nothing real to show here.</p></div>}
 
     {activeTab === 'backups' && <BackupsPanel />}
 

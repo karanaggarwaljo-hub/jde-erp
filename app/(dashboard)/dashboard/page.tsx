@@ -13,7 +13,6 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   ArrowRight,
-  Plus,
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
@@ -96,12 +95,6 @@ export default function DashboardPage() {
     { title: 'Low Stock Items', value: `${lowStockProducts.length} parts`, change: lowStockProducts.length > 0 ? 'Action required' : 'All stocked', context: `${lowStockProducts.length} at or below minimum`, positive: lowStockProducts.length === 0, icon: AlertTriangle, color: '#EF4444', colorBg: 'rgba(239,68,68,0.1)' },
   ];
 
-  const attentionItems = [
-    ...(overdueCustomerCount > 0 ? [{ label: 'Receivables outstanding', detail: `₹${totalReceivables.toLocaleString()} across ${overdueCustomerCount} customer(s)`, href: '/customers', tone: 'warning' }] : []),
-    ...(payableSupplierCount > 0 ? [{ label: 'Payments outstanding', detail: `₹${totalPayables.toLocaleString()} payable to ${payableSupplierCount} supplier(s)`, href: '/purchases', tone: 'info' }] : []),
-    ...(lowStockProducts.length > 0 ? [{ label: 'Critical stock shortages', detail: `${lowStockProducts.length} part(s) need a reorder`, href: '/inventory', tone: 'danger' }] : []),
-  ];
-
   const recentActivities = useMemo(() => {
     const events: Array<{ date: string; title: string; desc: string; type: string }> = [];
     for (const inv of invoices) events.push({ date: inv.date, title: `Invoice #${inv.id} generated`, desc: `${inv.customer} - ₹${Number(inv.total).toLocaleString()}`, type: 'sale' });
@@ -147,35 +140,7 @@ export default function DashboardPage() {
           <h1 className="page-title">Executive Dashboard</h1>
           <p className="page-subtitle">Real-time performance metrics for the active company</p>
         </div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <a className="btn btn-secondary" href="/api/export?type=dashboard" download>Download Summary</a>
-          <Link href="/sales" className="btn btn-primary">
-            <Plus size={16} /> New Sale Invoice
-          </Link>
-        </div>
       </div>
-
-      <section className="attention-section" aria-labelledby="attention-heading">
-        <div className="attention-heading">
-          <div>
-            <p className="eyebrow">Priority queue</p>
-            <h2 id="attention-heading">Needs attention today</h2>
-          </div>
-          <span className="badge badge-danger">{attentionItems.length} priorities</span>
-        </div>
-        <div className="attention-grid">
-          {attentionItems.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Nothing needs attention right now.</p>}
-          {attentionItems.map((item) => (
-            <Link key={item.label} href={item.href} className={`attention-item ${item.tone}`}>
-              <div>
-                <p>{item.label}</p>
-                <span>{item.detail}</span>
-              </div>
-              <ArrowRight size={16} aria-hidden="true" />
-            </Link>
-          ))}
-        </div>
-      </section>
 
       <div className="kpi-grid">
         {kpis.map((kpi) => {
