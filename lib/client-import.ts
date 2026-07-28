@@ -14,19 +14,101 @@ function normalizeHeader(header: string): string {
     .trim();
 }
 
+// These single words are common enough inside unrelated compound headers ("ordering cost",
+// "unite price" as a typo of "unit price") that fuzzy-matching them causes more false positives
+// than correct matches — only match them when a header is exactly this word, and let content-based
+// guessing (guessNumericRoles) handle the ambiguous cases instead.
+const AMBIGUOUS_SINGLE_WORDS = new Set(['cost', 'price', 'rate', 'value', 'amount', 'total']);
+
 function findKey(row: Record<string, unknown>, candidates: readonly string[]): string | undefined {
   const keys = Object.keys(row);
   const normalizedCandidates = candidates.map(normalizeHeader);
   const exact = keys.find((key) => normalizedCandidates.includes(normalizeHeader(key)));
   if (exact) return exact;
+  const fuzzyCandidates = normalizedCandidates.filter((c) => !AMBIGUOUS_SINGLE_WORDS.has(c));
   return keys.find((key) => {
     const normalizedKey = normalizeHeader(key);
     if (!normalizedKey) return false;
     // Only match when the header contains the full candidate phrase (e.g. "Cost Price (Rs.)" contains
     // "cost price"). Matching the reverse direction too would let short headers like "Qty" falsely
     // match unrelated multi-word candidates that happen to contain "qty", e.g. "min qty" for min_stock.
-    return normalizedCandidates.some((candidate) => normalizedKey.includes(candidate));
+    return fuzzyCandidates.some((candidate) => normalizedKey.includes(candidate));
   });
+}
+
+const HEADER_ROW_SIGNAL_WORDS = [
+  'name', 'item', 'part', 'description', 'code', 'category', 'type', 'price', 'rate', 'cost',
+  'qty', 'quantity', 'stock', 'unit', 'brand', 'supplier', 'oem', 'location', 'amount', 'value', 'no',
+];
+
+/**
+ * Real-world spreadsheets often have a title row ("Inventory Statement") or blank rows above the
+ * actual column headers. Blindly treating row 1 as the header row (the XLSX default) then makes
+ * every real header — "Name", "Qty available", etc. — look like ordinary data, so nothing matches.
+ * Scan the first few rows and pick whichever one reads the most like a header row.
+ */
+function detectHeaderRowIndex(rawRows: unknown[][]): number {
+  let bestIndex = 0;
+  let bestScore = -1;
+  const scanLimit = Math.min(rawRows.length, 10);
+  for (let i = 0; i < scanLimit; i++) {
+    const row = rawRows[i] ?? [];
+    const nonEmptyCells = row.map((c) => String(c ?? '').trim()).filter((c) => c !== '');
+    if (nonEmptyCells.length < 2) continue;
+    const matchingCells = nonEmptyCells.filter((cell) => {
+      const normalized = normalizeHeader(cell);
+      return HEADER_ROW_SIGNAL_WORDS.some((word) => normalized === word || normalized.includes(word));
+    });
+    const score = matchingCells.length * 100 + nonEmptyCells.length;
+    if (matchingCells.length > 0 && score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
+}
+
+/** Re-parses a sheet using whichever row looks like the true header row, instead of always row 1. */
+function sheetToRowsWithDetectedHeader(sheet: XLSX.WorkSheet): Array<Record<string, unknown>> {
+  const rawRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' });
+  if (rawRows.length === 0) return [];
+  const headerRowIndex = detectHeaderRowIndex(rawRows);
+  const headers = (rawRows[headerRowIndex] ?? []).map((h, i) => {
+    const text = String(h ?? '').trim();
+    return text || `__EMPTY_${i}`;
+  });
+  return rawRows.slice(headerRowIndex + 1).map((row) => {
+    const obj: Record<string, unknown> = {};
+    headers.forEach((header, i) => {
+      obj[header] = row[i] ?? '';
+    });
+    return obj;
+  });
+}
+
+/** A "S.No" / "Sr No" / index column counts up by 1 each row — never a real quantity or price. */
+function looksLikeRowIndex(rows: Array<Record<string, unknown>>, key: string): boolean {
+  let expected: number | null = null;
+  let matches = 0;
+  let total = 0;
+  for (const row of rows) {
+    const raw = row[key];
+    if (raw === undefined || raw === null || String(raw).trim() === '') continue;
+    const n = Number(raw);
+    if (Number.isNaN(n)) continue;
+    total++;
+    if (expected !== null && n === expected) matches++;
+    expected = n + 1;
+  }
+  return total > 3 && matches / total > 0.95;
+}
+
+const DERIVED_COLUMN_WORDS = ['value', 'total', 'amount', 'worth'];
+
+/** "Inventory Value" / "Total Amount" columns are usually qty × price, not a raw fact to store. */
+function looksLikeDerivedColumn(header: string): boolean {
+  const normalized = normalizeHeader(header);
+  return DERIVED_COLUMN_WORDS.some((word) => normalized.includes(word));
 }
 
 function guessTextColumn(rows: Array<Record<string, unknown>>): string | undefined {
@@ -64,7 +146,10 @@ function numericColumnStats(rows: Array<Record<string, unknown>>, key: string): 
     sum += n;
     if (Number.isInteger(n)) integerCount++;
   }
-  if (nonEmptyCount === 0 || numericCount / nonEmptyCount < 0.6) return null;
+  // Require the column to actually be populated across most rows, not just "numeric where present" —
+  // otherwise a column that's empty except for one stray value (e.g. a note in an "ordering cost"
+  // column meant for a different workflow) looks 100% numeric and gets mistaken for a real field.
+  if (rows.length === 0 || nonEmptyCount / rows.length < 0.5 || numericCount / nonEmptyCount < 0.6) return null;
   return { key, avg: sum / numericCount, integerFraction: integerCount / numericCount, nonEmptyCount };
 }
 
@@ -80,7 +165,7 @@ function guessNumericRoles(
 ): { stock?: string; cost?: string; sale?: string } {
   const allKeys = rows.length > 0 ? Object.keys(rows[0]) : [];
   const candidates = allKeys
-    .filter((k) => !claimedKeys.has(k))
+    .filter((k) => !claimedKeys.has(k) && !looksLikeDerivedColumn(k) && !looksLikeRowIndex(rows, k))
     .map((k) => numericColumnStats(rows, k))
     .filter((s): s is NumericColumnStats => s !== null);
 
@@ -107,7 +192,7 @@ export async function parseSpreadsheetFile(file: File): Promise<ImportedLine[]> 
   if (!sheet) {
     throw new Error('This file has no readable sheet — it may be empty, corrupted, or not a valid CSV/Excel file.');
   }
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+  const rows = sheetToRowsWithDetectedHeader(sheet);
 
   const lines: ImportedLine[] = [];
   for (const row of rows) {
@@ -164,7 +249,7 @@ export async function parseInventoryFile(file: File): Promise<InventoryImportRes
   if (!sheet) {
     throw new Error('This file has no readable sheet — it may be empty, corrupted, or not a valid CSV/Excel file.');
   }
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '' });
+  const rows = sheetToRowsWithDetectedHeader(sheet);
 
   const get = (row: Record<string, unknown>, keys: readonly string[]) => {
     const key = findKey(row, keys);
