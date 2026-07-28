@@ -51,13 +51,14 @@ export default function SalesPage() {
   const [invoiceDate, setInvoiceDate] = useState(todayIso());
   const [lines, setLines] = useState<InvoiceLine[]>([]);
   const [discountPercent, setDiscountPercent] = useState(0);
+  const [gstPercent, setGstPercent] = useState(18);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('unpaid');
   const [amountPaid, setAmountPaid] = useState(0);
 
   const subtotal = lines.reduce((sum, line) => sum + line.qty * line.price, 0);
   const discountAmount = subtotal * (discountPercent / 100);
   const total = subtotal - discountAmount;
-  const includedGst = total - total / 1.18;
+  const includedGst = gstPercent > 0 ? total - total / (1 + gstPercent / 100) : 0;
   const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
 
   const selectedCustomer = customers.find((c) => c.name === customer);
@@ -89,6 +90,7 @@ export default function SalesPage() {
     setCustomer(presetCustomer ?? customers[0]?.name ?? '');
     setLines(partOptions.length > 0 ? [{ part: partOptions[0].value, qty: 1, price: partOptions[0].price }] : []);
     setDiscountPercent(0);
+    setGstPercent(18);
     setInvoiceDate(todayIso());
     setPaymentStatus('unpaid');
     setAmountPaid(0);
@@ -101,6 +103,7 @@ export default function SalesPage() {
     setCustomer(invoice.customer);
     setInvoiceDate(invoice.date);
     setDiscountPercent(Number(invoice.discount_percent));
+    setGstPercent(18);
     setLines(items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price) })));
     const paid = Number(invoice.paid);
     const invoiceTotal = Number(invoice.total);
@@ -384,6 +387,10 @@ export default function SalesPage() {
                 <div className="form-group"><label className="form-label">Discount Amount (₹)</label><input type="text" className="form-input" value={discountAmount.toFixed(2)} disabled /></div>
               </div>
               <div className="form-grid-2">
+                <div className="form-group"><label className="form-label">GST Rate (%)</label><input type="number" min="0" max="28" step="0.1" className="form-input" value={gstPercent} onChange={(event) => setGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} /></div>
+                <div className="form-group"><label className="form-label">GST Amount (₹, included in total)</label><input type="text" className="form-input" value={includedGst.toFixed(2)} disabled /></div>
+              </div>
+              <div className="form-grid-2">
                 <div className="form-group">
                   <label className="form-label">Payment Received</label>
                   <select className="form-input form-select" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)}>
@@ -399,7 +406,7 @@ export default function SalesPage() {
               <div className="flex justify-between items-center invoice-summary">
                 <div><span className="text-muted">Subtotal: </span><strong>₹{subtotal.toLocaleString()}</strong></div>
                 {discountAmount > 0 && <div><span className="text-muted">Discount: </span><strong className="text-danger">-₹{discountAmount.toFixed(2)}</strong></div>}
-                <div><span className="text-muted">GST (18% included): </span><strong>₹{includedGst.toFixed(2)}</strong></div>
+                <div><span className="text-muted">GST ({gstPercent}% included): </span><strong>₹{includedGst.toFixed(2)}</strong></div>
                 <div><span className="text-muted">Received: </span><strong className="text-success">₹{paidAmount.toLocaleString()}</strong></div>
                 <div><strong>Total Payable: </strong><span className="invoice-total">₹{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
               </div>
