@@ -91,6 +91,26 @@ export async function deleteRow(table: TableName, id: string): Promise<void> {
   if (error) throw error;
 }
 
+export type AdjustableTable = 'products' | 'customers' | 'suppliers';
+
+const ADJUST_RPC: Record<AdjustableTable, { fn: string; idParam: string; deltaParam: string }> = {
+  products: { fn: 'jde_adjust_product_stock', idParam: 'p_id', deltaParam: 'p_delta' },
+  customers: { fn: 'jde_adjust_customer_balance', idParam: 'c_id', deltaParam: 'c_delta' },
+  suppliers: { fn: 'jde_adjust_supplier_balance', idParam: 's_id', deltaParam: 's_delta' },
+};
+
+/**
+ * Atomically adds `delta` to a product's current_stock / a customer's or supplier's balance,
+ * via a database-side UPDATE ... SET col = col + delta. Safe under concurrent writes from
+ * multiple computers, unlike reading the current value in JS and writing back the sum.
+ */
+export async function adjustRow(table: AdjustableTable, id: string, delta: number): Promise<Record<string, unknown>> {
+  const rpc = ADJUST_RPC[table];
+  const { data, error } = await getClient().rpc(rpc.fn, { [rpc.idParam]: id, [rpc.deltaParam]: delta }).single();
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
 export async function deleteCompany(id: string): Promise<{ error: string } | { ok: true }> {
   const companies = (await listRows('companies')) as Array<{ id: string; is_active: boolean }>;
   const target = companies.find((c) => c.id === id);

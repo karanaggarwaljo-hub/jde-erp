@@ -22,7 +22,7 @@ type Customer = {
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string };
 
 export default function CustomersPage() {
-  const { rows: customers, loading, create, update } = useCompanyTable<Customer>('customers');
+  const { rows: customers, loading, create, adjust } = useCompanyTable<Customer>('customers');
   const { rows: invoices, update: updateInvoice } = useCompanyTable<Invoice>('invoices');
   const [showModal, setShowModal] = useState(false);
   const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
@@ -61,7 +61,7 @@ export default function CustomersPage() {
       remaining -= apply;
     }
 
-    await update(paymentCustomer.id, { balance: paymentCustomer.balance - received });
+    await adjust(paymentCustomer.id, -received);
     setFeedback(`₹${received.toLocaleString()} payment received from ${paymentCustomer.name}.`);
     setPaymentCustomer(null);
   };

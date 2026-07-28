@@ -10,7 +10,7 @@ type PurchaseOrder = { id: string; supplier: string; date: string; total: number
 const categoryOptions = ['Engine', 'Brakes', 'Filters', 'Clutch', 'Suspension', 'Electrical'];
 
 export default function SuppliersPage() {
-  const { rows: suppliers, loading, create, update } = useCompanyTable<Supplier>('suppliers');
+  const { rows: suppliers, loading, create, adjust } = useCompanyTable<Supplier>('suppliers');
   const { rows: purchaseOrders, update: updatePurchaseOrder } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -62,7 +62,7 @@ export default function SuppliersPage() {
       remaining -= apply;
     }
 
-    await update(paymentSupplier.id, { balance: paymentSupplier.balance - paid });
+    await adjust(paymentSupplier.id, -paid);
     setFeedback(`₹${paid.toLocaleString()} payment recorded for ${paymentSupplier.name}.`);
     setPaymentSupplier(null);
   };

@@ -40,8 +40,8 @@ function cleanedGuess(text: string): string {
 }
 
 export default function PurchasesPage() {
-  const { rows: products, update: updateProduct } = useCompanyTable<Product>('products');
-  const { rows: suppliers, create: createSupplier, update: updateSupplier } = useCompanyTable<Supplier>('suppliers');
+  const { rows: products, adjust: adjustProduct } = useCompanyTable<Product>('products');
+  const { rows: suppliers, create: createSupplier, adjust: adjustSupplier } = useCompanyTable<Supplier>('suppliers');
   const { rows: purchaseOrders, loading: poLoading, create: createPurchaseOrder, update: updatePurchaseOrder } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const { rows: grns, create: createGrn } = useCompanyTable<Grn>('grns');
   const { rows: poItems, create: createPoItem } = useCompanyTable<PoItem>('po_items');
@@ -96,10 +96,7 @@ export default function PurchasesPage() {
 
     for (const item of items) {
       if (!item.product_id) continue;
-      const product = products.find((p) => p.id === item.product_id);
-      if (product) {
-        await updateProduct(product.id, { current_stock: Number(product.current_stock) + Number(item.qty) });
-      }
+      await adjustProduct(item.product_id, Number(item.qty));
     }
   }
 
@@ -131,7 +128,7 @@ export default function PurchasesPage() {
     // Newly created purchase — its amount has never been counted anywhere before, so it's safe to add to payables.
     const due = total - paid;
     if (due > 0) {
-      await updateSupplier(supplierRow.id, { balance: Number(supplierRow.balance) + due });
+      await adjustSupplier(supplierRow.id, due);
     }
 
     setShowPurchaseModal(false);
@@ -224,7 +221,7 @@ export default function PurchasesPage() {
 
     await receiveStock(id, supplierRow.name, lineItems);
     if (importedTotal > 0) {
-      await updateSupplier(supplierRow.id, { balance: Number(supplierRow.balance) + importedTotal });
+      await adjustSupplier(supplierRow.id, importedTotal);
     }
 
     setFeedback(`${id} recorded from ${importPreview.fileName} — ${importPreview.lines.length} item(s), ₹${importedTotal.toLocaleString()} from ${supplierRow.name}.`);

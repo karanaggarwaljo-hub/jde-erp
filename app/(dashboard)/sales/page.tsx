@@ -28,8 +28,8 @@ function nextId(rows: Array<{ id: string }>, prefix: string) {
 }
 
 export default function SalesPage() {
-  const { rows: products, update: updateProduct } = useCompanyTable<Product>('products');
-  const { rows: customers, update: updateCustomer } = useCompanyTable<Customer>('customers');
+  const { rows: products, adjust: adjustProduct } = useCompanyTable<Product>('products');
+  const { rows: customers, adjust: adjustCustomer } = useCompanyTable<Customer>('customers');
   const { rows: invoices, loading: invoicesLoading, create: createInvoice, update: updateInvoice, remove: removeInvoice } = useCompanyTable<Invoice>('invoices');
   const { rows: quotations, loading: quotationsLoading } = useCompanyTable<Quotation>('quotations');
   const { rows: invoiceItems, create: createInvoiceItem, remove: removeInvoiceItem } = useCompanyTable<InvoiceItem>('invoice_items');
@@ -150,17 +150,16 @@ export default function SalesPage() {
       }
       for (const [productId, delta] of stockDelta.entries()) {
         if (delta === 0) continue;
-        const product = products.find((p) => p.id === productId);
-        if (product) await updateProduct(product.id, { current_stock: Number(product.current_stock) + delta });
+        await adjustProduct(productId, delta);
       }
 
       const oldCustomerRow = customers.find((c) => c.name === editingInvoice.customer);
       const newCustomerRow = customers.find((c) => c.name === customer);
       if (oldCustomerRow && newCustomerRow && oldCustomerRow.id === newCustomerRow.id) {
-        await updateCustomer(oldCustomerRow.id, { balance: Number(oldCustomerRow.balance) - editingOldOutstanding + newOutstanding });
+        await adjustCustomer(oldCustomerRow.id, newOutstanding - editingOldOutstanding);
       } else {
-        if (oldCustomerRow) await updateCustomer(oldCustomerRow.id, { balance: Number(oldCustomerRow.balance) - editingOldOutstanding });
-        if (newCustomerRow) await updateCustomer(newCustomerRow.id, { balance: Number(newCustomerRow.balance) + newOutstanding });
+        if (oldCustomerRow) await adjustCustomer(oldCustomerRow.id, -editingOldOutstanding);
+        if (newCustomerRow) await adjustCustomer(newCustomerRow.id, newOutstanding);
       }
 
       await updateInvoice(editingInvoice.id, {
@@ -206,12 +205,12 @@ export default function SalesPage() {
         line_total: line.qty * line.price,
       });
       if (product) {
-        await updateProduct(product.id, { current_stock: Number(product.current_stock) - line.qty });
+        await adjustProduct(product.id, -line.qty);
       }
     }
 
     if (selectedCustomer) {
-      await updateCustomer(selectedCustomer.id, { balance: Number(selectedCustomer.balance) + newOutstanding });
+      await adjustCustomer(selectedCustomer.id, newOutstanding);
     }
 
     setShowInvoiceModal(false);
@@ -224,15 +223,14 @@ export default function SalesPage() {
     const items = invoiceItems.filter((item) => item.invoice_id === deleteCandidate.id);
     for (const item of items) {
       if (item.product_id) {
-        const product = products.find((p) => p.id === item.product_id);
-        if (product) await updateProduct(product.id, { current_stock: Number(product.current_stock) + Number(item.qty) });
+        await adjustProduct(item.product_id, Number(item.qty));
       }
       await removeInvoiceItem(item.id);
     }
     const custRow = customers.find((c) => c.name === deleteCandidate.customer);
     if (custRow) {
       const due = Number(deleteCandidate.total) - Number(deleteCandidate.paid);
-      await updateCustomer(custRow.id, { balance: Number(custRow.balance) - due });
+      await adjustCustomer(custRow.id, -due);
     }
     await removeInvoice(deleteCandidate.id);
     setFeedback(`${deleteCandidate.id} deleted — stock and customer balance reversed.`);
