@@ -13,6 +13,8 @@ export const TABLES: Record<string, TableSchema> = {
   quotations: { primaryKey: 'id', companyScoped: true },
   purchase_orders: { primaryKey: 'id', companyScoped: true },
   grns: { primaryKey: 'id', companyScoped: true },
+  invoice_items: { primaryKey: 'id', companyScoped: true },
+  po_items: { primaryKey: 'id', companyScoped: true },
   expenses: { primaryKey: 'id', companyScoped: true },
   users: { primaryKey: 'email', companyScoped: true },
 };

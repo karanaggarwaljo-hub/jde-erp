@@ -19,8 +19,11 @@ type Customer = {
   balance: number;
 };
 
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string };
+
 export default function CustomersPage() {
   const { rows: customers, loading, create, update } = useCompanyTable<Customer>('customers');
+  const { rows: invoices, update: updateInvoice } = useCompanyTable<Invoice>('invoices');
   const [showModal, setShowModal] = useState(false);
   const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
@@ -44,6 +47,20 @@ export default function CustomersPage() {
     event.preventDefault();
     if (!paymentCustomer) return;
     const received = Math.min(Math.max(paymentAmount, 0), paymentCustomer.balance);
+
+    let remaining = received;
+    const outstandingInvoices = invoices
+      .filter((inv) => inv.customer === paymentCustomer.name && Number(inv.total) > Number(inv.paid))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    for (const inv of outstandingInvoices) {
+      if (remaining <= 0) break;
+      const due = Number(inv.total) - Number(inv.paid);
+      const apply = Math.min(due, remaining);
+      const newPaid = Number(inv.paid) + apply;
+      await updateInvoice(inv.id, { paid: newPaid, status: newPaid >= Number(inv.total) ? 'paid' : 'partial' });
+      remaining -= apply;
+    }
+
     await update(paymentCustomer.id, { balance: paymentCustomer.balance - received });
     setFeedback(`₹${received.toLocaleString()} payment received from ${paymentCustomer.name}.`);
     setPaymentCustomer(null);
