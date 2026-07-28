@@ -218,13 +218,19 @@ export default function InventoryPage() {
               <th>Compatibility</th>
               <th>Loc.</th>
               <th className="text-right">Price</th>
+              <th className="text-right">Margin</th>
               <th className="text-center">Stock Level</th>
+              <th className="text-center">Status</th>
               <th className="text-center">Actions</th>
             </tr>
           </thead>
           <tbody>
             {filteredProducts.map((p) => {
               const isLow = p.min_stock > 0 && p.current_stock <= p.min_stock;
+              const isOut = p.current_stock <= 0;
+              const margin = p.sale_price > 0 ? ((p.sale_price - p.cost_price) / p.sale_price) * 100 : 0;
+              const status = isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
+              const statusBadge = isOut ? 'badge-danger' : isLow ? 'badge-warning' : 'badge-success';
               return (
                 <tr key={p.id}>
                   <td>
@@ -242,11 +248,17 @@ export default function InventoryPage() {
                     <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>₹{p.cost_price}</span>
                     <span className="font-semibold">₹{p.sale_price}</span>
                   </td>
+                  <td className="text-right">
+                    <span className={margin >= 0 ? 'text-success font-semibold' : 'text-danger font-semibold'}>{margin.toFixed(1)}%</span>
+                  </td>
                   <td className="text-center">
                     <span className={`badge ${isLow ? 'badge-danger' : 'badge-success'}`}>
                       {isLow && <AlertTriangle size={12} />}
                       {p.current_stock} Pcs
                     </span>
+                  </td>
+                  <td className="text-center">
+                    <span className={`badge ${statusBadge}`}>{status}</span>
                   </td>
                   <td className="text-center">
                     <div className="flex justify-between gap-1 items-center">
@@ -262,7 +274,7 @@ export default function InventoryPage() {
               );
             })}
             {filteredProducts.length === 0 && (
-              <tr><td colSpan={9}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term or category, or this company simply has no parts yet.'}</p></div></td></tr>
+              <tr><td colSpan={11}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term or category, or this company simply has no parts yet.'}</p></div></td></tr>
             )}
           </tbody>
         </table>
