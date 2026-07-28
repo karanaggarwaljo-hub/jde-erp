@@ -215,8 +215,6 @@ export default function InventoryPage() {
               <th>Item Name</th>
               <th>Brand</th>
               <th>Category</th>
-              <th>Compatibility</th>
-              <th>Loc.</th>
               <th className="text-right">Price</th>
               <th className="text-right">Margin</th>
               <th className="text-center">Stock Level</th>
@@ -240,10 +238,6 @@ export default function InventoryPage() {
                   <td style={{ fontWeight: 600, maxWidth: '150px' }} className="truncate">{p.name}</td>
                   <td style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{p.brand}</td>
                   <td><span className="badge badge-info">{p.category}</span></td>
-                  <td style={{ fontSize: '12px', color: 'var(--text-secondary)', maxWidth: '130px' }} className="truncate">
-                    {p.compatibility}
-                  </td>
-                  <td style={{ fontWeight: 600, color: 'var(--text-muted)' }}>{p.location}</td>
                   <td className="text-right">
                     <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>₹{p.cost_price}</span>
                     <span className="font-semibold">₹{p.sale_price}</span>
@@ -274,7 +268,7 @@ export default function InventoryPage() {
               );
             })}
             {filteredProducts.length === 0 && (
-              <tr><td colSpan={11}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term or category, or this company simply has no parts yet.'}</p></div></td></tr>
+              <tr><td colSpan={9}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term or category, or this company simply has no parts yet.'}</p></div></td></tr>
             )}
           </tbody>
         </table>
