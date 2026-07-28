@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Jai Durga ERP — Setup</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%;
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    background: #0A0D14;
+    color: #F1F5F9;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { display: flex; align-items: center; justify-content: center; height: 100%; padding: 24px; }
+  .card { width: 100%; max-width: 460px; }
+  .logo { width: 44px; height: 44px; border-radius: 10px; background: linear-gradient(135deg, #F59E0B, #F97316); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 17px; color: #000; margin-bottom: 14px; }
+  h1 { font-size: 19px; font-weight: 800; margin-bottom: 4px; }
+  p.sub { font-size: 12.5px; color: #94A3B8; line-height: 1.5; margin-bottom: 22px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: #94A3B8; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+  .field { margin-bottom: 16px; }
+  input {
+    width: 100%; background: #162032; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+    color: #F1F5F9; font-size: 13.5px; padding: 10px 12px; outline: none; font-family: inherit;
+  }
+  input:focus { border-color: #F59E0B; box-shadow: 0 0 0 3px rgba(245,158,11,0.12); }
+  .hint { font-size: 11px; color: #64748B; margin-top: 5px; line-height: 1.4; }
+  .hint a { color: #FCD34D; text-decoration: none; cursor: pointer; }
+  .hint a:hover { text-decoration: underline; }
+  button.primary {
+    width: 100%; margin-top: 6px; padding: 11px; border-radius: 10px; border: none; cursor: pointer;
+    font-size: 14px; font-weight: 700; color: #000;
+    background: linear-gradient(135deg, #F59E0B, #F97316);
+  }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .error { display: none; font-size: 12.5px; color: #F87171; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="logo">JDE</div>
+      <h1>Connect this computer</h1>
+      <p class="sub">One-time setup. These are the same three values from the app's README — every computer you install this on should use the <strong>same</strong> Supabase project so they all see the same live data.</p>
+
+      <div class="error" id="error"></div>
+
+      <form id="form">
+        <div class="field">
+          <label for="supabaseUrl">Supabase URL *</label>
+          <input id="supabaseUrl" type="text" placeholder="https://your-project-ref.supabase.co" required />
+        </div>
+        <div class="field">
+          <label for="serviceKey">Supabase Service Role Key *</label>
+          <input id="serviceKey" type="password" placeholder="Project Settings → API → service_role secret" required />
+          <p class="hint">Never share this key — it has full access to your data.</p>
+        </div>
+        <div class="field">
+          <label for="geminiKey">Gemini API Key (optional)</label>
+          <input id="geminiKey" type="password" placeholder="For AI forecast / insights / daily briefing" />
+          <p class="hint">Get a free key at <a id="geminiLink">aistudio.google.com/apikey</a> — skip this if you don't need the AI features.</p>
+        </div>
+        <button class="primary" type="submit" id="submitBtn">Save & Start</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('form');
+    const errorBox = document.getElementById('error');
+    const submitBtn = document.getElementById('submitBtn');
+
+    document.getElementById('geminiLink').addEventListener('click', () => {
+      window.setup.openExternal('https://aistudio.google.com/apikey');
+    });
+
+    window.setup.onPrefill((config) => {
+      if (config.NEXT_PUBLIC_SUPABASE_URL) document.getElementById('supabaseUrl').value = config.NEXT_PUBLIC_SUPABASE_URL;
+      if (config.SUPABASE_SERVICE_ROLE_KEY) document.getElementById('serviceKey').value = config.SUPABASE_SERVICE_ROLE_KEY;
+      if (config.GEMINI_API_KEY) document.getElementById('geminiKey').value = config.GEMINI_API_KEY;
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      errorBox.style.display = 'none';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Starting…';
+
+      const config = {
+        NEXT_PUBLIC_SUPABASE_URL: document.getElementById('supabaseUrl').value.trim(),
+        SUPABASE_SERVICE_ROLE_KEY: document.getElementById('serviceKey').value.trim(),
+        GEMINI_API_KEY: document.getElementById('geminiKey').value.trim(),
+      };
+
+      try {
+        await window.setup.submit(config);
+      } catch (err) {
+        errorBox.textContent = 'Could not start the app: ' + (err && err.message ? err.message : String(err));
+        errorBox.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save & Start';
+      }
+    });
+  </script>
+</body>
+</html>

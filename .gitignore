@@ -20,6 +20,10 @@
 # production
 /build
 
+# electron packaging output
+/dist-electron/
+/dist-electron2/
+
 # temp text logs
 *.txt
 update_doc.py

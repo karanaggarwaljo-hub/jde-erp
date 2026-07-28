@@ -2,11 +2,14 @@
   "name": "erp",
   "version": "0.1.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "electron:dev": "electron .",
+    "electron:build": "next build && node scripts/copy-standalone-assets.js && electron-builder"
   },
   "dependencies": {
     "@google/genai": "^2.13.0",
@@ -23,9 +26,42 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "electron": "^33",
+    "electron-builder": "^25",
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "build": {
+    "appId": "com.jaidurga.erp",
+    "productName": "Jai Durga ERP",
+    "asar": false,
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": ".next/standalone",
+        "to": "standalone",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }
