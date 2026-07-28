@@ -1,8 +1,8 @@
 'use client';
 
 import { ChangeEvent, FormEvent, useState } from 'react';
-import { Plus, FileCheck } from 'lucide-react';
-import { parseSpreadsheetFile, fileToBase64 } from '@/lib/client-import';
+import { Plus, FileCheck, Upload } from 'lucide-react';
+import { parseSpreadsheetFile, fileToBase64, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
 type PurchaseTab = 'po' | 'grn' | 'invoices';
@@ -17,12 +17,26 @@ function todayIso() {
   return new Date().toISOString().split('T')[0];
 }
 
+function daysFromNowIso(days: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
+}
+
 function nextId(rows: Array<{ id: string }>, prefix: string) {
   const maxNum = rows.reduce((max, row) => {
     const match = row.id.match(/(\d+)$/);
     return match ? Math.max(max, Number(match[1])) : max;
   }, 1000);
   return `${prefix}-${maxNum + 1}`;
+}
+
+function isSpreadsheetFile(file: File) {
+  return SPREADSHEET_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext));
+}
+
+function isScannableFile(file: File) {
+  return SCANNABLE_TYPES.includes(file.type);
 }
 
 export default function PurchasesPage() {
@@ -45,8 +59,10 @@ export default function PurchasesPage() {
   const [poDate, setPoDate] = useState(todayIso());
   const [expectedDate, setExpectedDate] = useState(todayIso());
   const [lines, setLines] = useState<POLine[]>([]);
+
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
+  const [importPreview, setImportPreview] = useState<{ fileName: string; lines: ImportedLine[]; supplier: string; supplierGuessed: boolean } | null>(null);
 
   const total = lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
 
@@ -81,19 +97,47 @@ export default function PurchasesPage() {
     setFeedback(`${grnId} recorded and ${poId} marked received.`);
   };
 
-  const handleSpreadsheetImport = async (event: ChangeEvent<HTMLInputElement>) => {
+  const guessSupplierFromText = (text: string | undefined | null): string | undefined => {
+    if (!text) return undefined;
+    const guess = text.toLowerCase();
+    return supplierOptions.find((s) => s.toLowerCase().includes(guess) || guess.includes(s.toLowerCase()));
+  };
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
     setImportError('');
+    setFeedback('');
+    setImportPreview(null);
     setImporting(true);
     try {
-      const imported = await parseSpreadsheetFile(file);
-      if (imported.length === 0) {
-        throw new Error('No rows with a recognizable description, quantity, or price column were found in this file.');
+      if (isSpreadsheetFile(file)) {
+        const imported = await parseSpreadsheetFile(file);
+        if (imported.length === 0) {
+          throw new Error('No rows with a recognizable description, quantity, or price column were found in this file.');
+        }
+        const guessed = guessSupplierFromText(file.name);
+        setImportPreview({ fileName: file.name, lines: imported, supplier: guessed ?? supplierOptions[0] ?? '', supplierGuessed: Boolean(guessed) });
+      } else if (isScannableFile(file)) {
+        const base64 = await fileToBase64(file);
+        const res = await fetch('/api/purchases/import-scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64, mimeType: file.type }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to scan document.');
+
+        const items: ImportedLine[] = Array.isArray(data.items) ? data.items : [];
+        if (items.length === 0) {
+          throw new Error('No line items could be read from this document.');
+        }
+        const guessed = guessSupplierFromText(data.supplier_name);
+        setImportPreview({ fileName: file.name, lines: items, supplier: guessed ?? supplierOptions[0] ?? '', supplierGuessed: Boolean(guessed) });
+      } else {
+        throw new Error('Unsupported file type. Upload a CSV/Excel file, or a PDF/photo of a supplier document.');
       }
-      setLines((current) => [...current, ...imported.map((item) => ({ description: item.description, quantity: item.quantity, unit_price: item.unit_price }))]);
-      setFeedback(`Imported ${imported.length} item(s) from ${file.name}. Review before sending.`);
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to read the file.');
     } finally {
@@ -101,49 +145,39 @@ export default function PurchasesPage() {
     }
   };
 
-  const handleScanImport = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    setImportError('');
-    setImporting(true);
-    try {
-      const base64 = await fileToBase64(file);
-      const res = await fetch('/api/purchases/import-scan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64, mimeType: file.type }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to scan document.');
-
-      if (data.supplier_name) {
-        const guess = String(data.supplier_name).toLowerCase();
-        const match = supplierOptions.find((s) => s.toLowerCase().includes(guess) || guess.includes(s.toLowerCase()));
-        if (match) setSupplier(match);
-      }
-      if (data.po_date) setPoDate(data.po_date);
-      if (data.expected_delivery) setExpectedDate(data.expected_delivery);
-
-      const items: Array<{ description: string; quantity: number; unit_price: number }> = Array.isArray(data.items) ? data.items : [];
-      if (items.length === 0) {
-        throw new Error('No line items could be read from this document.');
-      }
-      setLines((current) => [...current, ...items.map((item) => ({ description: item.description, quantity: item.quantity, unit_price: item.unit_price }))]);
-      setFeedback(`Extracted ${items.length} item(s) from ${file.name}. Review before sending.`);
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : 'Failed to scan document.');
-    } finally {
-      setImporting(false);
-    }
+  const confirmImportedPO = async () => {
+    if (!importPreview) return;
+    const importedTotal = importPreview.lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
+    const id = nextId(purchaseOrders, 'PO');
+    await createPurchaseOrder({
+      id,
+      supplier: importPreview.supplier,
+      date: todayIso(),
+      expected: daysFromNowIso(7),
+      items: importPreview.lines.length,
+      total: importedTotal,
+      status: 'sent',
+    });
+    setFeedback(`${id} created from ${importPreview.fileName} — ${importPreview.lines.length} item(s), ₹${importedTotal.toLocaleString()} for ${importPreview.supplier}.`);
+    setImportPreview(null);
+    setActiveTab('po');
   };
 
   return (
     <div>
       <div className="page-header"><div><h1 className="page-title">Purchases & Procurement</h1><p className="page-subtitle">Track Purchase Requests → Purchase Orders → Goods Received Notes (GRN) → Supplier Payments</p></div>
-        <button className="btn btn-primary" onClick={openPOModal} disabled={suppliers.length === 0}><Plus size={16} /> Create Purchase Order</button></div>
+        <div className="flex gap-2">
+          <label className="btn btn-secondary" style={{ cursor: importing || suppliers.length === 0 ? 'not-allowed' : 'pointer' }}>
+            <Upload size={16} /> {importing ? 'Reading file…' : 'Import from File'}
+            <input type="file" accept=".csv,.xls,.xlsx,.pdf,image/*" hidden disabled={importing || suppliers.length === 0} onChange={handleImportFile} />
+          </label>
+          <button className="btn btn-primary" onClick={openPOModal} disabled={suppliers.length === 0}><Plus size={16} /> Create Purchase Order</button>
+        </div>
+      </div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
+      {importError && <div className="alert alert-danger mb-4" role="alert">{importError}</div>}
+      {suppliers.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '16px' }}>Add a supplier first before creating a purchase order.</p>}
 
       <div className="tabs mb-6">
         <button className={`tab ${activeTab === 'po' ? 'active' : ''}`} onClick={() => setActiveTab('po')}>Purchase Orders ({purchaseOrders.length})</button>
@@ -175,6 +209,22 @@ export default function PurchasesPage() {
 
       {activeTab === 'invoices' && <div className="card empty-state"><FileCheck size={32} /><p className="empty-state-title">No unmatched supplier invoices</p><p className="empty-state-desc">Invoices will appear here when uploaded or received against a purchase order.</p></div>}
 
+      {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '480px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
+        <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Create Purchase Order from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setImportPreview(null)}>✕</button></div>
+        <div className="modal-body flex flex-col gap-4">
+          <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+            Read <strong>{importPreview.lines.length} item(s)</strong> from <strong>{importPreview.fileName}</strong>, total ₹{importPreview.lines.reduce((s, l) => s + l.quantity * l.unit_price, 0).toLocaleString()}.
+          </p>
+          <div className="form-group">
+            <label className="form-label">Supplier {importPreview.supplierGuessed ? '(detected from file)' : '(please confirm)'}</label>
+            <select className="form-input form-select" value={importPreview.supplier} onChange={(event) => setImportPreview({ ...importPreview, supplier: event.target.value })}>
+              {supplierOptions.map((s) => <option key={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setImportPreview(null)}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier}>Create Purchase Order</button></div>
+      </div></div>}
+
       {showPOModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="po-modal-title"><form onSubmit={createPO}>
         <div className="modal-header"><h3 id="po-modal-title" className="modal-title">New Purchase Order</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setShowPOModal(false)}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
@@ -182,23 +232,7 @@ export default function PurchasesPage() {
           <div className="form-grid-2"><div className="form-group"><label className="form-label">PO Date</label><input type="date" className="form-input" value={poDate} onChange={(event) => setPoDate(event.target.value)} /></div><div className="form-group"><label className="form-label">Expected Delivery</label><input type="date" className="form-input" value={expectedDate} onChange={(event) => setExpectedDate(event.target.value)} /></div></div>
 
           <div className="card card-sm bg-surface">
-            <div className="flex justify-between items-center flex-wrap gap-2 mb-2">
-              <h4 style={{ fontSize: '13px', fontWeight: 600 }}>Item Details</h4>
-              <div className="flex gap-2">
-                <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
-                  Import CSV/Excel
-                  <input type="file" accept=".csv,.xls,.xlsx" hidden disabled={importing} onChange={handleSpreadsheetImport} />
-                </label>
-                <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>
-                  Scan PDF/Photo
-                  <input type="file" accept=".pdf,image/*" hidden disabled={importing} onChange={handleScanImport} />
-                </label>
-              </div>
-            </div>
-
-            {importing && <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>Reading file…</p>}
-            {importError && <p className="form-error" style={{ marginBottom: '8px' }}>{importError}</p>}
-            {partOptions.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Add parts in Inventory to pick from a catalog, or type a description below.</p>}
+            <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Item Details</h4>
 
             <datalist id="po-part-options">
               {partOptions.map((option) => <option key={option.value} value={option.value} />)}
