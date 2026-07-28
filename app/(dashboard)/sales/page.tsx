@@ -8,8 +8,8 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 type SalesTab = 'invoices' | 'quotations' | 'orders' | 'returns';
 type InvoiceLine = { part: string; qty: number; price: number };
 
-type Product = { id: string; company_id: string; part_number: string; name: string; category: string; sale_price: number };
-type Customer = { id: string; company_id: string; name: string };
+type Product = { id: string; company_id: string; part_number: string; name: string; category: string; sale_price: number; current_stock: number };
+type Customer = { id: string; company_id: string; name: string; balance: number; credit_limit: number };
 type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string };
 type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
 
@@ -26,10 +26,11 @@ function nextId(rows: Array<{ id: string }>, prefix: string) {
 }
 
 export default function SalesPage() {
-  const { rows: products } = useCompanyTable<Product>('products');
-  const { rows: customers } = useCompanyTable<Customer>('customers');
+  const { rows: products, update: updateProduct } = useCompanyTable<Product>('products');
+  const { rows: customers, update: updateCustomer } = useCompanyTable<Customer>('customers');
   const { rows: invoices, loading: invoicesLoading, create: createInvoice } = useCompanyTable<Invoice>('invoices');
   const { rows: quotations, loading: quotationsLoading } = useCompanyTable<Quotation>('quotations');
+  const { create: createInvoiceItem } = useCompanyTable<Record<string, unknown>>('invoice_items');
 
   const partOptions = products.map((product) => ({
     value: `${product.part_number} - ${product.name}`,
@@ -49,6 +50,10 @@ export default function SalesPage() {
   const discountAmount = subtotal * (discountPercent / 100);
   const total = subtotal - discountAmount;
   const includedGst = total - total / 1.18;
+
+  const selectedCustomer = customers.find((c) => c.name === customer);
+  const projectedBalance = Number(selectedCustomer?.balance ?? 0) + total;
+  const overCreditLimit = !!selectedCustomer && Number(selectedCustomer.credit_limit) > 0 && projectedBalance > Number(selectedCustomer.credit_limit);
 
   const openInvoice = (presetCustomer?: string) => {
     setCustomer(presetCustomer ?? customers[0]?.name ?? '');
@@ -75,6 +80,27 @@ export default function SalesPage() {
       status: 'unpaid',
       mode: 'Credit',
     });
+
+    for (const line of lines) {
+      const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
+      await createInvoiceItem({
+        invoice_id: id,
+        product_id: product?.id ?? null,
+        part_number: product?.part_number ?? '',
+        name: product?.name ?? line.part,
+        qty: line.qty,
+        unit_price: line.price,
+        line_total: line.qty * line.price,
+      });
+      if (product) {
+        await updateProduct(product.id, { current_stock: Number(product.current_stock) - line.qty });
+      }
+    }
+
+    if (selectedCustomer) {
+      await updateCustomer(selectedCustomer.id, { balance: Number(selectedCustomer.balance) + total });
+    }
+
     setShowInvoiceModal(false);
     setActiveTab('invoices');
     setFeedback(`${id} generated for ${customer}.`);
@@ -167,6 +193,11 @@ export default function SalesPage() {
                 <div><span className="text-muted">GST (18% included): </span><strong>₹{includedGst.toFixed(2)}</strong></div>
                 <div><strong>Total Payable: </strong><span className="invoice-total">₹{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
               </div>
+              {overCreditLimit && selectedCustomer && (
+                <div className="alert alert-warning" role="alert">
+                  This will put {selectedCustomer.name} ₹{(projectedBalance - Number(selectedCustomer.credit_limit)).toLocaleString()} over their ₹{Number(selectedCustomer.credit_limit).toLocaleString()} credit limit (new balance would be ₹{projectedBalance.toLocaleString()}). You can still save this invoice.
+                </div>
+              )}
             </div>
             <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowInvoiceModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || !customer}>Generate & Save Invoice</button></div>
           </form>

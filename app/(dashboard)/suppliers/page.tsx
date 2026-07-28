@@ -5,11 +5,13 @@ import { Plus, Search, Phone, Mail } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
 type Supplier = { id: string; company_id: string; name: string; category: string; phone: string; email: string; gstin: string; terms: number; balance: number };
+type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string };
 
 const categoryOptions = ['Engine', 'Brakes', 'Filters', 'Clutch', 'Suspension', 'Electrical'];
 
 export default function SuppliersPage() {
   const { rows: suppliers, loading, create, update } = useCompanyTable<Supplier>('suppliers');
+  const { rows: purchaseOrders, update: updatePurchaseOrder } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [paymentSupplier, setPaymentSupplier] = useState<Supplier | null>(null);
@@ -47,6 +49,19 @@ export default function SuppliersPage() {
     event.preventDefault();
     if (!paymentSupplier) return;
     const paid = Math.min(Math.max(paymentAmount, 0), paymentSupplier.balance);
+
+    let remaining = paid;
+    const outstandingPOs = purchaseOrders
+      .filter((po) => po.supplier === paymentSupplier.name && po.status === 'received' && Number(po.total) > Number(po.paid))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    for (const po of outstandingPOs) {
+      if (remaining <= 0) break;
+      const due = Number(po.total) - Number(po.paid);
+      const apply = Math.min(due, remaining);
+      await updatePurchaseOrder(po.id, { paid: Number(po.paid) + apply });
+      remaining -= apply;
+    }
+
     await update(paymentSupplier.id, { balance: paymentSupplier.balance - paid });
     setFeedback(`₹${paid.toLocaleString()} payment recorded for ${paymentSupplier.name}.`);
     setPaymentSupplier(null);

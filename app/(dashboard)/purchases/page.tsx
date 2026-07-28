@@ -8,10 +8,11 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 type PurchaseTab = 'po' | 'grn' | 'invoices';
 type POLine = { description: string; quantity: number; unit_price: number };
 
-type Product = { id: string; company_id: string; part_number: string; name: string; category: string; cost_price: number };
-type Supplier = { id: string; company_id: string; name: string };
-type PurchaseOrder = { id: string; company_id: string; supplier: string; date: string; expected: string; items: number; total: number; status: string };
+type Product = { id: string; company_id: string; part_number: string; name: string; category: string; cost_price: number; current_stock: number };
+type Supplier = { id: string; company_id: string; name: string; balance: number };
+type PurchaseOrder = { id: string; company_id: string; supplier: string; date: string; expected: string; items: number; total: number; paid: number; status: string };
 type Grn = { id: string; company_id: string; po_number: string; supplier: string; received_at: string; status: string };
+type PoItem = { id: string; po_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_cost: number };
 
 function todayIso() {
   return new Date().toISOString().split('T')[0];
@@ -26,10 +27,11 @@ function nextId(rows: Array<{ id: string }>, prefix: string) {
 }
 
 export default function PurchasesPage() {
-  const { rows: products } = useCompanyTable<Product>('products');
-  const { rows: suppliers } = useCompanyTable<Supplier>('suppliers');
+  const { rows: products, update: updateProduct } = useCompanyTable<Product>('products');
+  const { rows: suppliers, update: updateSupplier } = useCompanyTable<Supplier>('suppliers');
   const { rows: purchaseOrders, loading: poLoading, create: createPurchaseOrder, update: updatePurchaseOrder } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const { rows: grns, loading: grnLoading, create: createGrn } = useCompanyTable<Grn>('grns');
+  const { rows: poItems, create: createPoItem } = useCompanyTable<PoItem>('po_items');
 
   const partOptions = products.map((product) => ({
     value: `${product.part_number} - ${product.name}`,
@@ -66,7 +68,21 @@ export default function PurchasesPage() {
   const createPO = async (event: FormEvent) => {
     event.preventDefault();
     const id = nextId(purchaseOrders, 'PO');
-    await createPurchaseOrder({ id, supplier, date: poDate, expected: expectedDate, items: lines.length, total, status: 'sent' });
+    await createPurchaseOrder({ id, supplier, date: poDate, expected: expectedDate, items: lines.length, total, paid: 0, status: 'sent' });
+
+    for (const line of lines) {
+      const matchedProduct = products.find((p) => `${p.part_number} - ${p.name}` === line.description);
+      await createPoItem({
+        po_id: id,
+        product_id: matchedProduct?.id ?? null,
+        part_number: matchedProduct?.part_number ?? '',
+        name: matchedProduct?.name ?? line.description,
+        qty: line.quantity,
+        unit_cost: line.unit_price,
+        line_total: line.quantity * line.unit_price,
+      });
+    }
+
     setShowPOModal(false);
     setFeedback(`${id} sent to ${supplier} for ${lines.length} line item(s).`);
     setActiveTab('po');
@@ -78,6 +94,20 @@ export default function PurchasesPage() {
     const grnId = nextId(grns, 'GRN');
     await updatePurchaseOrder(poId, { status: 'received' });
     await createGrn({ id: grnId, po_number: poId, supplier: order.supplier, received_at: new Date().toLocaleString('en-IN'), status: 'verified' });
+
+    for (const item of poItems.filter((poItem) => poItem.po_id === poId)) {
+      if (!item.product_id) continue;
+      const product = products.find((p) => p.id === item.product_id);
+      if (product) {
+        await updateProduct(product.id, { current_stock: Number(product.current_stock) + Number(item.qty) });
+      }
+    }
+
+    const matchedSupplier = suppliers.find((s) => s.name === order.supplier);
+    if (matchedSupplier) {
+      await updateSupplier(matchedSupplier.id, { balance: Number(matchedSupplier.balance) + Number(order.total) });
+    }
+
     setFeedback(`${grnId} recorded and ${poId} marked received.`);
   };
 
