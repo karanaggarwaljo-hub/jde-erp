@@ -1081,6 +1081,20 @@ input, textarea, select { font-family: inherit; }
 }
 
 /* ===================================================
+   Inline Metric Row (compact stats, no card borders)
+   =================================================== */
+.ms {
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+  padding: 4px 2px;
+}
+
+.msc { flex: none; }
+.msv { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+.msl { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* ===================================================
    Utilities
    =================================================== */
 .flex { display: flex; }
