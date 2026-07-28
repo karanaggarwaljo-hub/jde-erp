@@ -1,11 +1,11 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { Plus, Printer, Search, Eye, Trash2, FileText } from 'lucide-react';
+import { Plus, Printer, Search, Eye, Trash2, ArrowRight, ArrowLeft } from 'lucide-react';
 import { printCurrentPage } from '@/lib/client-export';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
-type SalesTab = 'invoices' | 'quotations' | 'orders' | 'returns';
+type SalesTab = 'invoices' | 'quotations';
 type InvoiceLine = { part: string; qty: number; price: number };
 
 type Product = { id: string; company_id: string; part_number: string; name: string; category: string; sale_price: number; current_stock: number };
@@ -151,31 +151,24 @@ export default function SalesPage() {
   return (
     <div>
       <div className="page-header">
-        <div><h1 className="page-title">Sales Management</h1><p className="page-subtitle">Manage Quotations → Sales Orders → Invoices → Payments & Returns</p></div>
+        <div><h1 className="page-title">Sales Management</h1><p className="page-subtitle">Invoices, billing and quotations</p></div>
         <button className="btn btn-primary" onClick={() => openInvoice()} disabled={customers.length === 0}><Plus size={16} /> Create Sales Invoice</button>
       </div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
 
       {activeTab === 'invoices' && (
-        <div className="ms mb-4">
-          <div className="msc"><div className="msv text-brand">₹{totalRevenue.toLocaleString()}</div><div className="msl">Total Revenue</div></div>
-          <div className="msc"><div className="msv text-info">{invoices.length}</div><div className="msl">Transactions</div></div>
-          <div className="msc"><div className="msv text-success">₹{avgOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div><div className="msl">Avg Order Value</div></div>
-          <div className="msc"><div className="msv text-brand truncate" style={{ maxWidth: '160px' }}>{topProduct ?? '—'}</div><div className="msl">Top Product</div></div>
-          <div className="msc"><div className="msv text-danger">₹{outstandingDue.toLocaleString()}</div><div className="msl">Outstanding Due</div></div>
-        </div>
-      )}
-
-      <div className="tabs mb-6">
-        <button className={`tab ${activeTab === 'invoices' ? 'active' : ''}`} onClick={() => setActiveTab('invoices')}>Invoices & Billing ({invoices.length})</button>
-        <button className={`tab ${activeTab === 'quotations' ? 'active' : ''}`} onClick={() => setActiveTab('quotations')}>Quotations ({quotations.length})</button>
-        <button className={`tab ${activeTab === 'orders' ? 'active' : ''}`} onClick={() => setActiveTab('orders')}>Sales Orders</button>
-        <button className={`tab ${activeTab === 'returns' ? 'active' : ''}`} onClick={() => setActiveTab('returns')}>Returns & Credit Notes</button>
-      </div>
-
-      {activeTab === 'invoices' && (
         <>
+          <div className="flex justify-between items-center mb-4">
+            <div className="ms">
+              <div className="msc"><div className="msv text-brand">₹{totalRevenue.toLocaleString()}</div><div className="msl">Total Revenue</div></div>
+              <div className="msc"><div className="msv text-info">{invoices.length}</div><div className="msl">Transactions</div></div>
+              <div className="msc"><div className="msv text-success">₹{avgOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div><div className="msl">Avg Order Value</div></div>
+              <div className="msc"><div className="msv text-brand truncate" style={{ maxWidth: '160px' }}>{topProduct ?? '—'}</div><div className="msl">Top Product</div></div>
+              <div className="msc"><div className="msv text-danger">₹{outstandingDue.toLocaleString()}</div><div className="msl">Outstanding Due</div></div>
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={() => setActiveTab('quotations')}>Quotations ({quotations.length}) <ArrowRight size={14} /></button>
+          </div>
           <div className="card mb-4 p-4">
             <div className="search-bar">
               <Search className="search-bar-icon" size={16} />
@@ -220,6 +213,8 @@ export default function SalesPage() {
       )}
 
       {activeTab === 'quotations' && (
+        <>
+        <button className="btn btn-ghost btn-sm mb-4" onClick={() => setActiveTab('invoices')}><ArrowLeft size={14} /> Back to Invoices</button>
         <div className="table-wrap"><table className="erp-table">
           <thead><tr><th>Quote #</th><th>Customer Name</th><th>Quote Date</th><th>Valid Until</th><th className="text-right">Total Amount</th><th>Status</th><th className="text-center">Convert</th></tr></thead>
           <tbody>{quotations.map((quote) => <tr key={quote.id}>
@@ -232,10 +227,7 @@ export default function SalesPage() {
           )}
           </tbody>
         </table></div>
-      )}
-
-      {(activeTab === 'orders' || activeTab === 'returns') && (
-        <div className="card empty-state"><FileText size={32} /><p className="empty-state-title">No {activeTab === 'orders' ? 'open sales orders' : 'returns or credit notes'}</p><p className="empty-state-desc">New records will appear here when they are created.</p></div>
+        </>
       )}
 
       {viewingInvoice && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '560px' }} role="dialog" aria-modal="true" aria-labelledby="view-invoice-title">
