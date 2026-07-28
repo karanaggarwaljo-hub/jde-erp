@@ -186,8 +186,23 @@ export default function PurchasesPage() {
       expected: daysFromNowIso(7),
       items: importPreview.lines.length,
       total: importedTotal,
+      paid: 0,
       status: 'sent',
     });
+
+    for (const line of importPreview.lines) {
+      const matchedProduct = products.find((p) => `${p.part_number} - ${p.name}` === line.description);
+      await createPoItem({
+        po_id: id,
+        product_id: matchedProduct?.id ?? null,
+        part_number: matchedProduct?.part_number ?? '',
+        name: matchedProduct?.name ?? line.description,
+        qty: line.quantity,
+        unit_cost: line.unit_price,
+        line_total: line.quantity * line.unit_price,
+      });
+    }
+
     setFeedback(`${id} created from ${importPreview.fileName} — ${importPreview.lines.length} item(s), ₹${importedTotal.toLocaleString()} for ${importPreview.supplier}.`);
     setImportPreview(null);
     setActiveTab('po');
