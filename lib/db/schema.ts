@@ -17,6 +17,8 @@ export const TABLES: Record<string, TableSchema> = {
   po_items: { primaryKey: 'id', companyScoped: true },
   expenses: { primaryKey: 'id', companyScoped: true },
   users: { primaryKey: 'email', companyScoped: true },
+  stock_layers: { primaryKey: 'id', companyScoped: true },
+  stock_consumptions: { primaryKey: 'id', companyScoped: true },
 };
 
 export type TableName = keyof typeof TABLES;

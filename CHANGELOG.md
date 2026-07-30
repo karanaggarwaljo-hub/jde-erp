@@ -2,8 +2,11 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
-## In progress
-- FIFO costing for inventory: purchases of the same item at different prices are tracked as separate cost batches instead of overwriting one price field. Inventory's cost price and margin will reflect the oldest unsold batch (the batch the next sale will actually draw from) and update automatically as batches are used up.
+## 2026-07-31 — FIFO inventory costing
+- Buying the same part at a different price no longer overwrites or gets lost — each purchase is now tracked as its own priced batch, and each sale draws from the oldest unsold batch first (First In, First Out). Inventory's cost price and margin now reflect the oldest batch still in stock and update automatically as batches run out, instead of staying frozen at whatever price was set when the part was first added.
+- Editing or deleting a sale now precisely un-does what it drew from those batches, rather than a rough guess.
+- Manually correcting a stock count in Inventory (typing a new number) also opens or draws down a batch to match, so the batch records never drift out of sync with the actual stock count.
+- The cost price shown elsewhere in the app (Reports, Analytics, Dashboard, exports, AI daily briefing) now also updates to the latest purchase price, so it stays consistent with what Inventory shows.
 
 ## 2026-07-29 — Desktop app
 - Packaged the app as a real installable Windows program (its own window, Start Menu/Desktop shortcuts, uninstaller) instead of only a browser tab, using Electron. Download and install from the GitHub Releases page — no cloning code or manual setup files. First launch asks once for the Supabase connection details.

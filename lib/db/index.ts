@@ -111,6 +111,42 @@ export async function adjustRow(table: AdjustableTable, id: string, delta: numbe
   return data as Record<string, unknown>;
 }
 
+/** Opens a new FIFO cost batch for a product. When adjustStock is true (purchases, manual
+ *  stock increases) this also atomically bumps current_stock; pass false when current_stock
+ *  was already set some other way (new product with opening stock, historical backfill) so
+ *  it isn't double-counted. */
+export async function addStockLayer(
+  productId: string, qty: number, unitCost: number, sourcePoId: string | null, adjustStock: boolean
+): Promise<Record<string, unknown>> {
+  const { data, error } = await getClient()
+    .rpc('jde_add_stock_layer', { p_product_id: productId, p_qty: qty, p_unit_cost: unitCost, p_source_po_id: sourcePoId, p_adjust_stock: adjustStock })
+    .single();
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
+/** Decrements current_stock and draws `qty` from the oldest open FIFO batches first. Pass
+ *  invoiceItemId to record exactly what was drawn from where (so it can be reversed later via
+ *  restoreStockForInvoiceItem); pass null for one-off manual adjustments with nothing to reverse. */
+export async function consumeStockFifo(
+  productId: string, qty: number, invoiceItemId: string | null
+): Promise<Array<Record<string, unknown>>> {
+  const { data, error } = await getClient()
+    .rpc('jde_consume_stock_fifo', { p_product_id: productId, p_qty: qty, p_invoice_item_id: invoiceItemId });
+  if (error) throw error;
+  return (data as Array<Record<string, unknown>>) ?? [];
+}
+
+/** Reverses a prior consumeStockFifo call for one invoice line: hands the quantity back to the
+ *  exact batches it was drawn from, restores current_stock, and clears the consumption records. */
+export async function restoreStockForInvoiceItem(invoiceItemId: string): Promise<number> {
+  const { data, error } = await getClient()
+    .rpc('jde_restore_stock_layers_for_invoice_item', { p_invoice_item_id: invoiceItemId })
+    .single();
+  if (error) throw error;
+  return Number((data as { restored_qty: number }).restored_qty);
+}
+
 export async function deleteCompany(id: string): Promise<{ error: string } | { ok: true }> {
   const companies = (await listRows('companies')) as Array<{ id: string; is_active: boolean }>;
   const target = companies.find((c) => c.id === id);

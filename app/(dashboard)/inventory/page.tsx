@@ -4,6 +4,7 @@ import { ChangeEvent, useState } from 'react';
 import { Plus, Search, Filter, Edit, Trash2, AlertTriangle, Upload } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { parseInventoryFile } from '@/lib/client-import';
+import { addStockLayer, consumeStockFifo } from '@/lib/client-fifo';
 
 type Product = {
   id: string;
@@ -22,10 +23,26 @@ type Product = {
   location: string;
 };
 
+type StockLayer = { id: string; product_id: string; unit_cost: number; qty_remaining: number; created_at: string };
+
 const DEFAULT_CATEGORIES = ['Engine', 'Brakes', 'Filters', 'Clutch', 'Suspension', 'Electrical'];
 
 export default function InventoryPage() {
   const { rows: products, loading, create, update, remove, reload, activeCompany } = useCompanyTable<Product>('products');
+  const { rows: stockLayers } = useCompanyTable<StockLayer>('stock_layers');
+
+  // Cost price shown per product = the oldest FIFO batch that still has stock left (i.e. what the
+  // next sale will actually cost), falling back to the static cost_price field when a product has
+  // no batches at all (e.g. it's never been purchased through the FIFO-tracked flow).
+  const oldestOpenLayerByProduct = new Map<string, StockLayer>();
+  for (const layer of stockLayers) {
+    if (Number(layer.qty_remaining) <= 0) continue;
+    const current = oldestOpenLayerByProduct.get(layer.product_id);
+    if (!current || new Date(layer.created_at).getTime() < new Date(current.created_at).getTime()) {
+      oldestOpenLayerByProduct.set(layer.product_id, layer);
+    }
+  }
+  const fifoCostFor = (product: Product) => Number(oldestOpenLayerByProduct.get(product.id)?.unit_cost ?? product.cost_price);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
@@ -82,18 +99,36 @@ export default function InventoryPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const newCostPrice = Number(formData.cost_price);
+    const newStock = Number(formData.current_stock);
     const payload = {
       ...formData,
-      cost_price: Number(formData.cost_price),
+      cost_price: newCostPrice,
       mrp: Number(formData.mrp),
       sale_price: Number(formData.sale_price),
-      current_stock: Number(formData.current_stock),
+      current_stock: newStock,
       min_stock: Number(formData.min_stock),
     };
     if (editingProduct) {
-      await update(editingProduct.id, payload);
+      // current_stock is owned by the FIFO calls below, not this PATCH — writing it here too
+      // would double-count. A stock-unchanged edit (e.g. fixing a typo'd sale price) correctly
+      // touches only the static fields and opens no new batch.
+      const patch: Record<string, unknown> = { ...payload };
+      delete patch.current_stock;
+      await update(editingProduct.id, patch);
+      const delta = newStock - Number(editingProduct.current_stock);
+      if (delta > 0) {
+        await addStockLayer(editingProduct.id, delta, newCostPrice, null, true);
+      } else if (delta < 0) {
+        await consumeStockFifo(editingProduct.id, -delta, null);
+      }
     } else {
-      await create(payload);
+      const created = await create(payload);
+      if (newStock > 0) {
+        // adjustStock=false: current_stock was already set by the insert above, so this only
+        // opens the matching opening batch without bumping stock a second time.
+        await addStockLayer(created.id, newStock, newCostPrice, null, false);
+      }
     }
     setShowModal(false);
     setFeedback(editingProduct ? 'Part updated successfully.' : 'New part added to inventory.');
@@ -226,7 +261,8 @@ export default function InventoryPage() {
             {filteredProducts.map((p) => {
               const isLow = p.min_stock > 0 && p.current_stock <= p.min_stock;
               const isOut = p.current_stock <= 0;
-              const margin = p.sale_price > 0 ? ((p.sale_price - p.cost_price) / p.sale_price) * 100 : 0;
+              const fifoCost = fifoCostFor(p);
+              const margin = p.sale_price > 0 ? ((p.sale_price - fifoCost) / p.sale_price) * 100 : 0;
               const status = isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
               const statusBadge = isOut ? 'badge-danger' : isLow ? 'badge-warning' : 'badge-success';
               return (
@@ -239,7 +275,7 @@ export default function InventoryPage() {
                   <td style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{p.brand}</td>
                   <td><span className="badge badge-info">{p.category}</span></td>
                   <td className="text-right">
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>₹{p.cost_price}</span>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>₹{fifoCost}</span>
                     <span className="font-semibold">₹{p.sale_price}</span>
                   </td>
                   <td className="text-right">

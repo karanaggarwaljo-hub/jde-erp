@@ -3,6 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { Plus, Printer, Search, Eye, Pencil, Trash2, ArrowRight, ArrowLeft } from 'lucide-react';
 import { printCurrentPage } from '@/lib/client-export';
+import { consumeStockFifo, restoreStockForInvoiceItem } from '@/lib/client-fifo';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
 type SalesTab = 'invoices' | 'quotations';
@@ -28,7 +29,7 @@ function nextId(rows: Array<{ id: string }>, prefix: string) {
 }
 
 export default function SalesPage() {
-  const { rows: products, adjust: adjustProduct } = useCompanyTable<Product>('products');
+  const { rows: products } = useCompanyTable<Product>('products');
   const { rows: customers, adjust: adjustCustomer } = useCompanyTable<Customer>('customers');
   const { rows: invoices, loading: invoicesLoading, create: createInvoice, update: updateInvoice, remove: removeInvoice } = useCompanyTable<Invoice>('invoices');
   const { rows: quotations, loading: quotationsLoading } = useCompanyTable<Quotation>('quotations');
@@ -122,23 +123,20 @@ export default function SalesPage() {
     if (editingInvoice) {
       const oldItems = invoiceItems.filter((item) => item.invoice_id === editingInvoice.id);
 
-      // Net stock delta per product across both the reversal and the new lines, applied once each,
-      // so a product appearing in both the old and new item sets doesn't get overwritten mid-edit.
-      const stockDelta = new Map<string, number>();
+      // Fully undo the old invoice's stock effect first — handing qty back to the exact FIFO
+      // batches it drew from — then draw fresh for the new lines below. This is "delete old +
+      // create new," which is simpler than netting deltas per product (the old approach) and,
+      // unlike a plain number, a FIFO batch-consumption pattern can't be "netted" if a product
+      // appears on both the old and new lines.
       for (const item of oldItems) {
-        if (item.product_id) stockDelta.set(item.product_id, (stockDelta.get(item.product_id) ?? 0) + Number(item.qty));
+        if (item.product_id) await restoreStockForInvoiceItem(item.id);
       }
-      for (const line of lines) {
-        const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
-        if (product) stockDelta.set(product.id, (stockDelta.get(product.id) ?? 0) - line.qty);
-      }
-
       for (const item of oldItems) {
         await removeInvoiceItem(item.id);
       }
       for (const line of lines) {
         const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
-        await createInvoiceItem({
+        const createdItem = await createInvoiceItem({
           invoice_id: editingInvoice.id,
           product_id: product?.id ?? null,
           part_number: product?.part_number ?? '',
@@ -147,10 +145,9 @@ export default function SalesPage() {
           unit_price: line.price,
           line_total: line.qty * line.price,
         });
-      }
-      for (const [productId, delta] of stockDelta.entries()) {
-        if (delta === 0) continue;
-        await adjustProduct(productId, delta);
+        if (product) {
+          await consumeStockFifo(product.id, line.qty, createdItem.id);
+        }
       }
 
       const oldCustomerRow = customers.find((c) => c.name === editingInvoice.customer);
@@ -195,7 +192,7 @@ export default function SalesPage() {
 
     for (const line of lines) {
       const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
-      await createInvoiceItem({
+      const createdItem = await createInvoiceItem({
         invoice_id: id,
         product_id: product?.id ?? null,
         part_number: product?.part_number ?? '',
@@ -205,7 +202,7 @@ export default function SalesPage() {
         line_total: line.qty * line.price,
       });
       if (product) {
-        await adjustProduct(product.id, -line.qty);
+        await consumeStockFifo(product.id, line.qty, createdItem.id);
       }
     }
 
@@ -223,7 +220,7 @@ export default function SalesPage() {
     const items = invoiceItems.filter((item) => item.invoice_id === deleteCandidate.id);
     for (const item of items) {
       if (item.product_id) {
-        await adjustProduct(item.product_id, Number(item.qty));
+        await restoreStockForInvoiceItem(item.id);
       }
       await removeInvoiceItem(item.id);
     }

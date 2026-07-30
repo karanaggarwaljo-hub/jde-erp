@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useState } from 'react';
 import { Plus, FileCheck, Upload } from 'lucide-react';
 import { parseSpreadsheetFile, fileToBase64, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
+import { addStockLayer } from '@/lib/client-fifo';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
 type PurchaseTab = 'purchases' | 'invoices';
@@ -40,7 +41,7 @@ function cleanedGuess(text: string): string {
 }
 
 export default function PurchasesPage() {
-  const { rows: products, adjust: adjustProduct } = useCompanyTable<Product>('products');
+  const { rows: products } = useCompanyTable<Product>('products');
   const { rows: suppliers, create: createSupplier, adjust: adjustSupplier } = useCompanyTable<Supplier>('suppliers');
   const { rows: purchaseOrders, loading: poLoading, create: createPurchaseOrder, update: updatePurchaseOrder } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const { rows: grns, create: createGrn } = useCompanyTable<Grn>('grns');
@@ -90,13 +91,16 @@ export default function PurchasesPage() {
     return createSupplier({ name: name.trim(), category: '', phone: '', email: '', gstin: '', terms: 30, balance: 0 }) as Promise<Supplier>;
   }
 
-  async function receiveStock(poId: string, supplierName: string, items: Array<{ product_id: string | null; qty: number }>) {
+  async function receiveStock(poId: string, supplierName: string, items: Array<{ product_id: string | null; qty: number; unit_cost: number }>) {
     const grnId = nextId(grns, 'GRN');
     await createGrn({ id: grnId, po_number: poId, supplier: supplierName, received_at: new Date().toLocaleString('en-IN'), status: 'verified' });
 
     for (const item of items) {
       if (!item.product_id) continue;
-      await adjustProduct(item.product_id, Number(item.qty));
+      // Opens a new FIFO cost batch at this purchase's price and bumps current_stock —
+      // this is what lets buying the same part at a different price later show correctly
+      // in Inventory instead of silently overwriting/averaging into one static cost field.
+      await addStockLayer(item.product_id, Number(item.qty), Number(item.unit_cost), poId, true);
     }
   }
 
@@ -120,7 +124,7 @@ export default function PurchasesPage() {
         unit_cost: line.unit_price,
         line_total: line.quantity * line.unit_price,
       });
-      lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity });
+      lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity, unit_cost: line.unit_price });
     }
 
     await receiveStock(id, supplierRow.name, lineItems);
@@ -145,7 +149,7 @@ export default function PurchasesPage() {
     await receiveStock(
       poId,
       order.supplier,
-      poItems.filter((item) => item.po_id === poId).map((item) => ({ product_id: item.product_id, qty: item.qty }))
+      poItems.filter((item) => item.po_id === poId).map((item) => ({ product_id: item.product_id, qty: item.qty, unit_cost: item.unit_cost }))
     );
     setFeedback(`${poId} marked received and added to stock.`);
   };
@@ -216,7 +220,7 @@ export default function PurchasesPage() {
         unit_cost: line.unit_price,
         line_total: line.quantity * line.unit_price,
       });
-      lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity });
+      lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity, unit_cost: line.unit_price });
     }
 
     await receiveStock(id, supplierRow.name, lineItems);
