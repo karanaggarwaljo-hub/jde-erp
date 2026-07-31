@@ -2,6 +2,10 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-01 — Recording a purchase of a brand-new part
+- Fixed: typing a part into Purchases that wasn't already in Inventory silently did nothing — no new item, no stock added — because only new *suppliers* got auto-created, not new *products*. Buying something for the first time now correctly adds it to Inventory (at the price you just paid) and stocks it, the same way a new supplier already got created automatically.
+- Fixed: the Product field on a new purchase row used to pre-fill with your first existing part, making it look like you couldn't type anything else. Every row now starts blank with a hint showing whether it matched an existing part or will create a new one.
+
 ## 2026-07-31 — FIFO inventory costing
 - Buying the same part at a different price no longer overwrites or gets lost — each purchase is now tracked as its own priced batch, and each sale draws from the oldest unsold batch first (First In, First Out). Inventory's cost price and margin now reflect the oldest batch still in stock and update automatically as batches run out, instead of staying frozen at whatever price was set when the part was first added.
 - Editing or deleting a sale now precisely un-does what it drew from those batches, rather than a rough guess.

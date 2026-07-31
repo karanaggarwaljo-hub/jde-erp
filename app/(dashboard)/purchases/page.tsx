@@ -41,7 +41,7 @@ function cleanedGuess(text: string): string {
 }
 
 export default function PurchasesPage() {
-  const { rows: products } = useCompanyTable<Product>('products');
+  const { rows: products, create: createProduct } = useCompanyTable<Product>('products');
   const { rows: suppliers, create: createSupplier, adjust: adjustSupplier } = useCompanyTable<Supplier>('suppliers');
   const { rows: purchaseOrders, loading: poLoading, create: createPurchaseOrder, update: updatePurchaseOrder } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const { rows: grns, create: createGrn } = useCompanyTable<Grn>('grns');
@@ -76,7 +76,7 @@ export default function PurchasesPage() {
     setPurchaseDate(todayIso());
     setPaymentStatus('unpaid');
     setAmountPaid(0);
-    setLines(partOptions.length > 0 ? [{ description: partOptions[0].value, quantity: 1, unit_price: partOptions[0].price }] : []);
+    setLines([{ description: '', quantity: 1, unit_price: 0 }]);
     setImportError('');
     setShowPurchaseModal(true);
   };
@@ -89,6 +89,37 @@ export default function PurchasesPage() {
     const existing = suppliers.find((s) => s.name.toLowerCase() === name.trim().toLowerCase());
     if (existing) return existing;
     return createSupplier({ name: name.trim(), category: '', phone: '', email: '', gstin: '', terms: 30, balance: 0 }) as Promise<Supplier>;
+  }
+
+  /** Matches a typed line description against an existing part; if nothing matches, auto-creates
+   *  a new Inventory item from it — same pattern as resolveSupplier above, so buying a brand-new
+   *  part works the first time instead of silently doing nothing because nothing matched. */
+  async function resolveProduct(description: string, unitCost: number): Promise<Product | null> {
+    const trimmed = description.trim();
+    if (!trimmed) return null;
+    const existing = products.find((p) => `${p.part_number} - ${p.name}` === trimmed);
+    if (existing) return existing;
+
+    const separatorIndex = trimmed.indexOf(' - ');
+    const partNumber = separatorIndex > 0 ? trimmed.slice(0, separatorIndex).trim() : `SP-${String(products.length + 1).padStart(3, '0')}`;
+    const name = separatorIndex > 0 ? trimmed.slice(separatorIndex + 3).trim() : trimmed;
+
+    return createProduct({
+      part_number: partNumber,
+      oem_number: '',
+      name: name || trimmed,
+      brand: '',
+      category: '',
+      compatibility: '',
+      // Sale price starts equal to cost (0% margin) rather than a guessed markup — an honest
+      // placeholder that's obviously not final, editable in Inventory once a real price is set.
+      cost_price: unitCost,
+      mrp: unitCost,
+      sale_price: unitCost,
+      current_stock: 0,
+      min_stock: 0,
+      location: '',
+    }) as Promise<Product>;
   }
 
   async function receiveStock(poId: string, supplierName: string, items: Array<{ product_id: string | null; qty: number; unit_cost: number }>) {
@@ -114,7 +145,8 @@ export default function PurchasesPage() {
 
     const lineItems = [];
     for (const line of lines) {
-      const matchedProduct = products.find((p) => `${p.part_number} - ${p.name}` === line.description);
+      if (!line.description.trim()) continue;
+      const matchedProduct = await resolveProduct(line.description, line.unit_price);
       await createPoItem({
         po_id: id,
         product_id: matchedProduct?.id ?? null,
@@ -210,7 +242,8 @@ export default function PurchasesPage() {
 
     const lineItems = [];
     for (const line of importPreview.lines) {
-      const matchedProduct = products.find((p) => `${p.part_number} - ${p.name}` === line.description);
+      if (!line.description.trim()) continue;
+      const matchedProduct = await resolveProduct(line.description, line.unit_price);
       await createPoItem({
         po_id: id,
         product_id: matchedProduct?.id ?? null,
@@ -315,8 +348,10 @@ export default function PurchasesPage() {
                 <div key={index} className="form-grid-4 mb-2">
                   <div className="form-group">
                     <label className="form-label">Product</label>
-                    <input list="po-part-options" className="form-input" value={line.description} onChange={(event) => updateLine(index, { description: event.target.value })} />
-                    {matched && <small style={{ color: 'var(--text-muted)' }}>Stock: {matched.stock}</small>}
+                    <input list="po-part-options" className="form-input" placeholder="Type a new part name or select an existing one" value={line.description} onChange={(event) => updateLine(index, { description: event.target.value })} />
+                    {matched
+                      ? <small style={{ color: 'var(--text-muted)' }}>Stock: {matched.stock}</small>
+                      : line.description.trim() && <small style={{ color: 'var(--text-muted)' }}>New part — will be added to Inventory</small>}
                   </div>
                   <div className="form-group"><label className="form-label">Category</label><input type="text" className="form-input" value={matched?.category ?? '-'} disabled /></div>
                   <div className="form-group"><label className="form-label">Quantity</label><input type="number" min="1" className="form-input" value={line.quantity} onChange={(event) => updateLine(index, { quantity: Number(event.target.value) })} /></div>
@@ -326,7 +361,7 @@ export default function PurchasesPage() {
             })}
 
             <div className="flex justify-between items-center mt-2">
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLines((current) => [...current, { description: partOptions[0]?.value ?? '', quantity: 1, unit_price: partOptions[0]?.price ?? 0 }])}>+ Add Item Row</button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLines((current) => [...current, { description: '', quantity: 1, unit_price: 0 }])}>+ Add Item Row</button>
               {lines.length > 1 && <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={() => setLines((current) => current.slice(0, -1))}>Remove Last Row</button>}
             </div>
           </div>
