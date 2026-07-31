@@ -89,7 +89,7 @@ export default function SalesPage() {
   const openInvoice = (presetCustomer?: string) => {
     setEditingInvoice(null);
     setCustomer(presetCustomer ?? customers[0]?.name ?? '');
-    setLines(partOptions.length > 0 ? [{ part: partOptions[0].value, qty: 1, price: partOptions[0].price }] : []);
+    setLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0 }] : []);
     setDiscountPercent(0);
     setGstPercent(18);
     setInvoiceDate(todayIso());
@@ -135,6 +135,7 @@ export default function SalesPage() {
         await removeInvoiceItem(item.id);
       }
       for (const line of lines) {
+        if (!line.part.trim()) continue;
         const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
         const createdItem = await createInvoiceItem({
           invoice_id: editingInvoice.id,
@@ -162,7 +163,7 @@ export default function SalesPage() {
       await updateInvoice(editingInvoice.id, {
         customer,
         date: invoiceDate,
-        items: lines.reduce((sum, line) => sum + line.qty, 0),
+        items: lines.filter((line) => line.part.trim()).reduce((sum, line) => sum + line.qty, 0),
         total,
         paid: paidAmount,
         status: paidAmount >= total && total > 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid',
@@ -191,6 +192,7 @@ export default function SalesPage() {
     });
 
     for (const line of lines) {
+      if (!line.part.trim()) continue;
       const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
       const createdItem = await createInvoiceItem({
         invoice_id: id,
@@ -369,13 +371,13 @@ export default function SalesPage() {
                 {lines.map((line, index) => {
                   const category = partOptions.find((part) => part.value === line.part)?.category ?? '-';
                   return <div key={index} className="form-grid-4 mb-2">
-                    <div className="form-group"><label className="form-label">Select Part</label><select className="form-input form-select" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }}>{partOptions.map((part) => <option key={part.value}>{part.value}</option>)}</select></div>
+                    <div className="form-group"><label className="form-label">Select Part</label><select className="form-input form-select" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }}><option value="" disabled>Select a part…</option>{partOptions.map((part) => <option key={part.value}>{part.value}</option>)}</select></div>
                     <div className="form-group"><label className="form-label">Category</label><input type="text" className="form-input" value={category} disabled /></div>
                     <div className="form-group"><label className="form-label">Qty</label><input type="number" min="1" className="form-input" value={line.qty} onChange={(event) => updateLine(index, { qty: Number(event.target.value) })} /></div>
                     <div className="form-group"><label className="form-label">Unit Price (₹)</label><input type="number" min="0" className="form-input" value={line.price} onChange={(event) => updateLine(index, { price: Number(event.target.value) })} /></div>
                   </div>;
                 })}
-                {partOptions.length > 0 && <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setLines((current) => [...current, { part: partOptions[0].value, qty: 1, price: partOptions[0].price }])}>+ Add Item Row</button>}
+                {partOptions.length > 0 && <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setLines((current) => [...current, { part: '', qty: 1, price: 0 }])}>+ Add Item Row</button>}
               </div>
               <div className="form-grid-2">
                 <div className="form-group"><label className="form-label">Discount (%)</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={discountPercent} onChange={(event) => setDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} /></div>
