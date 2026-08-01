@@ -4,7 +4,7 @@ import { ChangeEvent, useState } from 'react';
 import { Plus, Search, Filter, Edit, Trash2, AlertTriangle, Upload, Sparkles } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { parseInventoryFile } from '@/lib/client-import';
-import { addStockLayer, consumeStockFifo } from '@/lib/client-fifo';
+import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 
 type Product = {
   id: string;
@@ -146,6 +146,11 @@ export default function InventoryPage() {
         await addStockLayer(editingProduct.id, delta, newCostPrice, null, true);
       } else if (delta < 0) {
         await consumeStockFifo(editingProduct.id, -delta, null);
+      } else if (newCostPrice !== Number(editingProduct.cost_price)) {
+        // Stock didn't change, only the cost figure did — correct the batch the display is
+        // currently reading from instead of silently leaving it stale (the bug that made typing
+        // a new cost price not actually change the shown cost/margin).
+        await correctOldestLayerCost(editingProduct.id, newCostPrice);
       }
     } else {
       const created = await create(payload);

@@ -147,6 +147,19 @@ export async function restoreStockForInvoiceItem(invoiceItemId: string): Promise
   return Number((data as { restored_qty: number }).restored_qty);
 }
 
+/** Corrects the cost of the batch a product's displayed cost/margin is currently reading from —
+ *  for editing the Cost Price field on its own, with no stock quantity change (which is why
+ *  addStockLayer/consumeStockFifo wouldn't otherwise touch it). Returns null if the product has
+ *  no open batch to correct (nothing to do; the static cost_price field is already the source of
+ *  truth in that case, and gets updated by the normal product PATCH regardless). */
+export async function correctOldestLayerCost(productId: string, newCost: number): Promise<Record<string, unknown> | null> {
+  const { data, error } = await getClient()
+    .rpc('jde_correct_oldest_layer_cost', { p_product_id: productId, p_new_cost: newCost })
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Record<string, unknown> | null) ?? null;
+}
+
 export async function deleteCompany(id: string): Promise<{ error: string } | { ok: true }> {
   const companies = (await listRows('companies')) as Array<{ id: string; is_active: boolean }>;
   const target = companies.find((c) => c.id === id);

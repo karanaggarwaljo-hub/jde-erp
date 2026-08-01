@@ -32,3 +32,10 @@ export function consumeStockFifo(productId: string, qty: number, invoiceItemId: 
 export function restoreStockForInvoiceItem(invoiceItemId: string) {
   return postJson<{ restored_qty: number }>('/api/fifo/restore', { invoice_item_id: invoiceItemId }).then((r) => r.restored_qty);
 }
+
+/** Corrects the cost of the batch a product's displayed cost/margin currently reads from — for
+ *  editing the Cost Price field with no stock quantity change alongside it. No-op if the product
+ *  has no open batch (nothing to correct). */
+export function correctOldestLayerCost(productId: string, newCost: number) {
+  return postJson<{ layer: StockLayer | null }>('/api/fifo/correct-cost', { product_id: productId, new_cost: newCost }).then((r) => r.layer);
+}
