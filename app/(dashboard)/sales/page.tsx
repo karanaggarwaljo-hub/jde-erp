@@ -28,6 +28,12 @@ function nextId(rows: Array<{ id: string }>, prefix: string) {
   return `${prefix}-${maxNum + 1}`;
 }
 
+// Leaving the customer field blank means a walk-in sale — no account to bill, so it's stored
+// under this fixed label rather than as an empty string. Kept separate from the `customer` form
+// state (which stays '' for a walk-in) so the customer-lookup logic below never has to special-case
+// it — an empty string simply never matches a real customer.
+const WALK_IN_CUSTOMER = 'Walk-in Customer';
+
 export default function SalesPage() {
   const { rows: products } = useCompanyTable<Product>('products');
   const { rows: customers, adjust: adjustCustomer } = useCompanyTable<Customer>('customers');
@@ -63,6 +69,7 @@ export default function SalesPage() {
   const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
 
   const selectedCustomer = customers.find((c) => c.name === customer);
+  const customerLabel = customer.trim() || WALK_IN_CUSTOMER;
   const editingOldOutstanding = editingInvoice ? Number(editingInvoice.total) - Number(editingInvoice.paid) : 0;
   const isEditingSameCustomer = !!editingInvoice && editingInvoice.customer === customer;
   const balanceBeforeThisInvoice = Number(selectedCustomer?.balance ?? 0) - (isEditingSameCustomer ? editingOldOutstanding : 0);
@@ -88,7 +95,7 @@ export default function SalesPage() {
 
   const openInvoice = (presetCustomer?: string) => {
     setEditingInvoice(null);
-    setCustomer(presetCustomer ?? customers[0]?.name ?? '');
+    setCustomer(presetCustomer ?? '');
     setLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0 }] : []);
     setDiscountPercent(0);
     setGstPercent(18);
@@ -101,7 +108,7 @@ export default function SalesPage() {
   const openEditInvoice = (invoice: Invoice) => {
     const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
     setEditingInvoice(invoice);
-    setCustomer(invoice.customer);
+    setCustomer(invoice.customer === WALK_IN_CUSTOMER ? '' : invoice.customer);
     setInvoiceDate(invoice.date);
     setDiscountPercent(Number(invoice.discount_percent));
     setGstPercent(18);
@@ -161,7 +168,7 @@ export default function SalesPage() {
       }
 
       await updateInvoice(editingInvoice.id, {
-        customer,
+        customer: customerLabel,
         date: invoiceDate,
         items: lines.filter((line) => line.part.trim()).reduce((sum, line) => sum + line.qty, 0),
         total,
@@ -180,7 +187,7 @@ export default function SalesPage() {
     const id = nextId(invoices, 'INV');
     await createInvoice({
       id,
-      customer,
+      customer: customerLabel,
       date: invoiceDate,
       items: lines.reduce((sum, line) => sum + line.qty, 0),
       total,
@@ -214,7 +221,7 @@ export default function SalesPage() {
 
     setShowInvoiceModal(false);
     setActiveTab('invoices');
-    setFeedback(`${id} generated for ${customer}.`);
+    setFeedback(`${id} generated for ${customerLabel}.`);
   };
 
   const confirmDeleteInvoice = async () => {
@@ -240,7 +247,7 @@ export default function SalesPage() {
     <div>
       <div className="page-header">
         <div><h1 className="page-title">Sales Management</h1><p className="page-subtitle">Invoices, billing and quotations</p></div>
-        <button className="btn btn-primary" onClick={() => openInvoice()} disabled={customers.length === 0}><Plus size={16} /> Create Sales Invoice</button>
+        <button className="btn btn-primary" onClick={() => openInvoice()}><Plus size={16} /> Create Sales Invoice</button>
       </div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
@@ -354,7 +361,7 @@ export default function SalesPage() {
       {deleteCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="delete-invoice-title">
         <div className="modal-header"><h3 id="delete-invoice-title" className="modal-title">Delete invoice?</h3></div>
         <div className="modal-body">
-          <p>This will delete <strong>{deleteCandidate.id}</strong>, add its items back to stock, and reduce {deleteCandidate.customer}&apos;s balance by the outstanding ₹{(Number(deleteCandidate.total) - Number(deleteCandidate.paid)).toLocaleString()}.</p>
+          <p>This will delete <strong>{deleteCandidate.id}</strong> and add its items back to stock{customers.some((c) => c.name === deleteCandidate.customer) ? ` and reduce ${deleteCandidate.customer}'s balance by the outstanding ₹${(Number(deleteCandidate.total) - Number(deleteCandidate.paid)).toLocaleString()}` : ''}.</p>
         </div>
         <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setDeleteCandidate(null)}>Cancel</button><button className="btn btn-danger" onClick={confirmDeleteInvoice}>Delete Invoice</button></div>
       </div></div>}
@@ -364,7 +371,7 @@ export default function SalesPage() {
           <form onSubmit={saveInvoice}>
             <div className="modal-header"><h3 id="invoice-modal-title" className="modal-title">{editingInvoice ? `Edit ${editingInvoice.id}` : 'Create Sales Invoice'}</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>✕</button></div>
             <div className="modal-body flex flex-col gap-4">
-              <div className="form-grid-2"><div className="form-group"><label className="form-label">Customer *</label><select className="form-input form-select" value={customer} onChange={(event) => setCustomer(event.target.value)}>{customers.map((c) => <option key={c.id}>{c.name}</option>)}</select></div>
+              <div className="form-grid-2"><div className="form-group"><label className="form-label">Customer</label><select className="form-input form-select" value={customer} onChange={(event) => setCustomer(event.target.value)}><option value="">Walk-in Sale (no customer)</option>{customers.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div>
                 <div className="form-group"><label className="form-label">Invoice Date</label><input type="date" className="form-input" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} /></div></div>
               <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Invoice Line Items</h4>
                 {partOptions.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Add parts in Inventory before creating an invoice.</p>}
@@ -413,7 +420,7 @@ export default function SalesPage() {
                 </div>
               )}
             </div>
-            <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || !customer}>{editingInvoice ? 'Save Changes' : 'Generate & Save Invoice'}</button></div>
+            <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total}>{editingInvoice ? 'Save Changes' : 'Generate & Save Invoice'}</button></div>
           </form>
         </div></div>
       )}
