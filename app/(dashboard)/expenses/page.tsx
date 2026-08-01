@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Sparkles } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
 type Expense = { id: string; company_id: string; category: string; description: string; amount: number; date: string; paid_by: string; mode: string };
@@ -11,6 +11,7 @@ export default function ExpensesPage() {
 
   const [showModal, setShowModal] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [categorizing, setCategorizing] = useState(false);
   const [newExp, setNewExp] = useState({
     category: 'transport',
     description: '',
@@ -18,6 +19,26 @@ export default function ExpensesPage() {
     paid_by: 'Karan Aggarwal',
     mode: 'upi',
   });
+
+  const suggestCategory = async () => {
+    if (!newExp.description.trim()) return;
+    setCategorizing(true);
+    try {
+      const res = await fetch('/api/ai-categorize-expense', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: newExp.description }),
+      });
+      const body = await res.json();
+      if (res.ok && body.category) {
+        setNewExp((current) => ({ ...current, category: body.category }));
+      }
+    } catch {
+      // Suggestion is a convenience, not required — the category dropdown stays usable either way.
+    } finally {
+      setCategorizing(false);
+    }
+  };
 
   const totalExpense = expenses.reduce((acc, curr) => acc + curr.amount, 0);
 
@@ -126,7 +147,7 @@ export default function ExpensesPage() {
               <div className="modal-body flex flex-col gap-4">
                 <div className="form-grid-2">
                   <div className="form-group">
-                    <label className="form-label">Category *</label>
+                    <label className="form-label flex items-center gap-1">Category * {categorizing && <Sparkles size={12} className="text-brand spin" />}</label>
                     <select className="form-input form-select" value={newExp.category} onChange={e => setNewExp({ ...newExp, category: e.target.value })}>
                       <option value="rent">Rent</option>
                       <option value="salaries">Salaries</option>
@@ -145,7 +166,8 @@ export default function ExpensesPage() {
 
                 <div className="form-group">
                   <label className="form-label">Expense Description *</label>
-                  <input className="form-input" required placeholder="e.g. Courier charges for spare shipment" value={newExp.description} onChange={e => setNewExp({ ...newExp, description: e.target.value })} />
+                  <input className="form-input" required placeholder="e.g. Courier charges for spare shipment" value={newExp.description} onChange={e => setNewExp({ ...newExp, description: e.target.value })} onBlur={suggestCategory} />
+                  <small style={{ color: 'var(--text-muted)' }}>Category is suggested automatically once you finish typing this — override it anytime.</small>
                 </div>
 
                 <div className="form-grid-2">

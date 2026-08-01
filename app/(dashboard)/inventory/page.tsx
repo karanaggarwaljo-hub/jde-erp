@@ -1,7 +1,7 @@
 'use client';
 
 import { ChangeEvent, useState } from 'react';
-import { Plus, Search, Filter, Edit, Trash2, AlertTriangle, Upload } from 'lucide-react';
+import { Plus, Search, Filter, Edit, Trash2, AlertTriangle, Upload, Sparkles } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { parseInventoryFile } from '@/lib/client-import';
 import { addStockLayer, consumeStockFifo } from '@/lib/client-fifo';
@@ -51,6 +51,7 @@ export default function InventoryPage() {
   const [feedback, setFeedback] = useState('');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
+  const [suggesting, setSuggesting] = useState(false);
 
   const [formData, setFormData] = useState({
     part_number: '',
@@ -77,6 +78,30 @@ export default function InventoryPage() {
     const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
     return matchesSearch && matchesCategory;
   });
+
+  const suggestPartDetails = async () => {
+    if (!formData.name.trim()) return;
+    setSuggesting(true);
+    try {
+      const res = await fetch('/api/ai-suggest-part-details', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: formData.name, oem_number: formData.oem_number, existingCategories: categoryOptions }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setFormData((current) => ({
+          ...current,
+          category: body.category || current.category,
+          brand: !current.brand && body.brand ? body.brand : current.brand,
+        }));
+      }
+    } catch {
+      // Suggestion is a convenience, not required — both fields stay freely editable either way.
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const handleOpenAdd = () => {
     setEditingProduct(null);
@@ -333,16 +358,17 @@ export default function InventoryPage() {
 
                 <div className="form-group">
                   <label className="form-label">Part Name / Description *</label>
-                  <input className="form-input" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
+                  <input className="form-input" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} onBlur={suggestPartDetails} />
+                  <small style={{ color: 'var(--text-muted)' }}>Brand and category are suggested once you finish typing this — override either anytime.</small>
                 </div>
 
                 <div className="form-grid-2">
                   <div className="form-group">
-                    <label className="form-label">Brand</label>
+                    <label className="form-label flex items-center gap-1">Brand {suggesting && <Sparkles size={12} className="text-brand spin" />}</label>
                     <input className="form-input" value={formData.brand} onChange={e => setFormData({ ...formData, brand: e.target.value })} />
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Category</label>
+                    <label className="form-label flex items-center gap-1">Category {suggesting && <Sparkles size={12} className="text-brand spin" />}</label>
                     <input
                       className="form-input"
                       list="category-options"

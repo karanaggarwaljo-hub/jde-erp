@@ -1,8 +1,9 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { Plus, Search, Phone, Mail } from 'lucide-react';
+import { Plus, Search, Phone, Mail, Sparkles } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import PaymentReminderModal from '@/components/PaymentReminderModal';
 
 type Supplier = { id: string; company_id: string; name: string; category: string; phone: string; email: string; gstin: string; terms: number; balance: number };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string };
@@ -16,8 +17,17 @@ export default function SuppliersPage() {
   const [showModal, setShowModal] = useState(false);
   const [paymentSupplier, setPaymentSupplier] = useState<Supplier | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
+  const [reminderSupplier, setReminderSupplier] = useState<Supplier | null>(null);
   const [feedback, setFeedback] = useState('');
   const [form, setForm] = useState({ name: '', category: categoryOptions[0], phone: '', email: '', gstin: '', terms: 30 });
+
+  function overdueContext(supplierName: string): string {
+    const overdue = purchaseOrders
+      .filter((po) => po.supplier === supplierName && po.status === 'received' && Number(po.total) > Number(po.paid))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (overdue.length === 0) return '';
+    return `${overdue.length} unpaid purchase order${overdue.length > 1 ? 's' : ''}, oldest ${overdue[0].id} dated ${overdue[0].date}.`;
+  }
 
   const filteredSuppliers = suppliers.filter((supplier) => {
     const query = search.toLowerCase();
@@ -127,7 +137,10 @@ export default function SuppliersPage() {
                 <strong className={supplier.balance > 0 ? 'text-warning' : 'text-success'}>₹{supplier.balance.toLocaleString()}</strong>
               </td>
               <td className="text-center">
-                <button className="btn btn-secondary btn-sm" disabled={!supplier.balance} onClick={() => openPayment(supplier)}>Pay Vendor</button>
+                <div className="flex gap-1 justify-center">
+                  <button className="btn btn-secondary btn-sm" disabled={!supplier.balance} onClick={() => openPayment(supplier)}>Pay Vendor</button>
+                  <button className="btn btn-ghost btn-sm" aria-label={`Draft payment follow-up for ${supplier.name}`} title="Draft a payment follow-up message" disabled={!supplier.balance} onClick={() => setReminderSupplier(supplier)}><Sparkles size={14} /></button>
+                </div>
               </td>
             </tr>
           ))}
@@ -152,5 +165,15 @@ export default function SuppliersPage() {
       <div className="modal-body flex flex-col gap-4"><p>Outstanding balance for <strong>{paymentSupplier.name}</strong>: ₹{paymentSupplier.balance.toLocaleString()}</p><div className="form-group"><label className="form-label">Payment Amount (₹)</label><input type="number" min="1" max={paymentSupplier.balance} className="form-input" value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} /></div></div>
       <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setPaymentSupplier(null)}>Cancel</button><button type="submit" className="btn btn-primary">Record Payment</button></div>
     </form></div></div>}
+
+    {reminderSupplier && (
+      <PaymentReminderModal
+        direction="payable"
+        name={reminderSupplier.name}
+        balance={reminderSupplier.balance}
+        context={overdueContext(reminderSupplier.name)}
+        onClose={() => setReminderSupplier(null)}
+      />
+    )}
   </div>;
 }

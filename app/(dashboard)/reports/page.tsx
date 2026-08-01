@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Download, Printer } from 'lucide-react';
 import { printCurrentPage } from '@/lib/client-export';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import AIReportSummary from '@/components/AIReportSummary';
 
 type ReportType = 'pnl' | 'sales' | 'stock' | 'gst' | 'aging';
 
@@ -93,10 +94,20 @@ export default function ReportsPage() {
   const totalReceivablesDue = AGE_BUCKETS.reduce((t, b) => t + receivablesAging.totals[b], 0);
   const totalPayablesDue = AGE_BUCKETS.reduce((t, b) => t + payablesAging.totals[b], 0);
 
+  const summaryData: Record<ReportType, unknown> = {
+    pnl: { total_revenue: totalRevenue, total_purchase_spend: totalPurchaseSpend, gross_margin: grossMargin, total_expenses: totalExpenses, net_result: netResult },
+    sales: { invoice_count: invoices.length, recent_invoices: salesRows.slice(0, 10).map((r) => ({ id: r.id, customer: r.customer, date: r.date, total: r.total, status: r.status })) },
+    stock: { total_stock_units: totalStockUnits, by_category: stockRows.map(([category, row]) => ({ category, ...row })) },
+    gst: { taxable_sales: Math.round(taxableSales), output_gst: Math.round(outputGst), input_tax_credit: Math.round(inputTaxCredit), net_gst_payable: Math.round(Math.max(0, netGstPayable)) },
+    aging: { total_receivables_due: totalReceivablesDue, total_payables_due: totalPayablesDue, receivables_by_bucket: receivablesAging.totals, payables_by_bucket: payablesAging.totals },
+  };
+
   return <div>
     <div className="page-header"><div><h1 className="page-title">Financial & Operational Reports</h1><p className="page-subtitle">Generate P&L statements, GST filing summaries, stock valuation and sales audit reports</p></div><div className="flex gap-2"><button className="btn btn-secondary" onClick={printCurrentPage}><Printer size={16} /> Print Report</button><a className="btn btn-primary" href={`/api/export?type=${reportType}`} download onClick={() => setFeedback('Report export started.')}><Download size={16} /> Export CSV</a></div></div>
     {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
     <div className="tabs mb-6 report-tabs"><button className={`tab ${reportType === 'pnl' ? 'active' : ''}`} onClick={() => setReportType('pnl')}>Profit & Loss</button><button className={`tab ${reportType === 'sales' ? 'active' : ''}`} onClick={() => setReportType('sales')}>Sales Summary</button><button className={`tab ${reportType === 'stock' ? 'active' : ''}`} onClick={() => setReportType('stock')}>Stock Valuation</button><button className={`tab ${reportType === 'gst' ? 'active' : ''}`} onClick={() => setReportType('gst')}>GST Summary</button><button className={`tab ${reportType === 'aging' ? 'active' : ''}`} onClick={() => setReportType('aging')}>Aging</button></div>
+
+    <AIReportSummary reportType={reportType} data={summaryData[reportType]} />
 
     {reportType === 'pnl' && <div className="card"><div className="card-header"><div><h3 className="card-title">Profit & Loss Statement (All Time)</h3><p className="text-muted text-sm">Approximate — purchases used as a cost-of-goods proxy since per-sale line items aren&apos;t tracked</p></div><span className="badge badge-success">{netResult >= 0 ? 'Profitable' : 'Loss'}</span></div><div className="report-summary">
       <div className="report-line report-strong"><span>Total Sales Revenue</span><strong className="text-success">₹{totalRevenue.toLocaleString()}</strong></div><div className="report-line indent"><span>Less: Purchases (COGS proxy)</span><span>- ₹{totalPurchaseSpend.toLocaleString()}</span></div><div className="report-line report-strong"><span>Gross Margin</span><strong className="text-brand">₹{grossMargin.toLocaleString()}</strong></div><div className="report-line indent"><span>Operating Expenses</span><span>- ₹{totalExpenses.toLocaleString()}</span></div><div className="report-total"><div><strong>Net Result</strong><small>After purchases and operational costs</small></div><strong>₹{netResult.toLocaleString()}</strong></div>

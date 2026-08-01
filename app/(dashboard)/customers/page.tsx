@@ -1,8 +1,9 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { Plus, Phone, Mail, MapPin } from 'lucide-react';
+import { Plus, Phone, Mail, MapPin, Sparkles } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import PaymentReminderModal from '@/components/PaymentReminderModal';
 
 const emptyForm = { name: '', phone: '', email: '', gstin: '', address: '', type: 'retail', credit_limit: 50000 };
 
@@ -27,8 +28,17 @@ export default function CustomersPage() {
   const [showModal, setShowModal] = useState(false);
   const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
+  const [reminderCustomer, setReminderCustomer] = useState<Customer | null>(null);
   const [feedback, setFeedback] = useState('');
   const [form, setForm] = useState(emptyForm);
+
+  function overdueContext(customerName: string): string {
+    const overdue = invoices
+      .filter((inv) => inv.customer === customerName && Number(inv.total) > Number(inv.paid))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (overdue.length === 0) return '';
+    return `${overdue.length} unpaid invoice${overdue.length > 1 ? 's' : ''}, oldest ${overdue[0].id} dated ${overdue[0].date}.`;
+  }
 
   const saveCustomer = async (event: FormEvent) => {
     event.preventDefault();
@@ -85,7 +95,10 @@ export default function CustomersPage() {
             <div className="directory-details"><div className="flex items-center gap-2"><Phone size={13} /><span>{customer.phone || 'No phone'}</span></div><div className="flex items-center gap-2"><Mail size={13} /><span>{customer.email || 'No email'}</span></div><div className="flex items-center gap-2"><MapPin size={13} /><span className="truncate">{customer.address || 'No address'}</span></div></div>
           </div>
           <div className="directory-financials"><div><small>Outstanding</small><strong className={customer.balance > 0 ? 'text-danger' : 'text-success'}>₹{customer.balance.toLocaleString()}</strong></div><div><small>Credit Limit</small><strong>₹{customer.credit_limit.toLocaleString()}</strong></div></div>
-          <button className="btn btn-secondary btn-sm mt-2 w-full" style={{ justifyContent: 'center' }} disabled={!customer.balance} onClick={() => openPayment(customer)}>Received</button>
+          <div className="flex gap-2 mt-2">
+            <button className="btn btn-secondary btn-sm w-full" style={{ justifyContent: 'center' }} disabled={!customer.balance} onClick={() => openPayment(customer)}>Received</button>
+            <button className="btn btn-ghost btn-sm" aria-label={`Draft payment reminder for ${customer.name}`} title="Draft a payment reminder" disabled={!customer.balance} onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /></button>
+          </div>
         </div>)}
       </div>
 
@@ -106,6 +119,16 @@ export default function CustomersPage() {
         <div className="modal-body flex flex-col gap-4"><p>Outstanding balance for <strong>{paymentCustomer.name}</strong>: ₹{paymentCustomer.balance.toLocaleString()}</p><div className="form-group"><label className="form-label">Amount Received (₹)</label><input type="number" min="1" max={paymentCustomer.balance} className="form-input" value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} /></div></div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setPaymentCustomer(null)}>Cancel</button><button type="submit" className="btn btn-primary">Record Payment</button></div>
       </form></div></div>}
+
+      {reminderCustomer && (
+        <PaymentReminderModal
+          direction="receivable"
+          name={reminderCustomer.name}
+          balance={reminderCustomer.balance}
+          context={overdueContext(reminderCustomer.name)}
+          onClose={() => setReminderCustomer(null)}
+        />
+      )}
     </div>
   );
 }
