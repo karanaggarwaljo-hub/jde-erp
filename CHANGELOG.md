@@ -2,6 +2,11 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-01 — Reports page redesign
+- Every report tab now leads with colorful stat cards (matching the style already used on the Dashboard and Analytics pages) instead of plain text rows, so the headline numbers are readable at a glance.
+- Profit & Loss and Stock Valuation each got a visual bar breakdown (revenue vs. costs, and stock value by category) alongside the detailed numbers — nothing removed, just easier to scan before reading the full table.
+- Aging's four day-range buckets are now color-coded by urgency (green → amber → orange → red) for both receivables and payables.
+
 ## 2026-08-01 — Walk-in sales don't need a customer anymore
 - Creating a Sales invoice no longer requires picking a customer — leaving it blank now records the sale as "Walk-in Customer" instead of blocking you. Stock still updates normally; since there's no real customer account behind a walk-in sale, no balance or credit limit is touched. Editing a walk-in invoice later correctly shows it as unselected again rather than getting stuck on the stored label.
 
