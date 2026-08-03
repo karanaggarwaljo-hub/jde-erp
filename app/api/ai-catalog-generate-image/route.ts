@@ -1,8 +1,29 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, createPartFromBase64, createUserContent } from '@google/genai';
 import { friendlyAiErrorMessage } from '@/lib/ai/friendly-error';
 import { updateRow, uploadCatalogImage } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+
+const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/** Best-effort fetch of a reference image found via ai-catalog-reference-search, so it can be
+ *  passed to Gemini as visual grounding instead of generating blind from text alone. Never
+ *  throws — a broken/oversized/non-image link just means generation falls back to text-only,
+ *  same as if no reference had been selected. The fetched bytes are used for this one request
+ *  and never stored — only the newly generated image gets uploaded/published. */
+async function fetchReferenceImageAsBase64(url: string): Promise<{ base64: string; mimeType: string } | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return null;
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.byteLength === 0 || buffer.byteLength > MAX_REFERENCE_IMAGE_BYTES) return null;
+    return { base64: buffer.toString('base64'), mimeType: contentType.split(';')[0] };
+  } catch {
+    return null;
+  }
+}
 
 /** AI image generation is an optional convenience — manual upload (see catalog-image-upload)
  *  is the primary, always-available path, so any failure here (quota, safety filter, no
@@ -17,7 +38,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { catalogId, prompt } = await request.json();
+  const { catalogId, prompt, referenceImageUrl } = await request.json();
   if (typeof catalogId !== 'string' || !catalogId) {
     return Response.json({ error: 'catalogId is required' }, { status: 400 });
   }
@@ -27,13 +48,29 @@ export async function POST(request: Request) {
 
   try {
     const ai = new GoogleGenAI({ apiKey });
+    const reference = typeof referenceImageUrl === 'string' && referenceImageUrl
+      ? await fetchReferenceImageAsBase64(referenceImageUrl)
+      : null;
+
     // The dedicated Imagen models/generateImages() API is being retired (shutting down
     // 2026-08-17) — Google's migration guidance is gemini-2.5-flash-image ("Nano Banana") via
     // the regular generateContent() call instead, which returns the image as an inline part
     // rather than a generatedImages[] response. Free tier, same GEMINI_API_KEY as everything else.
+    // When a reference photo was found and picked in Reference Search, it's attached here so the
+    // model has an actual visual guide for the real part's shape/proportions instead of guessing
+    // from text alone — the photo itself is only ever used for this one request, never stored.
+    const contents = reference
+      ? createUserContent([
+          `${prompt}\n\nA reference photo of a similar real part is attached below — use it as a visual guide for ` +
+            'the actual shape, proportions, and material of this part. Do not copy any text, logos, watermarks, ' +
+            'pricing, or background/props visible in the reference photo itself.',
+          createPartFromBase64(reference.base64, reference.mimeType),
+        ])
+      : prompt;
+
     const response = await ai.models.generateContent({
       model: process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
-      contents: prompt,
+      contents,
     });
 
     if (response.promptFeedback?.blockReason) {

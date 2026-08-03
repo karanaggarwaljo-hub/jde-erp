@@ -171,7 +171,7 @@ export default function CatalogAdminDetailPage() {
       const res = await fetch('/api/ai-catalog-generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ catalogId: row.id, prompt: promptText }),
+        body: JSON.stringify({ catalogId: row.id, prompt: promptText, referenceImageUrl: row.selected_reference_url }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Image generation failed.');
@@ -213,7 +213,7 @@ export default function CatalogAdminDetailPage() {
       const res = await fetch('/api/ai-catalog-description', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.title, part_number: form.part_number, oem_number: form.oem_number, brand: form.brand, category: form.category, compatibility: form.compatibility }),
+        body: JSON.stringify({ name: form.title, part_number: form.part_number, oem_number: form.oem_number, brand: form.brand, category: form.category, compatibility: form.compatibility, description: form.description }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || 'Description draft failed.');
@@ -425,11 +425,16 @@ export default function CatalogAdminDetailPage() {
               <button className="btn btn-primary" disabled={imageBusy || !promptText.trim()} onClick={generateImageWithAi}>
                 <Sparkles size={16} /> {imageBusy ? 'Working…' : 'Generate with AI'}
               </button>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                {row.selected_reference_url
+                  ? 'Will use your selected reference photo as a visual guide.'
+                  : 'No reference photo selected — pick one above for a closer match, or it\'ll generate from the text description alone.'}
+              </span>
               <label className="btn btn-secondary" style={{ cursor: imageBusy ? 'not-allowed' : 'pointer' }}>
                 <Upload size={16} /> Upload Real Photo
                 <input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={imageBusy} onChange={uploadImage} />
               </label>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Uploading a real photo is recommended and always available.</span>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Uploading a real photo is always the most accurate option.</span>
             </div>
           </div>
         </div>

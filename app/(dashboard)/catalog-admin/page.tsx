@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { Globe, Plus, Search, ExternalLink } from 'lucide-react';
+import { Globe, Plus, Search, ExternalLink, Copy, Check } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { catalogDisplayStatus, computeAvailabilityFromStock, type CatalogProduct } from '@/lib/catalogTypes';
 
@@ -26,6 +26,18 @@ export default function CatalogAdminPage() {
   const [search, setSearch] = useState('');
   const [adding, setAdding] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyLiveLink = async (id: string) => {
+    const url = `${window.location.origin}/catalog/${id}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 2000);
+    } catch {
+      setError(`Could not copy automatically — the link is ${url}`);
+    }
+  };
 
   const catalogedProductIds = new Set(catalogRows.map((c) => c.erp_product_id));
   const uncataloged = products.filter((p) => !catalogedProductIds.has(p.id));
@@ -98,7 +110,19 @@ export default function CatalogAdminPage() {
                     <td>{row.category ? <span className="badge badge-info">{row.category}</span> : '-'}</td>
                     <td className="text-center"><span className={`badge ${status.cls}`}>{status.label}</span></td>
                     <td className="text-center">
-                      <Link href={`/catalog-admin/${row.id}`} className="btn btn-ghost btn-sm">Open</Link>
+                      <div className="flex gap-1 justify-center">
+                        <Link href={`/catalog-admin/${row.id}`} className="btn btn-ghost btn-sm">Open</Link>
+                        {row.publication_status === 'published' && (
+                          <>
+                            <Link href={`/catalog/${row.id}`} target="_blank" className="btn btn-ghost btn-sm" title="Open the live website page">
+                              <ExternalLink size={14} /> View Live
+                            </Link>
+                            <button className="btn btn-ghost btn-sm" title="Copy the website link" onClick={() => copyLiveLink(row.id)}>
+                              {copiedId === row.id ? <Check size={14} /> : <Copy size={14} />}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
