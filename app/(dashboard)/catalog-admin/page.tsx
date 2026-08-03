@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { Globe, Plus, Search, ExternalLink, Copy, Check } from 'lucide-react';
+import { Globe, Plus, Search, ExternalLink, Copy, Check, Trash2 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { catalogDisplayStatus, computeAvailabilityFromStock, type CatalogProduct } from '@/lib/catalogTypes';
 
@@ -22,7 +22,7 @@ type Product = {
 export default function CatalogAdminPage() {
   const router = useRouter();
   const { rows: products, loading: productsLoading } = useCompanyTable<Product>('products');
-  const { rows: catalogRows, loading: catalogLoading, create } = useCompanyTable<CatalogProduct>('catalog_products');
+  const { rows: catalogRows, loading: catalogLoading, create, remove } = useCompanyTable<CatalogProduct>('catalog_products');
   const [search, setSearch] = useState('');
   const [adding, setAdding] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -37,6 +37,12 @@ export default function CatalogAdminPage() {
     } catch {
       setError(`Could not copy automatically — the link is ${url}`);
     }
+  };
+
+  const deleteCatalogRow = async (row: CatalogProduct) => {
+    const liveWarning = row.publication_status === 'published' ? ' This is currently live on the public website.' : '';
+    if (!confirm(`Delete "${row.title || 'this draft'}" from the Website Catalog?${liveWarning} This cannot be undone.`)) return;
+    await remove(row.id);
   };
 
   const catalogedProductIds = new Set(catalogRows.map((c) => c.erp_product_id));
@@ -122,6 +128,9 @@ export default function CatalogAdminPage() {
                             </button>
                           </>
                         )}
+                        <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} title="Delete" aria-label={`Delete ${row.title || 'this draft'}`} onClick={() => deleteCatalogRow(row)}>
+                          <Trash2 size={14} />
+                        </button>
                       </div>
                     </td>
                   </tr>

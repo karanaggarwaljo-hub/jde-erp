@@ -294,9 +294,9 @@ export default function CatalogAdminDetailPage() {
           <h1 className="page-title">{row.title || '(untitled)'} <span className={`badge ${status.cls}`} style={{ marginLeft: '10px', verticalAlign: 'middle' }}>{status.label}</span></h1>
           {product && <p className="page-subtitle">From Inventory: {product.current_stock} in stock, cost ₹{product.cost_price}</p>}
         </div>
-        {row.publication_status === 'draft' && (
+        {row.publication_status !== 'published' && (
           <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={deleteDraft}>
-            <Trash2 size={14} /> Delete Draft
+            <Trash2 size={14} /> Delete
           </button>
         )}
       </div>

@@ -2,6 +2,9 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-04 — Website Catalog: delete option added
+- You can now delete a catalog listing directly from the Website Catalog list, not just from inside it — with a confirmation first. Delete is available for anything not currently live (draft, unpublished, or archived); a listing that's actively published has to be unpublished first, so nothing disappears off the real website by accident.
+
 ## 2026-08-04 — Website Catalog: quick link to a published listing
 - The Website Catalog list now has a "View Live" and a copy-link button next to any published item, so you can jump straight to (or grab the link to) the actual website page without opening the item first. Only shows up once something's actually published.
 
