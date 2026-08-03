@@ -10,9 +10,11 @@ export type Company = {
   po_prefix: string;
   address: string;
   is_active: boolean;
+  contact_email?: string | null;
+  contact_phone?: string | null;
 };
 
-type NewCompanyInput = { name: string; gstin: string; invoice_prefix: string; po_prefix: string; address: string };
+type NewCompanyInput = { name: string; gstin: string; invoice_prefix: string; po_prefix: string; address: string; contact_email?: string; contact_phone?: string };
 
 type CompanyContextValue = {
   companies: Company[];

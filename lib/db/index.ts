@@ -171,3 +171,77 @@ export async function deleteCompany(id: string): Promise<{ error: string } | { o
   if (error) throw error;
   return { ok: true };
 }
+
+/** Columns safe to show a public website visitor — never cost price, stock, supplier data,
+ *  internal notes, or any draft/review-workflow field, regardless of what gets added to
+ *  jde_catalog_products later for the admin workflow. */
+const PUBLIC_CATALOG_COLUMNS =
+  'id, title, description, category, brand, part_number, oem_number, compatibility, price, availability, image_url, published_at';
+
+/** Server-only: every published catalog row, safe columns only. Used exclusively by the public
+ *  /catalog pages — never by the admin UI, which reads catalog_products via the generic
+ *  /api/local table route instead (and so sees every column, as an authenticated admin should). */
+export async function listPublishedCatalogProducts(): Promise<Array<Record<string, unknown>>> {
+  const { data, error } = await getClient()
+    .from(supaTable('catalog_products'))
+    .select(PUBLIC_CATALOG_COLUMNS)
+    .eq('publication_status', 'published')
+    .order('published_at', { ascending: false });
+  if (error) throw error;
+  return (data as Array<Record<string, unknown>>) ?? [];
+}
+
+/** Server-only: a single published catalog row, safe columns only, plus company_id — the detail
+ *  page (a Server Component) uses company_id to look up that company's quote-request contact
+ *  info via getCompanyPublicContact, but never renders the id itself into the page. */
+export async function getPublishedCatalogProduct(id: string): Promise<Record<string, unknown> | undefined> {
+  const { data, error } = await getClient()
+    .from(supaTable('catalog_products'))
+    .select(`${PUBLIC_CATALOG_COLUMNS}, company_id`)
+    .eq('id', id)
+    .eq('publication_status', 'published')
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Record<string, unknown> | null) ?? undefined;
+}
+
+/** Server-only: the minimal public contact info for one company, for the website's "Request a
+ *  Quote" link. Returns undefined fields rather than throwing when a company has none set. */
+export async function getCompanyPublicContact(companyId: string): Promise<{ contact_email: string | null; contact_phone: string | null } | undefined> {
+  const { data, error } = await getClient()
+    .from(supaTable('companies'))
+    .select('contact_email, contact_phone')
+    .eq('id', companyId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { contact_email: string | null; contact_phone: string | null } | null) ?? undefined;
+}
+
+const CATALOG_IMAGE_BUCKET = 'jde-catalog-images';
+const CATALOG_IMAGE_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
+
+export function isSupportedCatalogImageType(mimeType: string): boolean {
+  return mimeType in CATALOG_IMAGE_EXTENSIONS;
+}
+
+/** Uploads/replaces the one approved image for a catalog row (service-role only — the bucket
+ *  has no client-writable storage.objects policy, matching every other write path in this app)
+ *  and returns its public URL. Path is keyed by catalogId only, so re-uploading always replaces
+ *  the current image; switching image format on a re-upload leaves the old-extension file
+ *  orphaned in storage (harmless — not linked from anywhere once image_url is overwritten). */
+export async function uploadCatalogImage(catalogId: string, base64: string, mimeType: string): Promise<string> {
+  const ext = CATALOG_IMAGE_EXTENSIONS[mimeType];
+  if (!ext) throw new Error('Unsupported image type — please use JPEG, PNG, or WebP.');
+  const path = `${catalogId}.${ext}`;
+  const buffer = Buffer.from(base64, 'base64');
+  const { error } = await getClient()
+    .storage.from(CATALOG_IMAGE_BUCKET)
+    .upload(path, buffer, { contentType: mimeType, upsert: true });
+  if (error) throw error;
+  const { data } = getClient().storage.from(CATALOG_IMAGE_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}

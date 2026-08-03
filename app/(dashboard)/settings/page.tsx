@@ -8,7 +8,7 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 type SettingsTab = 'users' | 'company' | 'audit' | 'backups';
 type UserAccount = { email: string; company_id: string; name: string; role: string; status: string };
 
-const emptyCompanyForm = { name: '', gstin: '', invoice_prefix: 'INV', po_prefix: 'PO', address: '' };
+const emptyCompanyForm = { name: '', gstin: '', invoice_prefix: 'INV', po_prefix: 'PO', address: '', contact_email: '', contact_phone: '' };
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('users');
@@ -50,7 +50,7 @@ export default function SettingsPage() {
 
   const openEditCompany = (company: Company) => {
     setEditingCompanyId(company.id);
-    setCompanyForm({ name: company.name, gstin: company.gstin, invoice_prefix: company.invoice_prefix, po_prefix: company.po_prefix, address: company.address });
+    setCompanyForm({ name: company.name, gstin: company.gstin, invoice_prefix: company.invoice_prefix, po_prefix: company.po_prefix, address: company.address, contact_email: company.contact_email || '', contact_phone: company.contact_phone || '' });
     setCompanyModalOpen(true);
   };
 
@@ -159,6 +159,11 @@ export default function SettingsPage() {
           <div className="form-group"><label className="form-label">PO Prefix</label><input className="form-input" value={companyForm.po_prefix} onChange={(event) => setCompanyForm({ ...companyForm, po_prefix: event.target.value })} /></div>
         </div>
         <div className="form-group"><label className="form-label">Registered Office Address</label><textarea className="form-input" rows={2} value={companyForm.address} onChange={(event) => setCompanyForm({ ...companyForm, address: event.target.value })} /></div>
+        <div className="form-grid-2">
+          <div className="form-group"><label className="form-label">Quote Request Email</label><input type="email" className="form-input" placeholder="For the website's Request a Quote button" value={companyForm.contact_email} onChange={(event) => setCompanyForm({ ...companyForm, contact_email: event.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Quote Request Phone</label><input className="form-input" placeholder="Optional" value={companyForm.contact_phone} onChange={(event) => setCompanyForm({ ...companyForm, contact_phone: event.target.value })} /></div>
+        </div>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '-8px' }}>Shown only on published Website Catalog listings, as a Request a Quote / Call button. Leave blank to hide it.</p>
       </div>
       <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setCompanyModalOpen(false)}>Cancel</button><button type="submit" className="btn btn-primary">{editingCompanyId ? 'Save Changes' : 'Add Company'}</button></div>
     </form></div></div>}

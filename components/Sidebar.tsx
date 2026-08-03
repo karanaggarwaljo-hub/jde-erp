@@ -12,6 +12,7 @@ import {
   Receipt,
   FileText,
   BarChart3,
+  Globe,
   Settings,
   LogOut
 } from 'lucide-react';
@@ -26,6 +27,7 @@ const navItems = [
   { name: 'Expenses', href: '/expenses', icon: Receipt },
   { name: 'Reports', href: '/reports', icon: FileText },
   { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+  { name: 'Website Catalog', href: '/catalog-admin', icon: Globe },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 

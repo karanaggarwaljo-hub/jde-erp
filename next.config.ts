@@ -11,6 +11,13 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  images: {
+    // Public catalog product photos live in Supabase Storage (jde-catalog-images bucket),
+    // served from the project's own *.supabase.co domain — needed for next/image on /catalog.
+    remotePatterns: [
+      { protocol: 'https', hostname: '**.supabase.co', pathname: '/storage/v1/object/public/**' },
+    ],
+  },
 };
 
 export default nextConfig;
