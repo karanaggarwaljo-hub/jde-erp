@@ -3,13 +3,17 @@
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { ChangeEvent, useEffect, useState } from 'react';
-import { ArrowLeft, Sparkles, Upload, Search, CheckCircle2, XCircle, HelpCircle, ExternalLink, Trash2 } from 'lucide-react';
+import { ArrowLeft, Sparkles, Upload, Search, CheckCircle2, XCircle, HelpCircle, ExternalLink, Trash2, RefreshCw, AlertTriangle, Copy } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { fileToBase64 } from '@/lib/client-import';
 import { buildCatalogImagePrompt } from '@/lib/catalogPrompt';
-import { canPublish, catalogDisplayStatus, missingRequiredFields, type CatalogProduct, type ReferenceCandidate } from '@/lib/catalogTypes';
+import { canPublish, catalogDisplayStatus, checkInventoryDrift, computeAvailabilityFromStock, missingRequiredFields, type CatalogProduct, type ReferenceCandidate } from '@/lib/catalogTypes';
 
-type Product = { id: string; name: string; current_stock: number; cost_price: number };
+type Product = { id: string; name: string; current_stock: number; cost_price: number; sale_price: number };
+
+const AVAILABILITY_LABEL: Record<CatalogProduct['availability'], string> = {
+  in_stock: 'In Stock', out_of_stock: 'Out of Stock', contact_for_availability: 'Contact for Availability',
+};
 
 const AVAILABILITY_OPTIONS: Array<{ value: CatalogProduct['availability']; label: string }> = [
   { value: 'in_stock', label: 'In Stock' },
@@ -38,6 +42,8 @@ export default function CatalogAdminDetailPage() {
   const [referenceError, setReferenceError] = useState('');
 
   const [promptText, setPromptText] = useState('');
+  const [promptCopied, setPromptCopied] = useState(false);
+  const [promptCopyError, setPromptCopyError] = useState('');
   const [imageBusy, setImageBusy] = useState(false);
   const [imageError, setImageError] = useState('');
 
@@ -89,6 +95,8 @@ export default function CatalogAdminDetailPage() {
   const status = catalogDisplayStatus(row);
   const missing = missingRequiredFields(row);
   const publishReady = canPublish(row);
+  const drift = checkInventoryDrift(row, product);
+  const driftBlocksPublish = drift.productMissing || Boolean(drift.priceDrift) || Boolean(drift.availabilityDrift);
 
   const saveFields = async () => {
     setSavingFields(true);
@@ -142,7 +150,17 @@ export default function CatalogAdminDetailPage() {
     }));
   };
 
-  const savePrompt = async () => {
+  const copyPrompt = async () => {
+    setPromptCopyError('');
+    try {
+      await navigator.clipboard.writeText(promptText);
+      setPromptCopied(true);
+      setTimeout(() => setPromptCopied(false), 2000);
+    } catch {
+      // Clipboard access can be blocked by the browser/OS — still save the prompt either way,
+      // and tell the admin to copy it by hand instead of failing silently.
+      setPromptCopyError('Could not copy automatically — select the text above and copy it manually.');
+    }
     await update(row.id, { generated_prompt: promptText });
   };
 
@@ -219,6 +237,14 @@ export default function CatalogAdminDetailPage() {
     const flat = [descDraft.short_description.trim(), ...features.map((f) => `• ${f}`)].filter(Boolean).join('\n');
     setForm((f) => ({ ...f, description: flat }));
     await update(row.id, { description: flat });
+  };
+
+  const syncFromInventory = async () => {
+    if (!product) return;
+    const liveAvailability = computeAvailabilityFromStock(product.current_stock);
+    const price = product.sale_price || null;
+    setForm((f) => ({ ...f, price: price != null ? String(price) : '', availability: liveAvailability }));
+    await update(row.id, { price, availability: liveAvailability });
   };
 
   const publish = async () => {
@@ -377,8 +403,11 @@ export default function CatalogAdminDetailPage() {
           </div>
           <div className="flex gap-2">
             <button className="btn btn-secondary" onClick={generatePrompt}>Generate Prompt from Details</button>
-            <button className="btn btn-ghost" onClick={savePrompt} disabled={!promptText.trim()}>Save Prompt</button>
+            <button className="btn btn-ghost" onClick={copyPrompt} disabled={!promptText.trim()}>
+              <Copy size={16} /> {promptCopied ? 'Copied!' : 'Copy Prompt'}
+            </button>
           </div>
+          {promptCopyError && <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{promptCopyError}</p>}
 
           {imageError && <div className="alert alert-danger" role="alert">{imageError}</div>}
           {row.image_status === 'failed' && row.generation_error && !imageError && (
@@ -446,15 +475,42 @@ export default function CatalogAdminDetailPage() {
         <div className="p-4 flex flex-col gap-4">
           {publishError && <div className="alert alert-danger" role="alert">{publishError}</div>}
           {row.published_at && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Last published {new Date(row.published_at).toLocaleString()} by {row.reviewer || 'unknown'}.</p>}
+
+          {publishReady && row.publication_status !== 'published' && drift.productMissing && (
+            <div className="alert alert-danger" role="alert">
+              <AlertTriangle size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
+              This part no longer exists in Inventory — publishing is disabled until that's resolved.
+            </div>
+          )}
+          {publishReady && row.publication_status !== 'published' && !drift.productMissing && driftBlocksPublish && (
+            <div className="alert alert-warning" role="alert" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div>
+                <AlertTriangle size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
+                Inventory has changed since these were set — the ERP is the source of truth, so double-check before publishing:
+                <ul style={{ margin: '6px 0 0 20px' }}>
+                  {drift.priceDrift && <li>Inventory price is now ₹{drift.priceDrift.inventory} (this listing shows ₹{drift.priceDrift.catalog})</li>}
+                  {drift.availabilityDrift && <li>Inventory now shows {AVAILABILITY_LABEL[drift.availabilityDrift.inventory]} (this listing shows {AVAILABILITY_LABEL[drift.availabilityDrift.catalog]})</li>}
+                </ul>
+              </div>
+              <button className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }} onClick={syncFromInventory}><RefreshCw size={14} /> Sync from Inventory</button>
+            </div>
+          )}
+
           <div className="form-group" style={{ maxWidth: '320px' }}>
             <label className="form-label">Reviewer Name</label>
             <input className="form-input" value={reviewer} onChange={(e) => setReviewer(e.target.value)} placeholder="Who is approving this?" />
           </div>
           <div className="flex gap-2 flex-wrap">
             {row.publication_status !== 'published' ? (
-              <button className="btn btn-primary" disabled={publishBusy || !publishReady} onClick={publish}>
-                {publishBusy ? 'Publishing…' : 'Publish to Website'}
-              </button>
+              driftBlocksPublish ? (
+                <button className="btn btn-primary" disabled={publishBusy || !publishReady || drift.productMissing} onClick={publish} title="Publishes with the values currently shown above, despite the Inventory mismatch">
+                  {publishBusy ? 'Publishing…' : 'Publish Anyway (Keep Current Values)'}
+                </button>
+              ) : (
+                <button className="btn btn-primary" disabled={publishBusy || !publishReady} onClick={publish}>
+                  {publishBusy ? 'Publishing…' : 'Publish to Website'}
+                </button>
+              )
             ) : (
               <button className="btn btn-secondary" disabled={publishBusy} onClick={unpublish}>{publishBusy ? 'Working…' : 'Unpublish'}</button>
             )}

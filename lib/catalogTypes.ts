@@ -78,3 +78,39 @@ export function catalogDisplayStatus(row: CatalogProduct): { label: string; cls:
 export function canPublish(row: CatalogProduct): boolean {
   return missingRequiredFields(row).length === 0 && row.image_status === 'ready';
 }
+
+/** The ERP is the source of truth for stock — this derives the public "availability" label from
+ *  a live current_stock count without ever exposing the exact number itself. Used both when a
+ *  catalog draft is first created from Inventory and when checking it hasn't drifted since. */
+export function computeAvailabilityFromStock(currentStock: number): CatalogProduct['availability'] {
+  return currentStock > 0 ? 'in_stock' : 'out_of_stock';
+}
+
+export type InventoryDrift = {
+  /** The Inventory item behind this draft is gone entirely — a hard block, not just a warning. */
+  productMissing: boolean;
+  priceDrift: { catalog: number; inventory: number } | null;
+  availabilityDrift: { catalog: CatalogProduct['availability']; inventory: CatalogProduct['availability'] } | null;
+};
+
+/** Compares a catalog draft's price/availability against the live Inventory record it was made
+ *  from — the ERP stays the source of truth, so this is checked right before publishing rather
+ *  than only once at draft-creation time. A null catalog price ("Request Quote") is a deliberate
+ *  admin choice, not drift, so it's only compared when a price is actually set. */
+export function checkInventoryDrift(row: CatalogProduct, product: { sale_price: number; current_stock: number } | undefined): InventoryDrift {
+  if (!product) return { productMissing: true, priceDrift: null, availabilityDrift: null };
+
+  const liveAvailability = computeAvailabilityFromStock(product.current_stock);
+  const priceDrift = row.price != null && Number(row.price) !== Number(product.sale_price)
+    ? { catalog: Number(row.price), inventory: Number(product.sale_price) }
+    : null;
+  const availabilityDrift = row.availability !== liveAvailability
+    ? { catalog: row.availability, inventory: liveAvailability }
+    : null;
+
+  return { productMissing: false, priceDrift, availabilityDrift };
+}
+
+export function hasInventoryDrift(drift: InventoryDrift): boolean {
+  return drift.productMissing || Boolean(drift.priceDrift) || Boolean(drift.availabilityDrift);
+}

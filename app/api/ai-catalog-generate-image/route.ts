@@ -27,22 +27,30 @@ export async function POST(request: Request) {
 
   try {
     const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateImages({
-      model: process.env.GEMINI_IMAGE_MODEL || 'imagen-4.0-generate-001',
-      prompt,
-      config: { numberOfImages: 1 },
+    // The dedicated Imagen models/generateImages() API is being retired (shutting down
+    // 2026-08-17) — Google's migration guidance is gemini-2.5-flash-image ("Nano Banana") via
+    // the regular generateContent() call instead, which returns the image as an inline part
+    // rather than a generatedImages[] response. Free tier, same GEMINI_API_KEY as everything else.
+    const response = await ai.models.generateContent({
+      model: process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
+      contents: prompt,
     });
 
-    const generated = response.generatedImages?.[0];
-    const imageBytes = generated?.image?.imageBytes;
-    if (!imageBytes) {
-      const reason = generated?.raiFilteredReason || 'The AI image service returned no image.';
+    if (response.promptFeedback?.blockReason) {
+      const reason = `Gemini declined to generate an image (${response.promptFeedback.blockReason}).`;
       await updateRow('catalog_products', catalogId, { image_status: 'failed', generation_error: reason });
       return Response.json({ error: reason }, { status: 502 });
     }
 
-    const mimeType = generated.image?.mimeType || 'image/png';
-    const imageUrl = await uploadCatalogImage(catalogId, imageBytes, mimeType);
+    const imagePart = response.candidates?.[0]?.content?.parts?.find((part) => part.inlineData?.data);
+    if (!imagePart?.inlineData?.data) {
+      const reason = 'The AI image service returned no image.';
+      await updateRow('catalog_products', catalogId, { image_status: 'failed', generation_error: reason });
+      return Response.json({ error: reason }, { status: 502 });
+    }
+
+    const mimeType = imagePart.inlineData.mimeType || 'image/png';
+    const imageUrl = await uploadCatalogImage(catalogId, imagePart.inlineData.data, mimeType);
     const row = await updateRow('catalog_products', catalogId, {
       image_url: imageUrl,
       image_status: 'ready',

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Globe, Plus, Search, ExternalLink } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
-import { catalogDisplayStatus, type CatalogProduct } from '@/lib/catalogTypes';
+import { catalogDisplayStatus, computeAvailabilityFromStock, type CatalogProduct } from '@/lib/catalogTypes';
 
 type Product = {
   id: string;
@@ -47,7 +47,7 @@ export default function CatalogAdminPage() {
         brand: product.brand,
         compatibility: product.compatibility,
         price: product.sale_price || null,
-        availability: product.current_stock > 0 ? 'in_stock' : 'out_of_stock',
+        availability: computeAvailabilityFromStock(product.current_stock),
       });
       router.push(`/catalog-admin/${created.id}`);
     } catch {
