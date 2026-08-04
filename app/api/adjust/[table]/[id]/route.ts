@@ -1,4 +1,4 @@
-import { adjustRow, type AdjustableTable } from '@/lib/db';
+import { adjustRow, dbErrorMessage, type AdjustableTable } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +17,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ tab
   if (typeof delta !== 'number' || Number.isNaN(delta)) {
     return Response.json({ error: 'delta must be a number' }, { status: 400 });
   }
-  const row = await adjustRow(table, decodeURIComponent(id), delta);
-  return Response.json(row);
+  try {
+    const row = await adjustRow(table, decodeURIComponent(id), delta);
+    return Response.json(row);
+  } catch (error) {
+    console.error(`POST /api/adjust/${table}/${id} failed:`, error);
+    return Response.json({ error: dbErrorMessage(error, 'Failed to adjust record.') }, { status: 500 });
+  }
 }

@@ -2,6 +2,17 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import { TABLES, type TableName } from './schema';
 
+/** Supabase/PostgREST errors are plain {message, details, hint, code} objects, not real Error
+ *  instances — an `error instanceof Error` check silently swallows the real message. Duck-type
+ *  instead so API routes can always return a real message to the client rather than a generic
+ *  one (or, if uncaught, a response with no body at all — which crashes callers on `res.json()`
+ *  with a raw "Unexpected end of JSON input" instead of anything actionable). */
+export function dbErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
+  return fallback;
+}
+
 let client: SupabaseClient | null = null;
 
 function getClient(): SupabaseClient {

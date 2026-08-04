@@ -58,6 +58,8 @@ export default function PurchasesPage() {
   const [activeTab, setActiveTab] = useState<PurchaseTab>('purchases');
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [purchaseError, setPurchaseError] = useState('');
+  const [savingPurchase, setSavingPurchase] = useState(false);
   const [supplierName, setSupplierName] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(todayIso());
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('unpaid');
@@ -78,6 +80,7 @@ export default function PurchasesPage() {
     setAmountPaid(0);
     setLines([{ description: '', quantity: 1, unit_price: 0 }]);
     setImportError('');
+    setPurchaseError('');
     setShowPurchaseModal(true);
   };
 
@@ -137,53 +140,70 @@ export default function PurchasesPage() {
 
   const recordPurchase = async (event: FormEvent) => {
     event.preventDefault();
-    const supplierRow = await resolveSupplier(supplierName);
-    const id = nextId(purchaseOrders, 'PO');
-    const paid = paidAmount;
+    setPurchaseError('');
+    setSavingPurchase(true);
+    try {
+      const supplierRow = await resolveSupplier(supplierName);
+      const id = nextId(purchaseOrders, 'PO');
+      const paid = paidAmount;
 
-    await createPurchaseOrder({ id, supplier: supplierRow.name, date: purchaseDate, items: lines.length, total, paid, status: 'received' });
+      await createPurchaseOrder({ id, supplier: supplierRow.name, date: purchaseDate, items: lines.length, total, paid, status: 'received' });
 
-    const lineItems = [];
-    for (const line of lines) {
-      if (!line.description.trim()) continue;
-      const matchedProduct = await resolveProduct(line.description, line.unit_price);
-      await createPoItem({
-        po_id: id,
-        product_id: matchedProduct?.id ?? null,
-        part_number: matchedProduct?.part_number ?? '',
-        name: matchedProduct?.name ?? line.description,
-        qty: line.quantity,
-        unit_cost: line.unit_price,
-        line_total: line.quantity * line.unit_price,
-      });
-      lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity, unit_cost: line.unit_price });
+      const lineItems = [];
+      for (const line of lines) {
+        if (!line.description.trim()) continue;
+        const matchedProduct = await resolveProduct(line.description, line.unit_price);
+        await createPoItem({
+          po_id: id,
+          product_id: matchedProduct?.id ?? null,
+          part_number: matchedProduct?.part_number ?? '',
+          name: matchedProduct?.name ?? line.description,
+          qty: line.quantity,
+          unit_cost: line.unit_price,
+          line_total: line.quantity * line.unit_price,
+        });
+        lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity, unit_cost: line.unit_price });
+      }
+
+      await receiveStock(id, supplierRow.name, lineItems);
+
+      // Newly created purchase — its amount has never been counted anywhere before, so it's safe to add to payables.
+      const due = total - paid;
+      if (due > 0) {
+        await adjustSupplier(supplierRow.id, due);
+      }
+
+      setShowPurchaseModal(false);
+      setFeedback(`${id} recorded — ${lines.length} item(s) added to stock from ${supplierRow.name}.`);
+      setActiveTab('purchases');
+    } catch (error) {
+      // A purchase can partially save before a step fails (e.g. the PO exists but a line item
+      // didn't) — surfacing the real error lets the user check Purchases/Inventory and retry
+      // rather than silently losing track of what happened, or crashing the whole page.
+      setPurchaseError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Inventory before retrying.');
+    } finally {
+      setSavingPurchase(false);
     }
-
-    await receiveStock(id, supplierRow.name, lineItems);
-
-    // Newly created purchase — its amount has never been counted anywhere before, so it's safe to add to payables.
-    const due = total - paid;
-    if (due > 0) {
-      await adjustSupplier(supplierRow.id, due);
-    }
-
-    setShowPurchaseModal(false);
-    setFeedback(`${id} recorded — ${lines.length} item(s) added to stock from ${supplierRow.name}.`);
-    setActiveTab('purchases');
   };
 
   const markReceived = async (poId: string) => {
     const order = purchaseOrders.find((po) => po.id === poId);
     if (!order) return;
-    await updatePurchaseOrder(poId, { status: 'received' });
-    // This is a pre-existing pending order created before per-purchase stock tracking existed — its
-    // amount is presumed already reflected in the supplier's balance, so only stock catches up here.
-    await receiveStock(
-      poId,
-      order.supplier,
-      poItems.filter((item) => item.po_id === poId).map((item) => ({ product_id: item.product_id, qty: item.qty, unit_cost: item.unit_cost }))
-    );
-    setFeedback(`${poId} marked received and added to stock.`);
+    setFeedback('');
+    setImportError('');
+    try {
+      await updatePurchaseOrder(poId, { status: 'received' });
+      // This is a pre-existing pending order created before per-purchase stock tracking existed — its
+      // amount is presumed already reflected in the supplier's balance, so only stock catches up here.
+      await receiveStock(
+        poId,
+        order.supplier,
+        poItems.filter((item) => item.po_id === poId).map((item) => ({ product_id: item.product_id, qty: item.qty, unit_cost: item.unit_cost }))
+      );
+      setFeedback(`${poId} marked received and added to stock.`);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : `Failed to mark ${poId} received.`);
+    }
   };
 
   const guessSupplierFromText = (text: string | undefined | null): string | undefined => {
@@ -235,35 +255,40 @@ export default function PurchasesPage() {
 
   const confirmImportedPO = async () => {
     if (!importPreview || !importPreview.supplier.trim()) return;
-    const supplierRow = await resolveSupplier(importPreview.supplier);
-    const importedTotal = importPreview.lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
-    const id = nextId(purchaseOrders, 'PO');
-    await createPurchaseOrder({ id, supplier: supplierRow.name, date: todayIso(), items: importPreview.lines.length, total: importedTotal, paid: 0, status: 'received' });
+    setImportError('');
+    try {
+      const supplierRow = await resolveSupplier(importPreview.supplier);
+      const importedTotal = importPreview.lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
+      const id = nextId(purchaseOrders, 'PO');
+      await createPurchaseOrder({ id, supplier: supplierRow.name, date: todayIso(), items: importPreview.lines.length, total: importedTotal, paid: 0, status: 'received' });
 
-    const lineItems = [];
-    for (const line of importPreview.lines) {
-      if (!line.description.trim()) continue;
-      const matchedProduct = await resolveProduct(line.description, line.unit_price);
-      await createPoItem({
-        po_id: id,
-        product_id: matchedProduct?.id ?? null,
-        part_number: matchedProduct?.part_number ?? '',
-        name: matchedProduct?.name ?? line.description,
-        qty: line.quantity,
-        unit_cost: line.unit_price,
-        line_total: line.quantity * line.unit_price,
-      });
-      lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity, unit_cost: line.unit_price });
+      const lineItems = [];
+      for (const line of importPreview.lines) {
+        if (!line.description.trim()) continue;
+        const matchedProduct = await resolveProduct(line.description, line.unit_price);
+        await createPoItem({
+          po_id: id,
+          product_id: matchedProduct?.id ?? null,
+          part_number: matchedProduct?.part_number ?? '',
+          name: matchedProduct?.name ?? line.description,
+          qty: line.quantity,
+          unit_cost: line.unit_price,
+          line_total: line.quantity * line.unit_price,
+        });
+        lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity, unit_cost: line.unit_price });
+      }
+
+      await receiveStock(id, supplierRow.name, lineItems);
+      if (importedTotal > 0) {
+        await adjustSupplier(supplierRow.id, importedTotal);
+      }
+
+      setFeedback(`${id} recorded from ${importPreview.fileName} — ${importPreview.lines.length} item(s), ₹${importedTotal.toLocaleString()} from ${supplierRow.name}.`);
+      setImportPreview(null);
+      setActiveTab('purchases');
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Inventory before retrying.');
     }
-
-    await receiveStock(id, supplierRow.name, lineItems);
-    if (importedTotal > 0) {
-      await adjustSupplier(supplierRow.id, importedTotal);
-    }
-
-    setFeedback(`${id} recorded from ${importPreview.fileName} — ${importPreview.lines.length} item(s), ₹${importedTotal.toLocaleString()} from ${supplierRow.name}.`);
-    setImportPreview(null);
-    setActiveTab('purchases');
   };
 
   return (
@@ -326,6 +351,7 @@ export default function PurchasesPage() {
       {showPurchaseModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="purchase-modal-title"><form onSubmit={recordPurchase}>
         <div className="modal-header"><h3 id="purchase-modal-title" className="modal-title">Record Purchase</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setShowPurchaseModal(false)}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
+          {purchaseError && <div className="alert alert-danger" role="alert">{purchaseError}</div>}
           <div className="form-grid-2">
             <div className="form-group">
               <label className="form-label">Supplier *</label>
@@ -386,7 +412,7 @@ export default function PurchasesPage() {
             <div><strong>Total: </strong><span className="invoice-total">₹{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
           </div>
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowPurchaseModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || !supplierName.trim()}>Save Purchase</button></div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowPurchaseModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || !supplierName.trim() || savingPurchase}>{savingPurchase ? 'Saving…' : 'Save Purchase'}</button></div>
       </form></div></div>}
     </div>
   );
