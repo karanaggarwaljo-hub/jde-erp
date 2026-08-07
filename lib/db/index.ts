@@ -58,6 +58,32 @@ export async function activateCompany(id: string): Promise<Record<string, unknow
   return (data as Record<string, unknown> | null) ?? undefined;
 }
 
+/** Which single company's published catalog is shown on the public /catalog pages —
+ *  deliberately separate from "active company" (which is which company an admin is
+ *  currently working in, and can change while someone works on unrelated data), so
+ *  switching companies in the ERP UI never changes what the public site shows. */
+export async function setStorefrontCompany(id: string): Promise<Record<string, unknown> | undefined> {
+  const { error } = await getClient().rpc('jde_set_storefront_company', { target_id: id });
+  if (error) throw error;
+  const { data, error: fetchError } = await getClient().from(supaTable('companies')).select('*').eq('id', id).maybeSingle();
+  if (fetchError) throw fetchError;
+  return (data as Record<string, unknown> | null) ?? undefined;
+}
+
+/** Server-only: the company currently flagged as the public storefront, or undefined
+ *  if none is (in which case callers must show an honest empty catalog — never fall
+ *  back to showing every company's published rows mixed together). */
+export async function getStorefrontCompanyId(): Promise<string | undefined> {
+  const { data, error } = await getClient()
+    .from(supaTable('companies'))
+    .select('id')
+    .eq('is_storefront', true)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { id: string } | null)?.id;
+}
+
 export async function listRows(table: TableName, companyId?: string): Promise<Array<Record<string, unknown>>> {
   let query = getClient().from(supaTable(table)).select('*');
   if (isCompanyScoped(table) && companyId) {
@@ -189,14 +215,21 @@ export async function deleteCompany(id: string): Promise<{ error: string } | { o
 const PUBLIC_CATALOG_COLUMNS =
   'id, title, description, category, brand, part_number, oem_number, compatibility, price, availability, image_url, published_at';
 
-/** Server-only: every published catalog row, safe columns only. Used exclusively by the public
- *  /catalog pages — never by the admin UI, which reads catalog_products via the generic
- *  /api/local table route instead (and so sees every column, as an authenticated admin should). */
+/** Server-only: every published catalog row for the storefront company, safe columns only. Used
+ *  exclusively by the public /catalog pages — never by the admin UI, which reads catalog_products
+ *  via the generic /api/local table route instead (and so sees every column, as an authenticated
+ *  admin should). Scoped to whichever company is flagged is_storefront: this app's Supabase
+ *  project holds more than one company's data, and without this filter every company's published
+ *  listings would show mixed together on the one public, JD-Enterprises-branded site. No company
+ *  flagged → an honest empty catalog, never a fallback to showing everything. */
 export async function listPublishedCatalogProducts(): Promise<Array<Record<string, unknown>>> {
+  const companyId = await getStorefrontCompanyId();
+  if (!companyId) return [];
   const { data, error } = await getClient()
     .from(supaTable('catalog_products'))
     .select(PUBLIC_CATALOG_COLUMNS)
     .eq('publication_status', 'published')
+    .eq('company_id', companyId)
     .order('published_at', { ascending: false });
   if (error) throw error;
   return (data as Array<Record<string, unknown>>) ?? [];
@@ -204,16 +237,81 @@ export async function listPublishedCatalogProducts(): Promise<Array<Record<strin
 
 /** Server-only: a single published catalog row, safe columns only, plus company_id — the detail
  *  page (a Server Component) uses company_id to look up that company's quote-request contact
- *  info via getCompanyPublicContact, but never renders the id itself into the page. */
+ *  info via getCompanyPublicContact, but never renders the id itself into the page. Scoped to the
+ *  storefront company for the same reason as listPublishedCatalogProducts — a product id alone
+ *  isn't enough to guarantee it belongs to the company whose site is being browsed. */
 export async function getPublishedCatalogProduct(id: string): Promise<Record<string, unknown> | undefined> {
+  const companyId = await getStorefrontCompanyId();
+  if (!companyId) return undefined;
   const { data, error } = await getClient()
     .from(supaTable('catalog_products'))
     .select(`${PUBLIC_CATALOG_COLUMNS}, company_id`)
     .eq('id', id)
     .eq('publication_status', 'published')
+    .eq('company_id', companyId)
     .maybeSingle();
   if (error) throw error;
   return (data as Record<string, unknown> | null) ?? undefined;
+}
+
+export type CatalogLeadInput = {
+  catalogProductId: string;
+  partTitle: string;
+  partNumber: string;
+  customerName: string;
+  customerPhone: string;
+  quantity?: number | null;
+  machineModel?: string | null;
+  message?: string | null;
+};
+
+/** Server-only, insert-only: records a Request-a-Quote submission from the public catalog.
+ *  Deliberately not the generic /api/local admin CRUD layer (that route has no auth at all, so
+ *  routing public writes through it would let anyone list every company's leads by guessing a
+ *  company_id — a strictly worse information-disclosure surface than exists today). company_id
+ *  always comes from the storefront flag, never from the caller, since an anonymous request body
+ *  is not a trustworthy source for which company's data it should land under. */
+export async function insertCatalogLead(input: CatalogLeadInput): Promise<void> {
+  const companyId = await getStorefrontCompanyId();
+  if (!companyId) throw new Error('No public catalog is configured right now.');
+  const { error } = await getClient().from(supaTable('catalog_leads')).insert({
+    company_id: companyId,
+    catalog_product_id: input.catalogProductId,
+    part_title: input.partTitle,
+    part_number: input.partNumber,
+    customer_name: input.customerName,
+    customer_phone: input.customerPhone,
+    quantity: input.quantity ?? null,
+    machine_model: input.machineModel ?? null,
+    message: input.message ?? null,
+    source: 'catalog_website',
+    status: 'new',
+  });
+  if (error) throw error;
+}
+
+export type CatalogEventInput = {
+  eventType: 'search' | 'view';
+  catalogProductId?: string | null;
+  query?: string | null;
+  zeroResults?: boolean | null;
+};
+
+/** Server-only, insert-only, fire-and-forget from the caller's perspective: basic catalog usage
+ *  analytics (search terms incl. zero-result, product views). Same "never trust a client-supplied
+ *  company_id" rule as insertCatalogLead. RFQ counts are derived from catalog_leads directly
+ *  rather than logged here too, so there's one write and one source of truth per customer action. */
+export async function logCatalogEvent(input: CatalogEventInput): Promise<void> {
+  const companyId = await getStorefrontCompanyId();
+  if (!companyId) return;
+  const { error } = await getClient().from(supaTable('catalog_events')).insert({
+    company_id: companyId,
+    event_type: input.eventType,
+    catalog_product_id: input.catalogProductId ?? null,
+    query: input.query ?? null,
+    zero_results: input.zeroResults ?? null,
+  });
+  if (error) throw error;
 }
 
 /** Server-only: the minimal public contact info for one company, for the website's "Request a

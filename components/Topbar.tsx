@@ -34,15 +34,18 @@ export default function Topbar() {
   const { rows: products } = useCompanyTable<Product>('products');
   const { rows: customers } = useCompanyTable<Customer>('customers');
   const { rows: suppliers } = useCompanyTable<Supplier>('suppliers');
+  const { rows: catalogLeads } = useCompanyTable<{ status: string }>('catalog_leads');
 
   const lowStockCount = products.filter((p) => Number(p.min_stock) > 0 && Number(p.current_stock) <= Number(p.min_stock)).length;
   const overdueCustomerCount = customers.filter((c) => Number(c.balance) > 0).length;
   const payableSupplierCount = suppliers.filter((s) => Number(s.balance) > 0).length;
+  const newLeadsCount = catalogLeads.filter((l) => l.status === 'new').length;
 
   const notifications = [
     ...(lowStockCount > 0 ? [{ href: '/inventory', text: `${lowStockCount} part(s) need reordering`, tag: 'Inventory' }] : []),
     ...(overdueCustomerCount > 0 ? [{ href: '/customers', text: `${overdueCustomerCount} customer payment(s) outstanding`, tag: 'Receivables' }] : []),
     ...(payableSupplierCount > 0 ? [{ href: '/purchases', text: `${payableSupplierCount} supplier payment(s) outstanding`, tag: 'Payables' }] : []),
+    ...(newLeadsCount > 0 ? [{ href: '/catalog-admin/leads', text: `${newLeadsCount} new catalog quote request(s)`, tag: 'Website Catalog' }] : []),
   ];
 
   useEffect(() => {

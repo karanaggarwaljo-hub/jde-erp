@@ -10,6 +10,7 @@ export type Company = {
   po_prefix: string;
   address: string;
   is_active: boolean;
+  is_storefront?: boolean;
   contact_email?: string | null;
   contact_phone?: string | null;
 };
@@ -22,6 +23,7 @@ type CompanyContextValue = {
   loading: boolean;
   refresh: () => Promise<void>;
   switchCompany: (id: string) => Promise<void>;
+  setStorefrontCompany: (id: string) => Promise<void>;
   addCompany: (data: NewCompanyInput) => Promise<Company>;
   updateCompany: (id: string, data: Partial<NewCompanyInput>) => Promise<void>;
   removeCompany: (id: string) => Promise<{ ok: true } | { error: string }>;
@@ -47,6 +49,11 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   const switchCompany = useCallback(async (id: string) => {
     await fetch(`/api/companies/${encodeURIComponent(id)}/activate`, { method: 'POST' });
+    await refresh();
+  }, [refresh]);
+
+  const setStorefrontCompany = useCallback(async (id: string) => {
+    await fetch(`/api/companies/${encodeURIComponent(id)}/set-storefront`, { method: 'POST' });
     await refresh();
   }, [refresh]);
 
@@ -81,7 +88,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const activeCompany = companies.find((c) => c.is_active) ?? null;
 
   return (
-    <CompanyContext.Provider value={{ companies, activeCompany, loading, refresh, switchCompany, addCompany, updateCompany, removeCompany }}>
+    <CompanyContext.Provider value={{ companies, activeCompany, loading, refresh, switchCompany, setStorefrontCompany, addCompany, updateCompany, removeCompany }}>
       {children}
     </CompanyContext.Provider>
   );

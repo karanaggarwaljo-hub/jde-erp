@@ -19,7 +19,7 @@ export default function SettingsPage() {
   const [editingEmail, setEditingEmail] = useState<string | null>(null);
   const [editingRole, setEditingRole] = useState('salesman');
 
-  const { companies, addCompany, updateCompany, switchCompany, removeCompany } = useCompany();
+  const { companies, addCompany, updateCompany, switchCompany, setStorefrontCompany, removeCompany } = useCompany();
   const [companyModalOpen, setCompanyModalOpen] = useState(false);
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
   const [companyForm, setCompanyForm] = useState(emptyCompanyForm);
@@ -72,6 +72,12 @@ export default function SettingsPage() {
     setFeedback(`${target?.name ?? 'Company'} is now the active company.`);
   };
 
+  const handleSetStorefrontCompany = async (id: string) => {
+    const target = companies.find((c) => c.id === id);
+    await setStorefrontCompany(id);
+    setFeedback(`${target?.name ?? 'Company'}'s published listings now show on the public Website Catalog.`);
+  };
+
   const confirmDeleteCompany = async () => {
     if (!deleteCompanyCandidate) return;
     setDeleteCompanyError('');
@@ -100,13 +106,13 @@ export default function SettingsPage() {
         <div className="card-header">
           <div>
             <h3 className="card-title">Companies</h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Manage the businesses run through this ERP. Only one company can be active at a time — switch anytime.</p>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Manage the businesses run through this ERP. Only one company can be active at a time — switch anytime. Only one company&apos;s published listings can show on the public Website Catalog at a time, too — that&apos;s independent of which one is &quot;active,&quot; so switching companies to work on something else never changes what the public site shows.</p>
           </div>
           <button className="btn btn-primary btn-sm" onClick={openAddCompany}>+ Add Company</button>
         </div>
         <div className="table-wrap">
           <table className="erp-table">
-            <thead><tr><th>Company</th><th>GSTIN</th><th>Invoice Prefix</th><th>PO Prefix</th><th>Status</th><th className="text-center">Actions</th></tr></thead>
+            <thead><tr><th>Company</th><th>GSTIN</th><th>Invoice Prefix</th><th>PO Prefix</th><th>Status</th><th>Public Website Catalog</th><th className="text-center">Actions</th></tr></thead>
             <tbody>
               {companies.map((c) => (
                 <tr key={c.id}>
@@ -115,6 +121,13 @@ export default function SettingsPage() {
                   <td>{c.invoice_prefix}</td>
                   <td>{c.po_prefix}</td>
                   <td>{c.is_active ? <span className="badge badge-success">ACTIVE</span> : <span className="badge badge-muted">INACTIVE</span>}</td>
+                  <td>
+                    {c.is_storefront ? (
+                      <span className="badge badge-success">LIVE ON /catalog</span>
+                    ) : (
+                      <button className="btn btn-ghost btn-sm" onClick={() => handleSetStorefrontCompany(c.id)}>Make Public</button>
+                    )}
+                  </td>
                   <td className="text-center">
                     <div className="flex justify-between gap-1 items-center">
                       {!c.is_active && <button className="btn btn-secondary btn-sm" onClick={() => handleSetActiveCompany(c.id)}>Set Active</button>}

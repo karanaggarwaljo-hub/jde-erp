@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { Globe, Plus, Search, ExternalLink, Copy, Check, Trash2 } from 'lucide-react';
+import { Globe, Plus, Search, ExternalLink, Copy, Check, Trash2, Inbox, RefreshCw } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { catalogDisplayStatus, computeAvailabilityFromStock, type CatalogProduct } from '@/lib/catalogTypes';
 
@@ -84,9 +84,17 @@ export default function CatalogAdminPage() {
           <h1 className="page-title">Website Catalog</h1>
           <p className="page-subtitle">Turn approved Inventory parts into public website listings — nothing goes live until you publish it</p>
         </div>
-        <Link href="/catalog" target="_blank" className="btn btn-secondary">
-          <ExternalLink size={16} /> View Public Site
-        </Link>
+        <div className="flex gap-2">
+          <Link href="/catalog-admin/leads" className="btn btn-secondary">
+            <Inbox size={16} /> Leads
+          </Link>
+          <Link href="/catalog-admin/recheck" className="btn btn-secondary">
+            <RefreshCw size={16} /> Recheck Inventory
+          </Link>
+          <Link href="/catalog" target="_blank" className="btn btn-secondary" title="Preview only — this app's own catalog pages, not jd-enterprise.com. Not deployed anywhere public yet.">
+            <ExternalLink size={16} /> Preview Catalog Pages
+          </Link>
+        </div>
       </div>
 
       {error && <div className="alert alert-danger mb-4" role="alert">{error}</div>}
