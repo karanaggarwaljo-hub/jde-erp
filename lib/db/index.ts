@@ -197,6 +197,148 @@ export async function correctOldestLayerCost(productId: string, newCost: number)
   return (data as Record<string, unknown> | null) ?? null;
 }
 
+export type SalesInvoiceItemInput = {
+  product_id: string | null;
+  part_number: string;
+  name: string;
+  qty: number;
+  unit_price: number;
+  line_total: number;
+};
+
+export type SaveSalesInvoiceInput = {
+  companyId: string;
+  invoiceId: string;
+  isEdit: boolean;
+  customerLabel: string;
+  oldCustomerId: string | null;
+  newCustomerId: string | null;
+  oldOutstanding: number;
+  newOutstanding: number;
+  date: string;
+  items: SalesInvoiceItemInput[];
+  total: number;
+  paid: number;
+  status: string;
+  mode: string;
+  discountPercent: number;
+  discountAmount: number;
+};
+
+/** Atomically creates or edits a sales invoice — header, line items, FIFO stock
+ *  consumption/restoration, and customer balance — as one database transaction (jde_save_sales_invoice),
+ *  instead of the 6-10 separate browser-initiated calls the Sales page used to make, which could leave
+ *  stock/balances/the invoice itself out of sync if one step failed partway through. */
+export async function saveSalesInvoice(input: SaveSalesInvoiceInput): Promise<Record<string, unknown>> {
+  const { data, error } = await getClient()
+    .rpc('jde_save_sales_invoice', {
+      p_company_id: input.companyId,
+      p_invoice_id: input.invoiceId,
+      p_is_edit: input.isEdit,
+      p_customer_label: input.customerLabel,
+      p_old_customer_id: input.oldCustomerId,
+      p_new_customer_id: input.newCustomerId,
+      p_old_outstanding: input.oldOutstanding,
+      p_new_outstanding: input.newOutstanding,
+      p_date: input.date,
+      p_items: input.items,
+      p_total: input.total,
+      p_paid: input.paid,
+      p_status: input.status,
+      p_mode: input.mode,
+      p_discount_percent: input.discountPercent,
+      p_discount_amount: input.discountAmount,
+    })
+    .single();
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
+/** Atomically deletes a sales invoice — restores FIFO stock for every line item, reverses the
+ *  customer balance, then removes the items and the invoice — as one database transaction. */
+export async function deleteSalesInvoice(invoiceId: string, customerId: string | null, outstanding: number): Promise<void> {
+  const { error } = await getClient().rpc('jde_delete_sales_invoice', {
+    p_invoice_id: invoiceId,
+    p_customer_id: customerId,
+    p_outstanding: outstanding,
+  });
+  if (error) throw error;
+}
+
+export type PurchaseItemInput = {
+  product_id: string | null;
+  part_number: string;
+  name: string;
+  qty: number;
+  unit_cost: number;
+  line_total: number;
+};
+
+export type SavePurchaseInput = {
+  companyId: string;
+  poId: string;
+  grnId: string;
+  supplierId: string | null;
+  supplierName: string;
+  date: string;
+  receivedAt: string;
+  items: PurchaseItemInput[];
+  total: number;
+  paid: number;
+  status: string;
+};
+
+/** Atomically records a new purchase — PO header, line items, GRN, FIFO stock layers, and
+ *  supplier balance — as one database transaction (jde_save_purchase), instead of the 5-9+
+ *  separate browser-initiated calls the Purchases page used to make. */
+export async function savePurchase(input: SavePurchaseInput): Promise<Record<string, unknown>> {
+  const { data, error } = await getClient()
+    .rpc('jde_save_purchase', {
+      p_company_id: input.companyId,
+      p_po_id: input.poId,
+      p_grn_id: input.grnId,
+      p_supplier_id: input.supplierId,
+      p_supplier_name: input.supplierName,
+      p_date: input.date,
+      p_received_at: input.receivedAt,
+      p_items: input.items,
+      p_total: input.total,
+      p_paid: input.paid,
+      p_status: input.status,
+    })
+    .single();
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
+export type ReceivePurchaseStockInput = {
+  companyId: string;
+  poId: string;
+  grnId: string;
+  supplierName: string;
+  receivedAt: string;
+  items: Array<{ product_id: string | null; qty: number; unit_cost: number }>;
+};
+
+/** Atomically marks a pre-existing pending purchase order received — GRN, FIFO stock layers, and
+ *  status — as one database transaction. For purchases created through this app's own "Record
+ *  Purchase" / file-import flows (which use savePurchase above and are already 'received'
+ *  immediately); this path exists for older/externally-created pending POs. */
+export async function receivePurchaseStock(input: ReceivePurchaseStockInput): Promise<Record<string, unknown>> {
+  const { data, error } = await getClient()
+    .rpc('jde_receive_purchase_stock', {
+      p_company_id: input.companyId,
+      p_po_id: input.poId,
+      p_grn_id: input.grnId,
+      p_supplier_name: input.supplierName,
+      p_received_at: input.receivedAt,
+      p_items: input.items,
+    })
+    .single();
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
 export async function deleteCompany(id: string): Promise<{ error: string } | { ok: true }> {
   const companies = (await listRows('companies')) as Array<{ id: string; is_active: boolean }>;
   const target = companies.find((c) => c.id === id);

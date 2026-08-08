@@ -3,7 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { Plus, Printer, Search, Eye, Pencil, Trash2, ArrowRight, ArrowLeft } from 'lucide-react';
 import { printCurrentPage } from '@/lib/client-export';
-import { consumeStockFifo, restoreStockForInvoiceItem } from '@/lib/client-fifo';
+import { saveSalesInvoice, deleteSalesInvoice } from '@/lib/client-sales';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
 type SalesTab = 'invoices' | 'quotations';
@@ -35,11 +35,11 @@ function nextId(rows: Array<{ id: string }>, prefix: string) {
 const WALK_IN_CUSTOMER = 'Walk-in Customer';
 
 export default function SalesPage() {
-  const { rows: products } = useCompanyTable<Product>('products');
-  const { rows: customers, adjust: adjustCustomer } = useCompanyTable<Customer>('customers');
-  const { rows: invoices, loading: invoicesLoading, create: createInvoice, update: updateInvoice, remove: removeInvoice } = useCompanyTable<Invoice>('invoices');
+  const { rows: products, activeCompany } = useCompanyTable<Product>('products');
+  const { rows: customers, reload: reloadCustomers } = useCompanyTable<Customer>('customers');
+  const { rows: invoices, loading: invoicesLoading, reload: reloadInvoices } = useCompanyTable<Invoice>('invoices');
   const { rows: quotations, loading: quotationsLoading } = useCompanyTable<Quotation>('quotations');
-  const { rows: invoiceItems, create: createInvoiceItem, remove: removeInvoiceItem } = useCompanyTable<InvoiceItem>('invoice_items');
+  const { rows: invoiceItems, reload: reloadInvoiceItems } = useCompanyTable<InvoiceItem>('invoice_items');
 
   const partOptions = products.map((product) => ({
     value: `${product.part_number} - ${product.name}`,
@@ -54,6 +54,10 @@ export default function SalesPage() {
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Invoice | null>(null);
   const [feedback, setFeedback] = useState('');
+  const [invoiceError, setInvoiceError] = useState('');
+  const [savingInvoice, setSavingInvoice] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [deletingInvoice, setDeletingInvoice] = useState(false);
   const [customer, setCustomer] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(todayIso());
   const [lines, setLines] = useState<InvoiceLine[]>([]);
@@ -102,6 +106,7 @@ export default function SalesPage() {
     setInvoiceDate(todayIso());
     setPaymentStatus('unpaid');
     setAmountPaid(0);
+    setInvoiceError('');
     setShowInvoiceModal(true);
   };
 
@@ -117,6 +122,7 @@ export default function SalesPage() {
     const invoiceTotal = Number(invoice.total);
     setPaymentStatus(paid >= invoiceTotal && invoiceTotal > 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid');
     setAmountPaid(paid);
+    setInvoiceError('');
     setShowInvoiceModal(true);
   };
 
@@ -126,121 +132,108 @@ export default function SalesPage() {
 
   const saveInvoice = async (event: FormEvent) => {
     event.preventDefault();
+    if (!activeCompany) return;
 
-    if (editingInvoice) {
-      const oldItems = invoiceItems.filter((item) => item.invoice_id === editingInvoice.id);
-
-      // Fully undo the old invoice's stock effect first — handing qty back to the exact FIFO
-      // batches it drew from — then draw fresh for the new lines below. This is "delete old +
-      // create new," which is simpler than netting deltas per product (the old approach) and,
-      // unlike a plain number, a FIFO batch-consumption pattern can't be "netted" if a product
-      // appears on both the old and new lines.
-      for (const item of oldItems) {
-        if (item.product_id) await restoreStockForInvoiceItem(item.id);
-      }
-      for (const item of oldItems) {
-        await removeInvoiceItem(item.id);
-      }
-      for (const line of lines) {
-        if (!line.part.trim()) continue;
+    const items = lines
+      .filter((line) => line.part.trim())
+      .map((line) => {
         const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
-        const createdItem = await createInvoiceItem({
-          invoice_id: editingInvoice.id,
+        return {
           product_id: product?.id ?? null,
           part_number: product?.part_number ?? '',
           name: product?.name ?? line.part,
           qty: line.qty,
           unit_price: line.price,
           line_total: line.qty * line.price,
+        };
+      });
+    const status = paidAmount >= total && total > 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
+
+    setInvoiceError('');
+    setSavingInvoice(true);
+    try {
+      if (editingInvoice) {
+        const oldCustomerRow = customers.find((c) => c.name === editingInvoice.customer);
+        const newCustomerRow = customers.find((c) => c.name === customer);
+
+        // Atomic on the database side (jde_save_sales_invoice): fully undoes the old invoice's
+        // stock effect, draws fresh FIFO batches for the new lines, and adjusts the customer
+        // balance, all as one transaction — a failure partway through leaves nothing half-done.
+        await saveSalesInvoice({
+          companyId: activeCompany.id,
+          invoiceId: editingInvoice.id,
+          isEdit: true,
+          customerLabel,
+          oldCustomerId: oldCustomerRow?.id ?? null,
+          newCustomerId: newCustomerRow?.id ?? null,
+          oldOutstanding: editingOldOutstanding,
+          newOutstanding,
+          date: invoiceDate,
+          items,
+          total,
+          paid: paidAmount,
+          status,
+          mode: editingInvoice.mode,
+          discountPercent,
+          discountAmount,
         });
-        if (product) {
-          await consumeStockFifo(product.id, line.qty, createdItem.id);
-        }
+
+        await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers()]);
+        setShowInvoiceModal(false);
+        setEditingInvoice(null);
+        setFeedback(`${editingInvoice.id} updated.`);
+        return;
       }
 
-      const oldCustomerRow = customers.find((c) => c.name === editingInvoice.customer);
-      const newCustomerRow = customers.find((c) => c.name === customer);
-      if (oldCustomerRow && newCustomerRow && oldCustomerRow.id === newCustomerRow.id) {
-        await adjustCustomer(oldCustomerRow.id, newOutstanding - editingOldOutstanding);
-      } else {
-        if (oldCustomerRow) await adjustCustomer(oldCustomerRow.id, -editingOldOutstanding);
-        if (newCustomerRow) await adjustCustomer(newCustomerRow.id, newOutstanding);
-      }
-
-      await updateInvoice(editingInvoice.id, {
-        customer: customerLabel,
+      const id = nextId(invoices, 'INV');
+      await saveSalesInvoice({
+        companyId: activeCompany.id,
+        invoiceId: id,
+        isEdit: false,
+        customerLabel,
+        oldCustomerId: null,
+        newCustomerId: selectedCustomer?.id ?? null,
+        oldOutstanding: 0,
+        newOutstanding,
         date: invoiceDate,
-        items: lines.filter((line) => line.part.trim()).reduce((sum, line) => sum + line.qty, 0),
+        items,
         total,
         paid: paidAmount,
-        status: paidAmount >= total && total > 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid',
-        discount_percent: discountPercent,
-        discount_amount: discountAmount,
+        status,
+        mode: 'Credit',
+        discountPercent,
+        discountAmount,
       });
 
+      await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers()]);
       setShowInvoiceModal(false);
-      setEditingInvoice(null);
-      setFeedback(`${editingInvoice.id} updated.`);
-      return;
+      setActiveTab('invoices');
+      setFeedback(`${id} generated for ${customerLabel}.`);
+    } catch (error) {
+      setInvoiceError(error instanceof Error ? error.message : 'Failed to save this invoice — please check Sales and Inventory before retrying.');
+    } finally {
+      setSavingInvoice(false);
     }
-
-    const id = nextId(invoices, 'INV');
-    await createInvoice({
-      id,
-      customer: customerLabel,
-      date: invoiceDate,
-      items: lines.reduce((sum, line) => sum + line.qty, 0),
-      total,
-      paid: paidAmount,
-      status: paidAmount >= total && total > 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid',
-      mode: 'Credit',
-      discount_percent: discountPercent,
-      discount_amount: discountAmount,
-    });
-
-    for (const line of lines) {
-      if (!line.part.trim()) continue;
-      const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
-      const createdItem = await createInvoiceItem({
-        invoice_id: id,
-        product_id: product?.id ?? null,
-        part_number: product?.part_number ?? '',
-        name: product?.name ?? line.part,
-        qty: line.qty,
-        unit_price: line.price,
-        line_total: line.qty * line.price,
-      });
-      if (product) {
-        await consumeStockFifo(product.id, line.qty, createdItem.id);
-      }
-    }
-
-    if (selectedCustomer) {
-      await adjustCustomer(selectedCustomer.id, newOutstanding);
-    }
-
-    setShowInvoiceModal(false);
-    setActiveTab('invoices');
-    setFeedback(`${id} generated for ${customerLabel}.`);
   };
 
   const confirmDeleteInvoice = async () => {
     if (!deleteCandidate) return;
-    const items = invoiceItems.filter((item) => item.invoice_id === deleteCandidate.id);
-    for (const item of items) {
-      if (item.product_id) {
-        await restoreStockForInvoiceItem(item.id);
-      }
-      await removeInvoiceItem(item.id);
-    }
-    const custRow = customers.find((c) => c.name === deleteCandidate.customer);
-    if (custRow) {
+    setDeleteError('');
+    setDeletingInvoice(true);
+    try {
+      const custRow = customers.find((c) => c.name === deleteCandidate.customer);
       const due = Number(deleteCandidate.total) - Number(deleteCandidate.paid);
-      await adjustCustomer(custRow.id, -due);
+      // Atomic on the database side (jde_delete_sales_invoice): restores FIFO stock for every
+      // line item and reverses the customer balance before removing the invoice itself.
+      await deleteSalesInvoice(deleteCandidate.id, custRow?.id ?? null, due);
+      await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers()]);
+      setFeedback(`${deleteCandidate.id} deleted — stock and customer balance reversed.`);
+      setDeleteCandidate(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : `Failed to delete ${deleteCandidate.id}.`);
+    } finally {
+      setDeletingInvoice(false);
     }
-    await removeInvoice(deleteCandidate.id);
-    setFeedback(`${deleteCandidate.id} deleted — stock and customer balance reversed.`);
-    setDeleteCandidate(null);
   };
 
   return (
@@ -360,10 +353,11 @@ export default function SalesPage() {
 
       {deleteCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="delete-invoice-title">
         <div className="modal-header"><h3 id="delete-invoice-title" className="modal-title">Delete invoice?</h3></div>
-        <div className="modal-body">
+        <div className="modal-body flex flex-col gap-3">
+          {deleteError && <div className="alert alert-danger" role="alert">{deleteError}</div>}
           <p>This will delete <strong>{deleteCandidate.id}</strong> and add its items back to stock{customers.some((c) => c.name === deleteCandidate.customer) ? ` and reduce ${deleteCandidate.customer}'s balance by the outstanding ₹${(Number(deleteCandidate.total) - Number(deleteCandidate.paid)).toLocaleString()}` : ''}.</p>
         </div>
-        <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setDeleteCandidate(null)}>Cancel</button><button className="btn btn-danger" onClick={confirmDeleteInvoice}>Delete Invoice</button></div>
+        <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setDeleteCandidate(null)} disabled={deletingInvoice}>Cancel</button><button className="btn btn-danger" onClick={confirmDeleteInvoice} disabled={deletingInvoice}>{deletingInvoice ? 'Deleting…' : 'Delete Invoice'}</button></div>
       </div></div>}
 
       {showInvoiceModal && (
@@ -371,6 +365,7 @@ export default function SalesPage() {
           <form onSubmit={saveInvoice}>
             <div className="modal-header"><h3 id="invoice-modal-title" className="modal-title">{editingInvoice ? `Edit ${editingInvoice.id}` : 'Create Sales Invoice'}</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>✕</button></div>
             <div className="modal-body flex flex-col gap-4">
+              {invoiceError && <div className="alert alert-danger" role="alert">{invoiceError}</div>}
               <div className="form-grid-2"><div className="form-group"><label className="form-label">Customer</label><select className="form-input form-select" value={customer} onChange={(event) => setCustomer(event.target.value)}><option value="">Walk-in Sale (no customer)</option>{customers.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div>
                 <div className="form-group"><label className="form-label">Invoice Date</label><input type="date" className="form-input" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} /></div></div>
               <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Invoice Line Items</h4>
@@ -420,7 +415,7 @@ export default function SalesPage() {
                 </div>
               )}
             </div>
-            <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total}>{editingInvoice ? 'Save Changes' : 'Generate & Save Invoice'}</button></div>
+            <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || savingInvoice}>{savingInvoice ? 'Saving…' : editingInvoice ? 'Save Changes' : 'Generate & Save Invoice'}</button></div>
           </form>
         </div></div>
       )}

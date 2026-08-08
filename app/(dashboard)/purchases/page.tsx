@@ -3,7 +3,7 @@
 import { ChangeEvent, FormEvent, useState } from 'react';
 import { Plus, FileCheck, Upload } from 'lucide-react';
 import { parseSpreadsheetFile, fileToBase64, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
-import { addStockLayer } from '@/lib/client-fifo';
+import { savePurchase, receivePurchaseStock } from '@/lib/client-purchases';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
 type PurchaseTab = 'purchases' | 'invoices';
@@ -41,11 +41,11 @@ function cleanedGuess(text: string): string {
 }
 
 export default function PurchasesPage() {
-  const { rows: products, create: createProduct } = useCompanyTable<Product>('products');
-  const { rows: suppliers, create: createSupplier, adjust: adjustSupplier } = useCompanyTable<Supplier>('suppliers');
-  const { rows: purchaseOrders, loading: poLoading, create: createPurchaseOrder, update: updatePurchaseOrder } = useCompanyTable<PurchaseOrder>('purchase_orders');
-  const { rows: grns, create: createGrn } = useCompanyTable<Grn>('grns');
-  const { rows: poItems, create: createPoItem } = useCompanyTable<PoItem>('po_items');
+  const { rows: products, create: createProduct, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
+  const { rows: suppliers, create: createSupplier, reload: reloadSuppliers } = useCompanyTable<Supplier>('suppliers');
+  const { rows: purchaseOrders, loading: poLoading, reload: reloadPurchaseOrders } = useCompanyTable<PurchaseOrder>('purchase_orders');
+  const { rows: grns, reload: reloadGrns } = useCompanyTable<Grn>('grns');
+  const { rows: poItems, reload: reloadPoItems } = useCompanyTable<PoItem>('po_items');
 
   const partOptions = products.map((product) => ({
     value: `${product.part_number} - ${product.name}`,
@@ -125,36 +125,22 @@ export default function PurchasesPage() {
     }) as Promise<Product>;
   }
 
-  async function receiveStock(poId: string, supplierName: string, items: Array<{ product_id: string | null; qty: number; unit_cost: number }>) {
-    const grnId = nextId(grns, 'GRN');
-    await createGrn({ id: grnId, po_number: poId, supplier: supplierName, received_at: new Date().toLocaleString('en-IN'), status: 'verified' });
-
-    for (const item of items) {
-      if (!item.product_id) continue;
-      // Opens a new FIFO cost batch at this purchase's price and bumps current_stock —
-      // this is what lets buying the same part at a different price later show correctly
-      // in Inventory instead of silently overwriting/averaging into one static cost field.
-      await addStockLayer(item.product_id, Number(item.qty), Number(item.unit_cost), poId, true);
-    }
-  }
-
   const recordPurchase = async (event: FormEvent) => {
     event.preventDefault();
+    if (!activeCompany) return;
     setPurchaseError('');
     setSavingPurchase(true);
     try {
       const supplierRow = await resolveSupplier(supplierName);
       const id = nextId(purchaseOrders, 'PO');
+      const grnId = nextId(grns, 'GRN');
       const paid = paidAmount;
 
-      await createPurchaseOrder({ id, supplier: supplierRow.name, date: purchaseDate, items: lines.length, total, paid, status: 'received' });
-
-      const lineItems = [];
+      const items = [];
       for (const line of lines) {
         if (!line.description.trim()) continue;
         const matchedProduct = await resolveProduct(line.description, line.unit_price);
-        await createPoItem({
-          po_id: id,
+        items.push({
           product_id: matchedProduct?.id ?? null,
           part_number: matchedProduct?.part_number ?? '',
           name: matchedProduct?.name ?? line.description,
@@ -162,24 +148,32 @@ export default function PurchasesPage() {
           unit_cost: line.unit_price,
           line_total: line.quantity * line.unit_price,
         });
-        lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity, unit_cost: line.unit_price });
       }
 
-      await receiveStock(id, supplierRow.name, lineItems);
+      // Atomic on the database side (jde_save_purchase): PO header, line items, GRN, FIFO stock
+      // layers, and the supplier balance all land as one transaction — a failure partway through
+      // leaves nothing half-done. Supplier/product auto-creation above stays a separate step (each
+      // already a single atomic insert on its own).
+      await savePurchase({
+        companyId: activeCompany.id,
+        poId: id,
+        grnId,
+        supplierId: supplierRow.id,
+        supplierName: supplierRow.name,
+        date: purchaseDate,
+        receivedAt: new Date().toLocaleString('en-IN'),
+        items,
+        total,
+        paid,
+        status: 'received',
+      });
 
-      // Newly created purchase — its amount has never been counted anywhere before, so it's safe to add to payables.
-      const due = total - paid;
-      if (due > 0) {
-        await adjustSupplier(supplierRow.id, due);
-      }
+      await Promise.all([reloadPurchaseOrders(), reloadPoItems(), reloadGrns(), reloadSuppliers(), reloadProducts()]);
 
       setShowPurchaseModal(false);
-      setFeedback(`${id} recorded — ${lines.length} item(s) added to stock from ${supplierRow.name}.`);
+      setFeedback(`${id} recorded — ${items.length} item(s) added to stock from ${supplierRow.name}.`);
       setActiveTab('purchases');
     } catch (error) {
-      // A purchase can partially save before a step fails (e.g. the PO exists but a line item
-      // didn't) — surfacing the real error lets the user check Purchases/Inventory and retry
-      // rather than silently losing track of what happened, or crashing the whole page.
       setPurchaseError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Inventory before retrying.');
     } finally {
       setSavingPurchase(false);
@@ -188,18 +182,26 @@ export default function PurchasesPage() {
 
   const markReceived = async (poId: string) => {
     const order = purchaseOrders.find((po) => po.id === poId);
-    if (!order) return;
+    if (!order || !activeCompany) return;
     setFeedback('');
     setImportError('');
     try {
-      await updatePurchaseOrder(poId, { status: 'received' });
-      // This is a pre-existing pending order created before per-purchase stock tracking existed — its
-      // amount is presumed already reflected in the supplier's balance, so only stock catches up here.
-      await receiveStock(
+      const grnId = nextId(grns, 'GRN');
+      // This is a pre-existing pending order created before per-purchase stock tracking existed —
+      // its amount is presumed already reflected in the supplier's balance, so only stock catches
+      // up here (atomic on the database side via jde_receive_purchase_stock: GRN + FIFO stock
+      // layers + status together).
+      await receivePurchaseStock({
+        companyId: activeCompany.id,
         poId,
-        order.supplier,
-        poItems.filter((item) => item.po_id === poId).map((item) => ({ product_id: item.product_id, qty: item.qty, unit_cost: item.unit_cost }))
-      );
+        grnId,
+        supplierName: order.supplier,
+        receivedAt: new Date().toLocaleString('en-IN'),
+        items: poItems
+          .filter((item) => item.po_id === poId)
+          .map((item) => ({ product_id: item.product_id, qty: item.qty, unit_cost: item.unit_cost })),
+      });
+      await Promise.all([reloadPurchaseOrders(), reloadGrns(), reloadProducts()]);
       setFeedback(`${poId} marked received and added to stock.`);
     } catch (error) {
       setImportError(error instanceof Error ? error.message : `Failed to mark ${poId} received.`);
@@ -254,20 +256,19 @@ export default function PurchasesPage() {
   };
 
   const confirmImportedPO = async () => {
-    if (!importPreview || !importPreview.supplier.trim()) return;
+    if (!importPreview || !importPreview.supplier.trim() || !activeCompany) return;
     setImportError('');
     try {
       const supplierRow = await resolveSupplier(importPreview.supplier);
       const importedTotal = importPreview.lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
       const id = nextId(purchaseOrders, 'PO');
-      await createPurchaseOrder({ id, supplier: supplierRow.name, date: todayIso(), items: importPreview.lines.length, total: importedTotal, paid: 0, status: 'received' });
+      const grnId = nextId(grns, 'GRN');
 
-      const lineItems = [];
+      const items = [];
       for (const line of importPreview.lines) {
         if (!line.description.trim()) continue;
         const matchedProduct = await resolveProduct(line.description, line.unit_price);
-        await createPoItem({
-          po_id: id,
+        items.push({
           product_id: matchedProduct?.id ?? null,
           part_number: matchedProduct?.part_number ?? '',
           name: matchedProduct?.name ?? line.description,
@@ -275,15 +276,25 @@ export default function PurchasesPage() {
           unit_cost: line.unit_price,
           line_total: line.quantity * line.unit_price,
         });
-        lineItems.push({ product_id: matchedProduct?.id ?? null, qty: line.quantity, unit_cost: line.unit_price });
       }
 
-      await receiveStock(id, supplierRow.name, lineItems);
-      if (importedTotal > 0) {
-        await adjustSupplier(supplierRow.id, importedTotal);
-      }
+      await savePurchase({
+        companyId: activeCompany.id,
+        poId: id,
+        grnId,
+        supplierId: supplierRow.id,
+        supplierName: supplierRow.name,
+        date: todayIso(),
+        receivedAt: new Date().toLocaleString('en-IN'),
+        items,
+        total: importedTotal,
+        paid: 0,
+        status: 'received',
+      });
 
-      setFeedback(`${id} recorded from ${importPreview.fileName} — ${importPreview.lines.length} item(s), ₹${importedTotal.toLocaleString()} from ${supplierRow.name}.`);
+      await Promise.all([reloadPurchaseOrders(), reloadPoItems(), reloadGrns(), reloadSuppliers(), reloadProducts()]);
+
+      setFeedback(`${id} recorded from ${importPreview.fileName} — ${items.length} item(s), ₹${importedTotal.toLocaleString()} from ${supplierRow.name}.`);
       setImportPreview(null);
       setActiveTab('purchases');
     } catch (error) {
@@ -331,7 +342,7 @@ export default function PurchasesPage() {
         </tbody>
       </table></div>}
 
-      {activeTab === 'invoices' && <div className="card empty-state"><FileCheck size={32} /><p className="empty-state-title">No unmatched supplier invoices</p><p className="empty-state-desc">Invoices will appear here when uploaded or received against a purchase.</p></div>}
+      {activeTab === 'invoices' && <div className="card empty-state"><FileCheck size={32} /><p className="empty-state-title">Supplier invoice matching isn&apos;t available yet</p><p className="empty-state-desc">This will let you upload supplier invoices and match them against purchases — not built yet.</p></div>}
 
       {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '480px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
         <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Record Purchase from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setImportPreview(null)}>✕</button></div>

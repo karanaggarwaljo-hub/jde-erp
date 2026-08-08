@@ -15,6 +15,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { useCompany } from '@/components/CompanyProvider';
 
 type Product = { id: string; part_number: string; name: string; brand: string; category: string; cost_price: number; current_stock: number; min_stock: number; location: string };
 type Customer = { id: string; balance: number };
@@ -49,6 +50,7 @@ function pctChange(current: number, previous: number): { label: string; positive
 }
 
 export default function DashboardPage() {
+  const { configError } = useCompany();
   const { rows: products } = useCompanyTable<Product>('products');
   const { rows: customers } = useCompanyTable<Customer>('customers');
   const { rows: suppliers } = useCompanyTable<Supplier>('suppliers');
@@ -142,6 +144,14 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {configError && (
+        <div className="alert alert-danger mb-4" role="alert">
+          Can&apos;t reach the database right now — {configError}
+        </div>
+      )}
+
+      {!configError && (
+      <>
       <div className="kpi-grid">
         {kpis.map((kpi) => {
           const Icon = kpi.icon;
@@ -254,6 +264,8 @@ export default function DashboardPage() {
           </table>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

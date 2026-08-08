@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { ChangeEvent, useEffect, useState } from 'react';
+import { ChangeEvent, useState } from 'react';
 import { ArrowLeft, Sparkles, Upload, Search, CheckCircle2, XCircle, HelpCircle, ExternalLink, Trash2, RefreshCw, AlertTriangle, Copy } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { fileToBase64 } from '@/lib/client-import';
@@ -55,8 +55,16 @@ export default function CatalogAdminDetailPage() {
   const [publishBusy, setPublishBusy] = useState(false);
   const [publishError, setPublishError] = useState('');
 
-  useEffect(() => {
-    if (!row) return;
+  // Reset the editable fields whenever a *different* row loads, or the current row comes back
+  // freshly reloaded after a save (row.updated_at changes) — never on local edits in between.
+  // Computed directly during render (React's documented "adjusting state when a prop changes"
+  // pattern) instead of in a useEffect, so the reset happens in the same render pass rather than
+  // committing stale/default values first and then cascading into a second render:
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const rowSyncKey = row ? `${row.id}:${row.updated_at}` : undefined;
+  const [syncedRowKey, setSyncedRowKey] = useState<string | undefined>(undefined);
+  if (row && rowSyncKey !== syncedRowKey) {
+    setSyncedRowKey(rowSyncKey);
     setForm({
       title: row.title || '', part_number: row.part_number || '', oem_number: row.oem_number || '',
       category: row.category || '', brand: row.brand || '', compatibility: row.compatibility || '',
@@ -75,9 +83,7 @@ export default function CatalogAdminDetailPage() {
         warnings: (row.generated_description.warnings || []).join('\n'),
       });
     }
-    // Only re-sync from the loaded row, never from local edits — deliberately excludes `form`/`descDraft`/etc.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row?.id, row?.updated_at]);
+  }
 
   if (loading && !row) {
     return <div className="empty-state"><p className="empty-state-title">Loading…</p></div>;
@@ -139,7 +145,7 @@ export default function CatalogAdminDetailPage() {
     await update(row.id, { reference_candidates: candidates });
   };
 
-  const useAsReference = async (url: string) => {
+  const selectAsReference = async (url: string) => {
     await update(row.id, { selected_reference_url: url });
   };
 
@@ -384,7 +390,7 @@ export default function CatalogAdminDetailPage() {
                     <button className={`btn btn-sm ${c.verdict === 'useful' ? 'btn-primary' : 'btn-ghost'}`} title="Useful" onClick={() => setCandidateVerdict(i, 'useful')}><CheckCircle2 size={14} /></button>
                     <button className={`btn btn-sm ${c.verdict === 'uncertain' ? 'btn-primary' : 'btn-ghost'}`} title="Uncertain" onClick={() => setCandidateVerdict(i, 'uncertain')}><HelpCircle size={14} /></button>
                     <button className={`btn btn-sm ${c.verdict === 'wrong' ? 'btn-primary' : 'btn-ghost'}`} title="Wrong" onClick={() => setCandidateVerdict(i, 'wrong')}><XCircle size={14} /></button>
-                    {c.kind === 'image' && <button className="btn btn-secondary btn-sm" onClick={() => useAsReference(c.url)}>Use as Reference</button>}
+                    {c.kind === 'image' && <button className="btn btn-secondary btn-sm" onClick={() => selectAsReference(c.url)}>Use as Reference</button>}
                   </div>
                 </div>
               ))}
@@ -484,7 +490,7 @@ export default function CatalogAdminDetailPage() {
           {publishReady && row.publication_status !== 'published' && drift.productMissing && (
             <div className="alert alert-danger" role="alert">
               <AlertTriangle size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
-              This part no longer exists in Inventory — publishing is disabled until that's resolved.
+              This part no longer exists in Inventory — publishing is disabled until that&apos;s resolved.
             </div>
           )}
           {publishReady && row.publication_status !== 'published' && !drift.productMissing && driftBlocksPublish && (
