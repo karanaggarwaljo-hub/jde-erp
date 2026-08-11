@@ -9,7 +9,10 @@ export type SalesInvoiceItemInput = {
 
 export type SaveSalesInvoiceInput = {
   companyId: string;
-  invoiceId: string;
+  /** Only meaningful (and required) when isEdit is true — omit/pass null on create, since the
+   *  database generates the real id itself (globally unique across every company, not something
+   *  the client can safely guess from its own company-scoped view of existing invoices). */
+  invoiceId: string | null;
   isEdit: boolean;
   customerLabel: string;
   oldCustomerId: string | null;

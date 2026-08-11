@@ -208,7 +208,10 @@ export type SalesInvoiceItemInput = {
 
 export type SaveSalesInvoiceInput = {
   companyId: string;
-  invoiceId: string;
+  /** Only meaningful (and required) when isEdit is true — a create ignores this and the database
+   *  generates the real id itself, since a client-guessed id can't safely account for every other
+   *  company's existing invoices (the id column is globally unique, not scoped per company). */
+  invoiceId: string | null;
   isEdit: boolean;
   customerLabel: string;
   oldCustomerId: string | null;
@@ -276,8 +279,6 @@ export type PurchaseItemInput = {
 
 export type SavePurchaseInput = {
   companyId: string;
-  poId: string;
-  grnId: string;
   supplierId: string | null;
   supplierName: string;
   date: string;
@@ -286,17 +287,22 @@ export type SavePurchaseInput = {
   total: number;
   paid: number;
   status: string;
+  /** SHA-256 hash of the source invoice file, when this purchase came from a scanned/imported
+   *  file — null for manual entry. jde_save_purchase rejects a second purchase with the same
+   *  (company, hash) pair, so the exact same invoice file can never be recorded twice. */
+  sourceFileHash?: string | null;
 };
 
 /** Atomically records a new purchase — PO header, line items, GRN, FIFO stock layers, and
  *  supplier balance — as one database transaction (jde_save_purchase), instead of the 5-9+
- *  separate browser-initiated calls the Purchases page used to make. */
+ *  separate browser-initiated calls the Purchases page used to make. The PO/GRN ids are generated
+ *  inside the function itself (from the true max across every company, not just the caller's
+ *  possibly-stale/company-scoped view) — the caller reads the real id off the returned row rather
+ *  than guessing one, since the id column is globally unique across all companies. */
 export async function savePurchase(input: SavePurchaseInput): Promise<Record<string, unknown>> {
   const { data, error } = await getClient()
     .rpc('jde_save_purchase', {
       p_company_id: input.companyId,
-      p_po_id: input.poId,
-      p_grn_id: input.grnId,
       p_supplier_id: input.supplierId,
       p_supplier_name: input.supplierName,
       p_date: input.date,
@@ -305,16 +311,30 @@ export async function savePurchase(input: SavePurchaseInput): Promise<Record<str
       p_total: input.total,
       p_paid: input.paid,
       p_status: input.status,
+      p_source_file_hash: input.sourceFileHash ?? null,
     })
     .single();
   if (error) throw error;
   return data as Record<string, unknown>;
 }
 
+/** Server-only: the id of the purchase already recorded from this exact invoice file, if any —
+ *  used to reject a re-scan of a file that's already been recorded before spending an AI call on
+ *  it, not just at final save time. Returns undefined when this file hasn't been recorded yet. */
+export async function findPurchaseByFileHash(companyId: string, fileHash: string): Promise<string | undefined> {
+  const { data, error } = await getClient()
+    .from(supaTable('purchase_orders'))
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('source_file_hash', fileHash)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { id: string } | null)?.id;
+}
+
 export type ReceivePurchaseStockInput = {
   companyId: string;
   poId: string;
-  grnId: string;
   supplierName: string;
   receivedAt: string;
   items: Array<{ product_id: string | null; qty: number; unit_cost: number }>;
@@ -323,16 +343,46 @@ export type ReceivePurchaseStockInput = {
 /** Atomically marks a pre-existing pending purchase order received — GRN, FIFO stock layers, and
  *  status — as one database transaction. For purchases created through this app's own "Record
  *  Purchase" / file-import flows (which use savePurchase above and are already 'received'
- *  immediately); this path exists for older/externally-created pending POs. */
+ *  immediately); this path exists for older/externally-created pending POs. The GRN id is
+ *  generated inside the function itself, same reasoning as savePurchase above. */
 export async function receivePurchaseStock(input: ReceivePurchaseStockInput): Promise<Record<string, unknown>> {
   const { data, error } = await getClient()
     .rpc('jde_receive_purchase_stock', {
       p_company_id: input.companyId,
       p_po_id: input.poId,
-      p_grn_id: input.grnId,
       p_supplier_name: input.supplierName,
       p_received_at: input.receivedAt,
       p_items: input.items,
+    })
+    .single();
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
+export type CreateExpenseInput = {
+  companyId: string;
+  category: string;
+  description: string;
+  amount: number;
+  date: string;
+  paidBy: string;
+  mode: string;
+};
+
+/** Records a new expense with a server-generated id (jde_create_expense) — same reasoning as
+ *  savePurchase/saveSalesInvoice above: the id is globally unique across every company, so it's
+ *  generated from the true full-table state inside the function, not guessed client-side from
+ *  whichever company's rows happen to already be loaded in the browser. */
+export async function createExpense(input: CreateExpenseInput): Promise<Record<string, unknown>> {
+  const { data, error } = await getClient()
+    .rpc('jde_create_expense', {
+      p_company_id: input.companyId,
+      p_category: input.category,
+      p_description: input.description,
+      p_amount: input.amount,
+      p_date: input.date,
+      p_paid_by: input.paidBy,
+      p_mode: input.mode,
     })
     .single();
   if (error) throw error;

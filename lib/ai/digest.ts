@@ -1,7 +1,7 @@
 import { listRows, getActiveCompanyId } from '@/lib/db';
 
 type Product = { name: string; part_number: string; brand: string; category: string; current_stock: number; min_stock: number; cost_price: number };
-type Customer = { credit_limit: number; balance: number };
+type Customer = { balance: number };
 type Supplier = { name: string; balance: number };
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string };
 type Quotation = { status: string };
@@ -72,7 +72,6 @@ export async function buildBusinessDigest() {
     },
     customers: {
       total: customers.length,
-      total_credit_limit: sum(customers, 'credit_limit'),
       total_outstanding_receivables: sum(customers, 'balance'),
     },
     suppliers: {

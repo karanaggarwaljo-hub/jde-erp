@@ -3,14 +3,17 @@
 import { useState } from 'react';
 import { Plus, Sparkles } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { createExpense } from '@/lib/client-expenses';
 
 type Expense = { id: string; company_id: string; category: string; description: string; amount: number; date: string; paid_by: string; mode: string };
 
 export default function ExpensesPage() {
-  const { rows: expenses, loading, create } = useCompanyTable<Expense>('expenses');
+  const { rows: expenses, loading, reload, activeCompany } = useCompanyTable<Expense>('expenses');
 
   const [showModal, setShowModal] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [expenseError, setExpenseError] = useState('');
+  const [savingExpense, setSavingExpense] = useState(false);
   const [categorizing, setCategorizing] = useState(false);
   const [newExp, setNewExp] = useState({
     category: 'transport',
@@ -46,28 +49,33 @@ export default function ExpensesPage() {
   for (const exp of expenses) categoryTotals.set(exp.category, (categoryTotals.get(exp.category) ?? 0) + exp.amount);
   const largestCategory = Array.from(categoryTotals.entries()).sort((a, b) => b[1] - a[1])[0];
 
-  const nextExpenseId = () => {
-    const maxNum = expenses.reduce((max, exp) => {
-      const match = exp.id.match(/(\d+)$/);
-      return match ? Math.max(max, Number(match[1])) : max;
-    }, 100);
-    return `EXP-${maxNum + 1}`;
-  };
-
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    await create({
-      id: nextExpenseId(),
-      category: newExp.category,
-      description: newExp.description,
-      amount: Number(newExp.amount),
-      date: new Date().toISOString().split('T')[0],
-      paid_by: newExp.paid_by,
-      mode: newExp.mode,
-    });
-    setShowModal(false);
-    setFeedback(`Expense ${newExp.description} saved.`);
-    setNewExp({ category: 'transport', description: '', amount: '', paid_by: 'Karan Aggarwal', mode: 'upi' });
+    if (!activeCompany) return;
+    setExpenseError('');
+    setSavingExpense(true);
+    try {
+      // Id is generated inside jde_create_expense itself, not guessed client-side — same reasoning
+      // as Purchases/Sales: it's globally unique across every company on this account, not scoped
+      // per company, so a locally-computed guess can collide with another company's real records.
+      await createExpense({
+        companyId: activeCompany.id,
+        category: newExp.category,
+        description: newExp.description,
+        amount: Number(newExp.amount),
+        date: new Date().toISOString().split('T')[0],
+        paidBy: newExp.paid_by,
+        mode: newExp.mode,
+      });
+      await reload();
+      setShowModal(false);
+      setFeedback(`Expense ${newExp.description} saved.`);
+      setNewExp({ category: 'transport', description: '', amount: '', paid_by: 'Karan Aggarwal', mode: 'upi' });
+    } catch (error) {
+      setExpenseError(error instanceof Error ? error.message : 'Failed to log this expense — please try again.');
+    } finally {
+      setSavingExpense(false);
+    }
   };
 
   return (
@@ -145,6 +153,7 @@ export default function ExpensesPage() {
             </div>
             <form onSubmit={handleAdd}>
               <div className="modal-body flex flex-col gap-4">
+                {expenseError && <div className="alert alert-danger" role="alert">{expenseError}</div>}
                 <div className="form-grid-2">
                   <div className="form-group">
                     <label className="form-label flex items-center gap-1">Category * {categorizing && <Sparkles size={12} className="text-brand spin" />}</label>
@@ -188,8 +197,8 @@ export default function ExpensesPage() {
               </div>
 
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save Expense Entry</button>
+                <button type="button" className="btn btn-secondary" disabled={savingExpense} onClick={() => setShowModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={savingExpense}>{savingExpense ? 'Saving…' : 'Save Expense Entry'}</button>
               </div>
             </form>
           </div>

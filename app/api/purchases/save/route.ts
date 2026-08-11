@@ -4,16 +4,10 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { companyId, poId, grnId, supplierId, supplierName, date, receivedAt, items, total, paid, status } = body ?? {};
+  const { companyId, supplierId, supplierName, date, receivedAt, items, total, paid, status, sourceFileHash } = body ?? {};
 
   if (typeof companyId !== 'string' || !companyId) {
     return Response.json({ error: 'companyId is required' }, { status: 400 });
-  }
-  if (typeof poId !== 'string' || !poId) {
-    return Response.json({ error: 'poId is required' }, { status: 400 });
-  }
-  if (typeof grnId !== 'string' || !grnId) {
-    return Response.json({ error: 'grnId is required' }, { status: 400 });
   }
   if (!Array.isArray(items)) {
     return Response.json({ error: 'items must be an array' }, { status: 400 });
@@ -22,8 +16,6 @@ export async function POST(request: Request) {
   try {
     const po = await savePurchase({
       companyId,
-      poId,
-      grnId,
       supplierId: supplierId ?? null,
       supplierName: String(supplierName ?? ''),
       date: String(date ?? ''),
@@ -32,6 +24,7 @@ export async function POST(request: Request) {
       total: Number(total) || 0,
       paid: Number(paid) || 0,
       status: String(status ?? 'received'),
+      sourceFileHash: sourceFileHash ?? null,
     });
     return Response.json(po, { status: 201 });
   } catch (error) {

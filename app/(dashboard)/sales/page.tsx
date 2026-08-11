@@ -11,21 +11,13 @@ type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 type InvoiceLine = { part: string; qty: number; price: number };
 
 type Product = { id: string; company_id: string; part_number: string; name: string; category: string; sale_price: number; current_stock: number };
-type Customer = { id: string; company_id: string; name: string; balance: number; credit_limit: number };
+type Customer = { id: string; company_id: string; name: string; balance: number };
 type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string; discount_percent: number; discount_amount: number };
 type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
 type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_price: number; line_total: number };
 
 function todayIso() {
   return new Date().toISOString().split('T')[0];
-}
-
-function nextId(rows: Array<{ id: string }>, prefix: string) {
-  const maxNum = rows.reduce((max, row) => {
-    const match = row.id.match(/(\d+)$/);
-    return match ? Math.max(max, Number(match[1])) : max;
-  }, 1000);
-  return `${prefix}-${maxNum + 1}`;
 }
 
 // Leaving the customer field blank means a walk-in sale — no account to bill, so it's stored
@@ -35,7 +27,7 @@ function nextId(rows: Array<{ id: string }>, prefix: string) {
 const WALK_IN_CUSTOMER = 'Walk-in Customer';
 
 export default function SalesPage() {
-  const { rows: products, activeCompany } = useCompanyTable<Product>('products');
+  const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
   const { rows: customers, reload: reloadCustomers } = useCompanyTable<Customer>('customers');
   const { rows: invoices, loading: invoicesLoading, reload: reloadInvoices } = useCompanyTable<Invoice>('invoices');
   const { rows: quotations, loading: quotationsLoading } = useCompanyTable<Quotation>('quotations');
@@ -75,11 +67,7 @@ export default function SalesPage() {
   const selectedCustomer = customers.find((c) => c.name === customer);
   const customerLabel = customer.trim() || WALK_IN_CUSTOMER;
   const editingOldOutstanding = editingInvoice ? Number(editingInvoice.total) - Number(editingInvoice.paid) : 0;
-  const isEditingSameCustomer = !!editingInvoice && editingInvoice.customer === customer;
-  const balanceBeforeThisInvoice = Number(selectedCustomer?.balance ?? 0) - (isEditingSameCustomer ? editingOldOutstanding : 0);
   const newOutstanding = total - paidAmount;
-  const projectedBalance = balanceBeforeThisInvoice + newOutstanding;
-  const overCreditLimit = !!selectedCustomer && Number(selectedCustomer.credit_limit) > 0 && projectedBalance > Number(selectedCustomer.credit_limit);
 
   const filteredInvoices = invoices.filter((invoice) => {
     const query = search.trim().toLowerCase();
@@ -178,17 +166,19 @@ export default function SalesPage() {
           discountAmount,
         });
 
-        await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers()]);
+        await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
         setShowInvoiceModal(false);
         setEditingInvoice(null);
         setFeedback(`${editingInvoice.id} updated.`);
         return;
       }
 
-      const id = nextId(invoices, 'INV');
-      await saveSalesInvoice({
+      // The id is generated inside jde_save_sales_invoice itself and read back from the result —
+      // not guessed client-side — since id is globally unique across every company, not just the
+      // ones this browser has loaded.
+      const invoice = await saveSalesInvoice({
         companyId: activeCompany.id,
-        invoiceId: id,
+        invoiceId: null,
         isEdit: false,
         customerLabel,
         oldCustomerId: null,
@@ -205,10 +195,10 @@ export default function SalesPage() {
         discountAmount,
       });
 
-      await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers()]);
+      await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
       setShowInvoiceModal(false);
       setActiveTab('invoices');
-      setFeedback(`${id} generated for ${customerLabel}.`);
+      setFeedback(`${invoice.id} generated for ${customerLabel}.`);
     } catch (error) {
       setInvoiceError(error instanceof Error ? error.message : 'Failed to save this invoice — please check Sales and Inventory before retrying.');
     } finally {
@@ -226,7 +216,7 @@ export default function SalesPage() {
       // Atomic on the database side (jde_delete_sales_invoice): restores FIFO stock for every
       // line item and reverses the customer balance before removing the invoice itself.
       await deleteSalesInvoice(deleteCandidate.id, custRow?.id ?? null, due);
-      await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers()]);
+      await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
       setFeedback(`${deleteCandidate.id} deleted — stock and customer balance reversed.`);
       setDeleteCandidate(null);
     } catch (error) {
@@ -409,11 +399,6 @@ export default function SalesPage() {
                 <div><span className="text-muted">Received: </span><strong className="text-success">₹{paidAmount.toLocaleString()}</strong></div>
                 <div><strong>Total Payable: </strong><span className="invoice-total">₹{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
               </div>
-              {overCreditLimit && selectedCustomer && (
-                <div className="alert alert-warning" role="alert">
-                  This will put {selectedCustomer.name} ₹{(projectedBalance - Number(selectedCustomer.credit_limit)).toLocaleString()} over their ₹{Number(selectedCustomer.credit_limit).toLocaleString()} credit limit (new balance would be ₹{projectedBalance.toLocaleString()}). You can still save this invoice.
-                </div>
-              )}
             </div>
             <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || savingInvoice}>{savingInvoice ? 'Saving…' : editingInvoice ? 'Save Changes' : 'Generate & Save Invoice'}</button></div>
           </form>

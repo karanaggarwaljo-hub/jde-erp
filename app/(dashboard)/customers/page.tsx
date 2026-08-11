@@ -5,7 +5,7 @@ import { Plus, Phone, Mail, MapPin, Sparkles } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
 
-const emptyForm = { name: '', phone: '', email: '', gstin: '', address: '', type: 'retail', credit_limit: 50000 };
+const emptyForm = { name: '', phone: '', email: '', gstin: '', address: '', type: 'retail' };
 
 type Customer = {
   id: string;
@@ -16,7 +16,6 @@ type Customer = {
   gstin: string;
   address: string;
   type: string;
-  credit_limit: number;
   balance: number;
 };
 
@@ -78,7 +77,7 @@ export default function CustomersPage() {
 
   return (
     <div>
-      <div className="page-header"><div><h1 className="page-title">Customer Ledger & Directory</h1><p className="page-subtitle">Track accounts receivable, credit limits, GST numbers and purchase histories</p></div>
+      <div className="page-header"><div><h1 className="page-title">Customer Ledger & Directory</h1><p className="page-subtitle">Track accounts receivable, GST numbers and purchase histories</p></div>
         <button className="btn btn-primary" onClick={() => setShowModal(true)}><Plus size={16} /> Add New Customer</button></div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
@@ -94,7 +93,7 @@ export default function CustomersPage() {
             <h3 className="directory-card-title">{customer.name}</h3>
             <div className="directory-details"><div className="flex items-center gap-2"><Phone size={13} /><span>{customer.phone || 'No phone'}</span></div><div className="flex items-center gap-2"><Mail size={13} /><span>{customer.email || 'No email'}</span></div><div className="flex items-center gap-2"><MapPin size={13} /><span className="truncate">{customer.address || 'No address'}</span></div></div>
           </div>
-          <div className="directory-financials"><div><small>Outstanding</small><strong className={customer.balance > 0 ? 'text-danger' : 'text-success'}>₹{customer.balance.toLocaleString()}</strong></div><div><small>Credit Limit</small><strong>₹{customer.credit_limit.toLocaleString()}</strong></div></div>
+          <div className="directory-financials"><div><small>Outstanding</small><strong className={customer.balance > 0 ? 'text-danger' : 'text-success'}>₹{customer.balance.toLocaleString()}</strong></div></div>
           <div className="flex gap-2 mt-2">
             <button className="btn btn-secondary btn-sm w-full" style={{ justifyContent: 'center' }} disabled={!customer.balance} onClick={() => openPayment(customer)}>Received</button>
             <button className="btn btn-ghost btn-sm" aria-label={`Draft payment reminder for ${customer.name}`} title="Draft a payment reminder" disabled={!customer.balance} onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /></button>
@@ -108,7 +107,6 @@ export default function CustomersPage() {
           <div className="form-group"><label className="form-label">Customer / Business Name *</label><input className="form-input" required placeholder="e.g. Acme Motors" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></div>
           <div className="form-grid-2"><div className="form-group"><label className="form-label">Phone</label><input className="form-input" placeholder="10-digit number" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></div><div className="form-group"><label className="form-label">Email</label><input type="email" className="form-input" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></div></div>
           <div className="form-grid-2"><div className="form-group"><label className="form-label">GSTIN</label><input className="form-input" placeholder="GST Number" value={form.gstin} onChange={(event) => setForm({ ...form, gstin: event.target.value })} /></div><div className="form-group"><label className="form-label">Customer Type</label><select className="form-input form-select" value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}><option value="retail">Retail</option><option value="wholesale">Wholesale</option><option value="dealer">Dealer</option></select></div></div>
-          <div className="form-group"><label className="form-label">Credit Limit (₹)</label><input type="number" min="0" className="form-input" value={form.credit_limit} onChange={(event) => setForm({ ...form, credit_limit: Number(event.target.value) })} /></div>
           <div className="form-group"><label className="form-label">Billing Address</label><textarea className="form-input" rows={2} placeholder="Full postal address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button><button type="submit" className="btn btn-primary">Save Customer</button></div>

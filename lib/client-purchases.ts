@@ -9,8 +9,6 @@ export type PurchaseItemInput = {
 
 export type SavePurchaseInput = {
   companyId: string;
-  poId: string;
-  grnId: string;
   supplierId: string | null;
   supplierName: string;
   date: string;
@@ -19,12 +17,14 @@ export type SavePurchaseInput = {
   total: number;
   paid: number;
   status: string;
+  /** SHA-256 hash of the source invoice file — set when this purchase came from a scanned/
+   *  imported file, so the server can reject the exact same file being recorded twice. */
+  sourceFileHash?: string | null;
 };
 
 export type ReceivePurchaseStockInput = {
   companyId: string;
   poId: string;
-  grnId: string;
   supplierName: string;
   receivedAt: string;
   items: Array<{ product_id: string | null; qty: number; unit_cost: number }>;

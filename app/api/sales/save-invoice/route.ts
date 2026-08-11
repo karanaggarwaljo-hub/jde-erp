@@ -13,8 +13,11 @@ export async function POST(request: Request) {
   if (typeof companyId !== 'string' || !companyId) {
     return Response.json({ error: 'companyId is required' }, { status: 400 });
   }
-  if (typeof invoiceId !== 'string' || !invoiceId) {
-    return Response.json({ error: 'invoiceId is required' }, { status: 400 });
+  // Only required when editing an existing invoice — a new invoice's id is generated inside the
+  // database transaction itself (globally unique across every company, not something the caller
+  // can safely guess), so invoiceId is ignored entirely when isEdit is false.
+  if (isEdit && (typeof invoiceId !== 'string' || !invoiceId)) {
+    return Response.json({ error: 'invoiceId is required when editing an invoice' }, { status: 400 });
   }
   if (!Array.isArray(items)) {
     return Response.json({ error: 'items must be an array' }, { status: 400 });
@@ -23,7 +26,7 @@ export async function POST(request: Request) {
   try {
     const invoice = await saveSalesInvoice({
       companyId,
-      invoiceId,
+      invoiceId: isEdit ? invoiceId : null,
       isEdit: Boolean(isEdit),
       customerLabel: String(customerLabel ?? ''),
       oldCustomerId: oldCustomerId ?? null,

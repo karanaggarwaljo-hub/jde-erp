@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useState } from 'react';
 import { Plus, FileCheck, Upload } from 'lucide-react';
-import { parseSpreadsheetFile, fileToBase64, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
+import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
 import { savePurchase, receivePurchaseStock } from '@/lib/client-purchases';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 
@@ -20,14 +20,6 @@ function todayIso() {
   return new Date().toISOString().split('T')[0];
 }
 
-function nextId(rows: Array<{ id: string }>, prefix: string) {
-  const maxNum = rows.reduce((max, row) => {
-    const match = row.id.match(/(\d+)$/);
-    return match ? Math.max(max, Number(match[1])) : max;
-  }, 1000);
-  return `${prefix}-${maxNum + 1}`;
-}
-
 function isSpreadsheetFile(file: File) {
   return SPREADSHEET_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext));
 }
@@ -40,11 +32,30 @@ function cleanedGuess(text: string): string {
   return text.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
 }
 
+async function parseJsonOrThrow(res: Response, fallback: string): Promise<unknown> {
+  const text = await res.text();
+  let body: unknown = undefined;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      // Non-JSON body (e.g. an HTML error page) — fall through to the generic/status-based message.
+    }
+  }
+  if (!res.ok) {
+    const message = body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string'
+      ? (body as { error: string }).error
+      : `${fallback} (${res.status})`;
+    throw new Error(message);
+  }
+  return body;
+}
+
 export default function PurchasesPage() {
-  const { rows: products, create: createProduct, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
+  const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
   const { rows: suppliers, create: createSupplier, reload: reloadSuppliers } = useCompanyTable<Supplier>('suppliers');
   const { rows: purchaseOrders, loading: poLoading, reload: reloadPurchaseOrders } = useCompanyTable<PurchaseOrder>('purchase_orders');
-  const { rows: grns, reload: reloadGrns } = useCompanyTable<Grn>('grns');
+  const { reload: reloadGrns } = useCompanyTable<Grn>('grns');
   const { rows: poItems, reload: reloadPoItems } = useCompanyTable<PoItem>('po_items');
 
   const partOptions = products.map((product) => ({
@@ -68,7 +79,8 @@ export default function PurchasesPage() {
 
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
-  const [importPreview, setImportPreview] = useState<{ fileName: string; lines: ImportedLine[]; supplier: string } | null>(null);
+  const [importPreview, setImportPreview] = useState<{ fileName: string; lines: ImportedLine[]; supplier: string; supplierGstin: string; fileHash: string | null } | null>(null);
+  const [confirmingImport, setConfirmingImport] = useState(false);
 
   const total = lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
   const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
@@ -88,41 +100,71 @@ export default function PurchasesPage() {
     setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   };
 
-  async function resolveSupplier(name: string): Promise<Supplier> {
+  async function resolveSupplier(name: string, gstin?: string): Promise<Supplier> {
     const existing = suppliers.find((s) => s.name.toLowerCase() === name.trim().toLowerCase());
     if (existing) return existing;
-    return createSupplier({ name: name.trim(), category: '', phone: '', email: '', gstin: '', terms: 30, balance: 0 }) as Promise<Supplier>;
+    return createSupplier({ name: name.trim(), category: '', phone: '', email: '', gstin: gstin?.trim() ?? '', terms: 30, balance: 0 }) as Promise<Supplier>;
   }
 
   /** Matches a typed line description against an existing part; if nothing matches, auto-creates
    *  a new Inventory item from it — same pattern as resolveSupplier above, so buying a brand-new
-   *  part works the first time instead of silently doing nothing because nothing matched. */
-  async function resolveProduct(description: string, unitCost: number): Promise<Product | null> {
+   *  part works the first time instead of silently doing nothing because nothing matched.
+   *
+   *  knownProducts is a local, caller-owned list (seeded from `products`, mutated in place as new
+   *  parts get created) rather than reading `products` directly — two things this fixes at once:
+   *  1. Speed: creating a part through the hook's own `create()` reloads the *entire* products
+   *     table after every single call. A 14-line invoice import was doing that 14 times in a row —
+   *     each one slower than the last as Inventory grows — which is what made recording a purchase
+   *     feel painfully slow. This uses a direct, unwrapped POST instead; the caller reloads once,
+   *     after the whole batch, not per item.
+   *  2. Correctness: `products` from the hook is a React value captured once when this function
+   *     started running — it never updates mid-loop no matter how many items get created before
+   *     it. Multiple genuinely-new items in the *same* purchase could all compute the same
+   *     `products.length`-based fallback part number and collide (this is what produced several
+   *     real items all sharing "SP-235" after one multi-line invoice import). knownProducts is
+   *     grown after every creation, so each subsequent item in the same batch sees the ones before it.
+   *
+   *  splitOnDash controls whether a " - " in the description is treated as an already-formatted
+   *  "part number - name" pair (matching the po-part-options datalist's own `${part_number} -
+   *  ${name}` convention, so typing/picking a new part in that same shape works as expected).
+   *  Only safe for manually-typed descriptions — pass false for AI-scanned invoice text, which is
+   *  plain natural-language and can contain " - " for unrelated reasons (e.g. "LOADER CUTTER KIT
+   *  - JCB", where JCB is a brand, not a part number). Splitting there mangled real line items
+   *  into a part "number" like "PIN" named "12400" instead of one part named "PIN - 12400". */
+  async function resolveProduct(description: string, unitCost: number, knownProducts: Product[], splitOnDash = true): Promise<Product | null> {
     const trimmed = description.trim();
     if (!trimmed) return null;
-    const existing = products.find((p) => `${p.part_number} - ${p.name}` === trimmed);
+    const existing = knownProducts.find((p) => `${p.part_number} - ${p.name}` === trimmed);
     if (existing) return existing;
 
-    const separatorIndex = trimmed.indexOf(' - ');
-    const partNumber = separatorIndex > 0 ? trimmed.slice(0, separatorIndex).trim() : `SP-${String(products.length + 1).padStart(3, '0')}`;
+    const separatorIndex = splitOnDash ? trimmed.indexOf(' - ') : -1;
+    const partNumber = separatorIndex > 0 ? trimmed.slice(0, separatorIndex).trim() : `SP-${String(knownProducts.length + 1).padStart(3, '0')}`;
     const name = separatorIndex > 0 ? trimmed.slice(separatorIndex + 3).trim() : trimmed;
 
-    return createProduct({
-      part_number: partNumber,
-      oem_number: '',
-      name: name || trimmed,
-      brand: '',
-      category: '',
-      compatibility: '',
-      // Sale price starts equal to cost (0% margin) rather than a guessed markup — an honest
-      // placeholder that's obviously not final, editable in Inventory once a real price is set.
-      cost_price: unitCost,
-      mrp: unitCost,
-      sale_price: unitCost,
-      current_stock: 0,
-      min_stock: 0,
-      location: '',
-    }) as Promise<Product>;
+    const res = await fetch('/api/local/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        part_number: partNumber,
+        oem_number: '',
+        name: name || trimmed,
+        brand: '',
+        category: '',
+        compatibility: '',
+        // Sale price starts equal to cost (0% margin) rather than a guessed markup — an honest
+        // placeholder that's obviously not final, editable in Inventory once a real price is set.
+        cost_price: unitCost,
+        mrp: unitCost,
+        sale_price: unitCost,
+        current_stock: 0,
+        min_stock: 0,
+        location: '',
+        company_id: activeCompany?.id,
+      }),
+    });
+    const created = await parseJsonOrThrow(res, 'Failed to create part.') as Product;
+    knownProducts.push(created);
+    return created;
   }
 
   const recordPurchase = async (event: FormEvent) => {
@@ -132,14 +174,13 @@ export default function PurchasesPage() {
     setSavingPurchase(true);
     try {
       const supplierRow = await resolveSupplier(supplierName);
-      const id = nextId(purchaseOrders, 'PO');
-      const grnId = nextId(grns, 'GRN');
       const paid = paidAmount;
 
+      const knownProducts = [...products];
       const items = [];
       for (const line of lines) {
         if (!line.description.trim()) continue;
-        const matchedProduct = await resolveProduct(line.description, line.unit_price);
+        const matchedProduct = await resolveProduct(line.description, line.unit_price, knownProducts);
         items.push({
           product_id: matchedProduct?.id ?? null,
           part_number: matchedProduct?.part_number ?? '',
@@ -153,11 +194,11 @@ export default function PurchasesPage() {
       // Atomic on the database side (jde_save_purchase): PO header, line items, GRN, FIFO stock
       // layers, and the supplier balance all land as one transaction — a failure partway through
       // leaves nothing half-done. Supplier/product auto-creation above stays a separate step (each
-      // already a single atomic insert on its own).
-      await savePurchase({
+      // already a single atomic insert on its own). The PO/GRN id is generated inside the function
+      // itself and read back from the result — not guessed client-side — since id is globally
+      // unique across every company, not just the ones this browser has loaded.
+      const po = await savePurchase({
         companyId: activeCompany.id,
-        poId: id,
-        grnId,
         supplierId: supplierRow.id,
         supplierName: supplierRow.name,
         date: purchaseDate,
@@ -171,7 +212,7 @@ export default function PurchasesPage() {
       await Promise.all([reloadPurchaseOrders(), reloadPoItems(), reloadGrns(), reloadSuppliers(), reloadProducts()]);
 
       setShowPurchaseModal(false);
-      setFeedback(`${id} recorded — ${items.length} item(s) added to stock from ${supplierRow.name}.`);
+      setFeedback(`${po.id} recorded — ${items.length} item(s) added to stock from ${supplierRow.name}.`);
       setActiveTab('purchases');
     } catch (error) {
       setPurchaseError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Inventory before retrying.');
@@ -186,15 +227,14 @@ export default function PurchasesPage() {
     setFeedback('');
     setImportError('');
     try {
-      const grnId = nextId(grns, 'GRN');
       // This is a pre-existing pending order created before per-purchase stock tracking existed —
       // its amount is presumed already reflected in the supplier's balance, so only stock catches
       // up here (atomic on the database side via jde_receive_purchase_stock: GRN + FIFO stock
-      // layers + status together).
+      // layers + status together). The GRN id is generated inside the function itself, same
+      // reasoning as savePurchase above.
       await receivePurchaseStock({
         companyId: activeCompany.id,
         poId,
-        grnId,
         supplierName: order.supplier,
         receivedAt: new Date().toLocaleString('en-IN'),
         items: poItems
@@ -229,13 +269,17 @@ export default function PurchasesPage() {
         if (imported.length === 0) {
           throw new Error('No rows with a recognizable description, quantity, or price column were found in this file.');
         }
-        setImportPreview({ fileName: file.name, lines: imported, supplier: guessSupplierFromText(file.name) ?? '' });
+        setImportPreview({ fileName: file.name, lines: imported, supplier: guessSupplierFromText(file.name) ?? '', supplierGstin: '', fileHash: null });
       } else if (isScannableFile(file)) {
         const base64 = await fileToBase64(file);
+        // Content-based, not filename-based, so the exact same invoice can't be scanned or
+        // recorded twice even under a renamed/re-saved copy — checked server-side before this
+        // spends an AI call, and again (as a hard guarantee) when the purchase is actually saved.
+        const fileHash = await hashFile(file);
         const res = await fetch('/api/purchases/import-scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64, mimeType: file.type }),
+          body: JSON.stringify({ base64, mimeType: file.type, fileHash, companyId: activeCompany?.id }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Failed to scan document.');
@@ -244,7 +288,13 @@ export default function PurchasesPage() {
         if (items.length === 0) {
           throw new Error('No line items could be read from this document.');
         }
-        setImportPreview({ fileName: file.name, lines: items, supplier: guessSupplierFromText(data.supplier_name) ?? '' });
+        setImportPreview({
+          fileName: file.name,
+          lines: items,
+          supplier: guessSupplierFromText(data.supplier_name) ?? '',
+          supplierGstin: typeof data.supplier_gstin === 'string' ? data.supplier_gstin : '',
+          fileHash,
+        });
       } else {
         throw new Error('Unsupported file type. Upload a CSV/Excel file, or a PDF/photo of a supplier document.');
       }
@@ -258,16 +308,18 @@ export default function PurchasesPage() {
   const confirmImportedPO = async () => {
     if (!importPreview || !importPreview.supplier.trim() || !activeCompany) return;
     setImportError('');
+    setConfirmingImport(true);
     try {
-      const supplierRow = await resolveSupplier(importPreview.supplier);
+      const supplierRow = await resolveSupplier(importPreview.supplier, importPreview.supplierGstin);
       const importedTotal = importPreview.lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
-      const id = nextId(purchaseOrders, 'PO');
-      const grnId = nextId(grns, 'GRN');
 
+      const knownProducts = [...products];
       const items = [];
       for (const line of importPreview.lines) {
         if (!line.description.trim()) continue;
-        const matchedProduct = await resolveProduct(line.description, line.unit_price);
+        // false: this description is raw AI-scanned invoice text, not a manually-typed
+        // "part number - name" pair — see resolveProduct's own comment for why that matters.
+        const matchedProduct = await resolveProduct(line.description, line.unit_price, knownProducts, false);
         items.push({
           product_id: matchedProduct?.id ?? null,
           part_number: matchedProduct?.part_number ?? '',
@@ -278,10 +330,8 @@ export default function PurchasesPage() {
         });
       }
 
-      await savePurchase({
+      const po = await savePurchase({
         companyId: activeCompany.id,
-        poId: id,
-        grnId,
         supplierId: supplierRow.id,
         supplierName: supplierRow.name,
         date: todayIso(),
@@ -290,15 +340,18 @@ export default function PurchasesPage() {
         total: importedTotal,
         paid: 0,
         status: 'received',
+        sourceFileHash: importPreview.fileHash,
       });
 
       await Promise.all([reloadPurchaseOrders(), reloadPoItems(), reloadGrns(), reloadSuppliers(), reloadProducts()]);
 
-      setFeedback(`${id} recorded from ${importPreview.fileName} — ${items.length} item(s), ₹${importedTotal.toLocaleString()} from ${supplierRow.name}.`);
+      setFeedback(`${po.id} recorded from ${importPreview.fileName} — ${items.length} item(s), ₹${importedTotal.toLocaleString()} from ${supplierRow.name}.`);
       setImportPreview(null);
       setActiveTab('purchases');
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Inventory before retrying.');
+    } finally {
+      setConfirmingImport(false);
     }
   };
 
@@ -345,8 +398,9 @@ export default function PurchasesPage() {
       {activeTab === 'invoices' && <div className="card empty-state"><FileCheck size={32} /><p className="empty-state-title">Supplier invoice matching isn&apos;t available yet</p><p className="empty-state-desc">This will let you upload supplier invoices and match them against purchases — not built yet.</p></div>}
 
       {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '480px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
-        <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Record Purchase from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setImportPreview(null)}>✕</button></div>
+        <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Record Purchase from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={confirmingImport} onClick={() => setImportPreview(null)}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
+          {importError && <div className="alert alert-danger" role="alert">{importError}</div>}
           <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
             Read <strong>{importPreview.lines.length} item(s)</strong> from <strong>{importPreview.fileName}</strong>, total ₹{importPreview.lines.reduce((s, l) => s + l.quantity * l.unit_price, 0).toLocaleString()}.
           </p>
@@ -354,9 +408,14 @@ export default function PurchasesPage() {
             <label className="form-label">Supplier</label>
             <input list="purchase-supplier-options" className="form-input" placeholder="Type or select a supplier" value={importPreview.supplier} onChange={(event) => setImportPreview({ ...importPreview, supplier: event.target.value })} />
             <datalist id="purchase-supplier-options">{supplierOptions.map((s) => <option key={s} value={s} />)}</datalist>
+            {importPreview.supplierGstin.trim() && (
+              <small style={{ color: 'var(--text-muted)' }}>
+                GSTIN read from document: {importPreview.supplierGstin.trim()} — saved against this supplier if it&apos;s a new one.
+              </small>
+            )}
           </div>
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setImportPreview(null)}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier.trim()}>Record Purchase</button></div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={confirmingImport} onClick={() => setImportPreview(null)}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier.trim() || confirmingImport}>{confirmingImport ? 'Saving…' : 'Record Purchase'}</button></div>
       </div></div>}
 
       {showPurchaseModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="purchase-modal-title"><form onSubmit={recordPurchase}>
