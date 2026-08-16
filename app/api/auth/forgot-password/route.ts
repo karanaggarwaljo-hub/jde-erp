@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
+import { createClient, resolveSiteOrigin } from '@/lib/supabase/server';
 
 /** Public — anyone can request a reset link for any email, by design (standard "forgot
  *  password" UX). Always responds the same way regardless of whether the email has an
@@ -11,7 +11,7 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient();
-  const redirectTo = new URL('/auth/callback', request.url).toString();
+  const redirectTo = new URL('/auth/callback', resolveSiteOrigin(request)).toString();
   const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
   if (error) {
     console.error('POST /api/auth/forgot-password failed:', error);

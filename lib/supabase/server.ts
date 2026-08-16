@@ -30,3 +30,12 @@ export async function createClient() {
     }
   );
 }
+
+/** The origin baked into password-reset/invite email links (Supabase's redirectTo). Prefers a
+ *  fixed, explicitly configured value over the requesting connection's own Host — request.url's
+ *  host isn't guaranteed to be trustworthy on every deployment target, and there's no reason
+ *  the link in an email needs to depend on it when a real production origin is known. Falls
+ *  back to the request's own origin so local dev keeps working with zero extra setup. */
+export function resolveSiteOrigin(request: Request): string {
+  return process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
+}

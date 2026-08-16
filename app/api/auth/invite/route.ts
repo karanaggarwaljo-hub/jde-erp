@@ -1,5 +1,6 @@
 import { inviteStaffUser, insertRow, getActiveCompanyId, dbErrorMessage } from '@/lib/db';
 import { isRole } from '@/lib/authTypes';
+import { resolveSiteOrigin } from '@/lib/supabase/server';
 
 /** Owner-only — enforced centrally by proxy.ts (see its OWNER_ONLY_PREFIXES), not re-checked
  *  here, so this stays a thin wrapper around the two things a real invite actually needs. */
@@ -9,7 +10,7 @@ export async function POST(request: Request) {
     return Response.json({ error: 'A name, email, and valid role are required.' }, { status: 400 });
   }
 
-  const redirectTo = new URL('/auth/callback', request.url).toString();
+  const redirectTo = new URL('/auth/callback', resolveSiteOrigin(request)).toString();
 
   try {
     await inviteStaffUser(email, name, redirectTo);
