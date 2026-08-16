@@ -3,6 +3,7 @@
 import { ChangeEvent, useState } from 'react';
 import { Plus, Search, Filter, Edit, Trash2, AlertTriangle, Upload, Sparkles } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { useCompany } from '@/components/CompanyProvider';
 import { parseInventoryFile } from '@/lib/client-import';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 
@@ -28,6 +29,7 @@ type StockLayer = { id: string; product_id: string; unit_cost: number; qty_remai
 const DEFAULT_CATEGORIES = ['Engine', 'Brakes', 'Filters', 'Clutch', 'Suspension', 'Electrical'];
 
 export default function InventoryPage() {
+  const { configError } = useCompany();
   const { rows: products, loading, create, update, remove, reload, activeCompany } = useCompanyTable<Product>('products');
   const { rows: stockLayers } = useCompanyTable<StockLayer>('stock_layers');
 
@@ -240,6 +242,14 @@ export default function InventoryPage() {
         </div>
       </div>
 
+      {configError && (
+        <div className="alert alert-danger mb-4" role="alert">
+          Can&apos;t reach the database right now — {configError}
+        </div>
+      )}
+
+      {!configError && (
+      <>
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
       {importError && <div className="alert alert-danger mb-4" role="alert">{importError}</div>}
 
@@ -339,6 +349,8 @@ export default function InventoryPage() {
           </tbody>
         </table>
       </div>
+      </>
+      )}
 
       {/* Add / Edit Product Modal */}
       {showModal && (

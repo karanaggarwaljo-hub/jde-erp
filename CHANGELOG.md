@@ -2,6 +2,27 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-16 — Fixed: Dashboard and Inventory silently showing ₹0 and "0 parts"
+
+Right after the real-login work landed, the Executive Dashboard and Inventory could get stuck
+showing ₹0 for every KPI and "0 parts" — even with real data sitting in the database for the
+active company. No error, no loading spinner stuck on screen — it just quietly looked like an
+empty company. The same underlying gap silently affects every other page that reads company data
+(Sales, Customers, Purchases, etc.) too — Dashboard and Inventory are just the two that now show
+an honest error instead of fake zeros, matching the fix already proven out elsewhere in the app.
+
+**What was actually happening:** the one request every page makes on load to find out which
+company is "active" (`/api/companies/active`) had no error handling — if that single request
+ever failed for any reason (a slow/cold database connection, a brief hiccup), the app had no way
+to notice or recover. It just silently stayed convinced no company was active, which meant every
+other panel that depends on "the active company" (Inventory, Sales, Customers, everywhere) kept
+showing zero, forever, with nothing on screen to say why.
+
+This exact failure mode was already found and fixed once before, on a different branch of this
+app, the day before real login was added here — that fix (proper error handling, plus an honest
+"Can't reach the database right now" message instead of fake zeros) had just never made it onto
+this branch. Reapplied it here rather than re-solving it from scratch.
+
 ## 2026-08-15 — Real login added — the app now has an actual lock on the door
 
 Until today, "Sign In" was fake: the login screen accepted anything you typed (it even had a fake password pre-filled) and every single page and API endpoint — Inventory, Sales, Customers, Reports, Settings, all of it — was reachable by anyone who had the URL, no password required. That was fine while the only way to reach this app at all was installing the desktop program on a specific PC. It stops being fine the moment this app is reachable at a real web address instead, which is the actual goal (see the next entry, once it lands) — so real login had to come first.
