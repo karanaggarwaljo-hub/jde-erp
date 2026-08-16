@@ -32,17 +32,27 @@ const navItems = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export default function Sidebar() {
+type SidebarProps = {
+  /** Whether the mobile slide-out drawer is open — irrelevant/inert above the 768px breakpoint,
+   *  where the sidebar is always visible regardless of this prop. */
+  mobileOpen?: boolean;
+  /** Called after any navigation (a nav link or Sign Out) so the mobile drawer closes itself
+   *  instead of staying open over the newly-loaded page. */
+  onNavigate?: () => void;
+};
+
+export default function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
 
   const handleSignOut = async () => {
+    onNavigate?.();
     await logout();
     router.push('/login');
   };
 
   return (
-    <aside className="erp-sidebar">
+    <aside className={`erp-sidebar ${mobileOpen ? 'open' : ''}`}>
       <div className="sidebar-logo">
         <div className="sidebar-logo-icon">JDE</div>
         <div className="sidebar-logo-text">
@@ -62,6 +72,7 @@ export default function Sidebar() {
               key={item.name}
               href={item.href}
               className={`sidebar-item ${isActive ? 'active' : ''}`}
+              onClick={onNavigate}
             >
               <Icon className="sidebar-item-icon" />
               <span>{item.name}</span>

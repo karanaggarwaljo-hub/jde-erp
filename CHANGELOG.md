@@ -2,6 +2,18 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-16 — Fixed: no way to open the menu on a phone
+
+Now that this is reachable from a real web address, it needed to actually work on a phone —
+and it didn't. Below tablet width, the side menu (Inventory, Sales, Purchases, everything) slid
+completely off-screen with no button anywhere to bring it back. On a phone, after signing in,
+you'd see the top bar and the page content and nothing to tap to get anywhere else.
+
+Added a real menu button (top-left, phone-sized screens only) that slides the full menu in over
+the page, with a dark backdrop you can tap to dismiss — standard mobile-menu behavior. The menu
+also now closes itself automatically once you tap something in it, so it doesn't sit open over
+whatever page you just navigated to.
+
 ## 2026-08-16 — Fixed: Dashboard and Inventory silently showing ₹0 and "0 parts"
 
 Right after the real-login work landed, the Executive Dashboard and Inventory could get stuck

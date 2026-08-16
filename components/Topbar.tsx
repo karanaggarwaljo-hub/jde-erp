@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Bell, Sunrise, ChevronDown, Settings, LogOut } from 'lucide-react';
+import { Search, Bell, Sunrise, ChevronDown, Settings, LogOut, Menu } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { logout } from '@/lib/client-auth';
 import { ROLE_LABELS, isRole } from '@/lib/authTypes';
@@ -26,6 +26,10 @@ const searchTargets = [
 
 type TopbarProps = {
   currentUser: { email: string; name: string | null; role: string };
+  /** Toggles the mobile slide-out sidebar. The button that calls this is only visible below
+   *  the 768px breakpoint (see .mobile-menu-btn in globals.css) — above it the sidebar is
+   *  always on screen and there's nothing for this button to do. */
+  onMenuClick?: () => void;
 };
 
 function initialsFor(name: string | null, email: string): string {
@@ -35,7 +39,7 @@ function initialsFor(name: string | null, email: string): string {
   return initials || '?';
 }
 
-export default function Topbar({ currentUser }: TopbarProps) {
+export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
   const router = useRouter();
   const topbarRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -120,6 +124,10 @@ export default function Topbar({ currentUser }: TopbarProps) {
 
   return (
     <header className="erp-topbar" ref={topbarRef}>
+      <button className="btn btn-ghost btn-icon mobile-menu-btn" aria-label="Open menu" onClick={onMenuClick}>
+        <Menu size={20} />
+      </button>
+
       {searchOpen && (
         <div className="search-overlay" onClick={() => { setSearchOpen(false); setQuery(''); }}>
           <div className="search-overlay-box" onClick={(event) => event.stopPropagation()}>

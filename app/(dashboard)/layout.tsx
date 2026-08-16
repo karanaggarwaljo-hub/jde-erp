@@ -1,9 +1,6 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import Sidebar from '@/components/Sidebar';
-import Topbar from '@/components/Topbar';
-import DailyBriefingModal from '@/components/DailyBriefingModal';
-import { CompanyProvider } from '@/components/CompanyProvider';
+import DashboardChrome from '@/components/DashboardChrome';
 
 export default async function DashboardGroupLayout({
   children,
@@ -23,16 +20,5 @@ export default async function DashboardGroupLayout({
   }
   const name = decodeURIComponent(headerList.get('x-jde-user-name') || '') || null;
 
-  return (
-    <CompanyProvider>
-      <div className="erp-root">
-        <Sidebar />
-        <div className="erp-main">
-          <Topbar currentUser={{ email, name, role }} />
-          <main className="erp-content">{children}</main>
-        </div>
-        <DailyBriefingModal />
-      </div>
-    </CompanyProvider>
-  );
+  return <DashboardChrome currentUser={{ email, name, role }}>{children}</DashboardChrome>;
 }
