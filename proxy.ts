@@ -40,3 +40,88 @@ function isOwnerOnlyPath(pathname: string): boolean {
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+
+  if (matchesAny(pathname, PUBLIC_EXACT, PUBLIC_PREFIXES)) {
+    return NextResponse.next();
+  }
+
+
+  // @supabase/ssr needs to both read and rewrite cookies on this exact response — getUser()
+  // can silently refresh a near-expiry token, and those refreshed cookies live on whatever
+  // `response` currently is. Every branch below must carry them forward, never a bare
+  // `NextResponse.next()`/`.redirect()`/`.json()`, or sessions will randomly appear to expire.
+  let response = NextResponse.next({ request });
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          response = NextResponse.next({ request });
+          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+        },
+      },
+    }
+  );
+
+
+  const deny = (status: 401 | 403, redirectReason: string) => {
+    const denied = pathname.startsWith('/api/')
+      ? NextResponse.json({ error: status === 401 ? 'Authentication required.' : 'Forbidden.' }, { status })
+      : NextResponse.redirect(new URL(`${status === 403 ? '/dashboard' : '/login'}?error=${redirectReason}`, request.url));
+    response.cookies.getAll().forEach((cookie) => denied.cookies.set(cookie));
+    return denied;
+  };
+
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.email) {
+    return deny(401, 'no_session');
+  }
+
+
+  if (SESSION_ONLY_EXACT.has(pathname)) {
+    return response;
+  }
+
+
+  // Authorization layer: a valid Supabase login is necessary but not sufficient — the
+  // identity must also have an active jde_users row. Same rule as lib/auth/dal.ts's
+  // getCurrentUser(), applied here as the actual, primary gate for every request.
+  let staffUser;
+  try {
+    staffUser = await getUserRecord(user.email);
+  } catch (dbError) {
+    console.error('proxy.ts: jde_users lookup failed:', dbError);
+    return deny(401, 'no_access');
+  }
+
+
+  if (!staffUser || staffUser.status !== 'active') {
+    return deny(401, staffUser?.status === 'invited' ? 'inactive' : 'no_access');
+  }
+
+
+  if (isOwnerOnlyPath(pathname) && staffUser.role !== 'owner') {
+    return deny(403, 'forbidden');
+  }
+
+
+  // Cheap identity handoff for app/(dashboard)/layout.tsx's belt-and-suspenders check — set on
+  // the forwarded *request* (not the response) so a Server Component can read it via headers().
+  // Percent-encoded since a real staff name may contain non-ASCII characters HTTP headers can't.
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-jde-user-email', user.email);
+  requestHeaders.set('x-jde-user-role', staffUser.role);
+  requestHeaders.set('x-jde-user-name', encodeURIComponent(staffUser.name ?? ''));
+
+
+  const finalResponse = NextResponse.next({ request: { headers: requestHeaders } });
+  response.cookies.getAll().forEach((cookie) => finalResponse.cookies.set(cookie));
+  return finalResponse;
+}
