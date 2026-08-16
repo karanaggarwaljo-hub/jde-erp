@@ -209,6 +209,36 @@ export async function deleteCompany(id: string): Promise<{ error: string } | { o
   return { ok: true };
 }
 
+export type StaffUserRecord = { email: string; company_id: string | null; name: string | null; role: string; status: string };
+
+/** Server-only, looked up by email alone — jde_users' primary key IS the email column (see
+ *  lib/db/schema.ts), not an (email, company_id) composite, so this must never filter by the
+ *  currently-active company (an unrelated, shared, mutable global — see activateCompany above).
+ *  This is the authorization half of login: a valid Supabase Auth identity is necessary but not
+ *  sufficient to use this ERP — it must also have a row here with status 'active'. */
+export async function getUserRecord(email: string): Promise<StaffUserRecord | undefined> {
+  const { data, error } = await getClient()
+    .from(supaTable('users'))
+    .select('*')
+    .eq('email', email)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as StaffUserRecord | null) ?? undefined;
+}
+
+/** Sends a real Supabase Auth invite email (service-role/admin action, so it lives here
+ *  alongside this file's one Supabase client rather than a separate ad hoc one) so a new
+ *  teammate can set their own password. The jde_users row itself (status: 'invited') is
+ *  created separately by the caller once this succeeds — matching the existing Settings
+ *  "Invite User" flow, just now backed by a real credential instead of a bare row. */
+export async function inviteStaffUser(email: string, name: string, redirectTo: string): Promise<void> {
+  const { error } = await getClient().auth.admin.inviteUserByEmail(email, {
+    data: { full_name: name },
+    redirectTo,
+  });
+  if (error) throw error;
+}
+
 /** Columns safe to show a public website visitor — never cost price, stock, supplier data,
  *  internal notes, or any draft/review-workflow field, regardless of what gets added to
  *  jde_catalog_products later for the admin workflow. */

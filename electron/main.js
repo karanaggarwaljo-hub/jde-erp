@@ -41,7 +41,7 @@ function writeConfig(config) {
 }
 
 function isConfigComplete(config) {
-  return !!(config && config.NEXT_PUBLIC_SUPABASE_URL && config.SUPABASE_SERVICE_ROLE_KEY);
+  return !!(config && config.NEXT_PUBLIC_SUPABASE_URL && config.NEXT_PUBLIC_SUPABASE_ANON_KEY && config.SUPABASE_SERVICE_ROLE_KEY);
 }
 
 function waitForServer(url, timeoutMs) {

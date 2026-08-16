@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Bell, Sunrise, ChevronDown, Settings, LogOut } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { logout } from '@/lib/client-auth';
+import { ROLE_LABELS, isRole } from '@/lib/authTypes';
 
 type Product = { current_stock: number; min_stock: number };
 type Customer = { balance: number };
@@ -22,7 +24,18 @@ const searchTargets = [
   { label: 'Analytics', detail: 'Demand forecast and trends', href: '/analytics', keywords: 'analytics ai forecast demand' },
 ];
 
-export default function Topbar() {
+type TopbarProps = {
+  currentUser: { email: string; name: string | null; role: string };
+};
+
+function initialsFor(name: string | null, email: string): string {
+  const source = (name && name.trim()) || email;
+  const parts = source.split(/[\s@.]+/).filter(Boolean);
+  const initials = parts.slice(0, 2).map((p) => p[0]?.toUpperCase() ?? '').join('');
+  return initials || '?';
+}
+
+export default function Topbar({ currentUser }: TopbarProps) {
   const router = useRouter();
   const topbarRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -98,6 +111,13 @@ export default function Topbar() {
     if (results[0]) goToResult(results[0].href);
   };
 
+  const handleSignOut = async () => {
+    await logout();
+    router.push('/login');
+  };
+
+  const roleLabel = isRole(currentUser.role) ? ROLE_LABELS[currentUser.role] : currentUser.role;
+
   return (
     <header className="erp-topbar" ref={topbarRef}>
       {searchOpen && (
@@ -156,14 +176,14 @@ export default function Topbar() {
 
         <div className="topbar-menu-wrap">
           <button className="profile-trigger" aria-label="User menu" aria-expanded={profileOpen} onClick={() => { setProfileOpen((open) => !open); setNotificationsOpen(false); }}>
-            <span className="profile-avatar">KA</span>
-            <span className="profile-copy"><strong>Karan Aggarwal</strong><small>Owner / Admin</small></span>
+            <span className="profile-avatar">{initialsFor(currentUser.name, currentUser.email)}</span>
+            <span className="profile-copy"><strong>{currentUser.name || currentUser.email}</strong><small>{roleLabel}</small></span>
             <ChevronDown size={14} color="var(--text-muted)" />
           </button>
           {profileOpen && (
             <div className="topbar-popover profile-popover">
               <Link href="/settings" onClick={() => setProfileOpen(false)}><Settings size={15} /> Account settings</Link>
-              <Link href="/login"><LogOut size={15} /> Sign out</Link>
+              <button type="button" onClick={handleSignOut}><LogOut size={15} /> Sign out</button>
             </div>
           )}
         </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Package,
@@ -16,6 +16,7 @@ import {
   Settings,
   LogOut
 } from 'lucide-react';
+import { logout } from '@/lib/client-auth';
 
 const navItems = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -33,6 +34,12 @@ const navItems = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const handleSignOut = async () => {
+    await logout();
+    router.push('/login');
+  };
 
   return (
     <aside className="erp-sidebar">
@@ -64,10 +71,10 @@ export default function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <Link href="/login" className="sidebar-item" style={{ color: '#EF4444' }}>
+        <button type="button" onClick={handleSignOut} className="sidebar-item" style={{ color: '#EF4444', width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer' }}>
           <LogOut className="sidebar-item-icon" />
           <span>Sign Out</span>
-        </Link>
+        </button>
       </div>
     </aside>
   );

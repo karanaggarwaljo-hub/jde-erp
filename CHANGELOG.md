@@ -2,6 +2,21 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-15 — Real login added — the app now has an actual lock on the door
+
+Until today, "Sign In" was fake: the login screen accepted anything you typed (it even had a fake password pre-filled) and every single page and API endpoint — Inventory, Sales, Customers, Reports, Settings, all of it — was reachable by anyone who had the URL, no password required. That was fine while the only way to reach this app at all was installing the desktop program on a specific PC. It stops being fine the moment this app is reachable at a real web address instead, which is the actual goal (see the next entry, once it lands) — so real login had to come first.
+
+**What changed:**
+- Signing in is now real, backed by Supabase Auth. A login also has to match an actual staff record (Settings → User Roles & Access) that's been marked active — so even someone who somehow got a valid Supabase login some other way still can't get into this ERP without being explicitly added as staff.
+- Every page and every API route now checks this before doing anything, enforced in one place (`proxy.ts`) rather than hoping each page remembers to check — confirmed by testing directly: a signed-out visitor hitting `/inventory` or the underlying data API gets bounced/blocked, not shown real data.
+- **Settings is now Owner-only** — it's the one screen that can delete an entire company or hand out other people's access, so only the Owner role can reach it. Every other role (Manager, Salesperson, Accountant, Warehouse) currently has the same access to the rest of the app as before; more fine-grained per-role limits (e.g. should a Salesperson see Reports) are intentionally left for later, once real staff are actually using their own accounts day to day.
+- **Inviting a teammate is now real**: Settings → Invite User sends an actual email with a sign-in link, instead of just adding a name to a list with no way to actually log in. They click it, set their own password, and they're in.
+- The desktop app's one-time setup screen has a new field (Supabase's anon/publishable key) — needed for the login screen to work; existing installs will be prompted for it once on next launch via "Reconfigure Supabase / AI keys" if it's missing.
+
+**Before this is usable day to day:** the very first (Owner) account needed a real password set, since the Supabase login that already existed for that email predated real password auth. Turned out to need a proper fix rather than a one-off: added a real "Forgot password?" link on the sign-in screen (`/forgot-password`) — enter your email, get a real reset link, set a new password yourself. The same "set a new password" screen now handles both finishing an invite and resetting a forgotten one.
+
+**Not done yet, on purpose:** actually hosting this app at a public web address. That's the point of doing the login work first — it was the blocker. Deployment is the next step.
+
 ## 2026-08-07 — Update 3.0: Website Catalog goes live — search, filter, WhatsApp, quote requests, and three real bugs fixed
 Built out the public Website Catalog based on a PRD review, closing the gaps the original build flagged as "not included yet," and put the result live on the real jd-enterprise.com — not just this app's own preview pages.
 
