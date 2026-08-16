@@ -149,8 +149,12 @@ input, textarea, select { font-family: inherit; }
 }
 
 /* Opens the mobile drawer version of .erp-sidebar — hidden above the 768px breakpoint, where
-   the sidebar is always on screen and this button has nothing to do. */
-.mobile-menu-btn { display: none; }
+   the sidebar is always on screen and this button has nothing to do. Selector is .btn.mobile-
+   menu-btn (not just .mobile-menu-btn) to out-specificity .btn's own `display: inline-flex`
+   (same single-class specificity, but .btn is declared later in this file, so plain
+   `.mobile-menu-btn { display: none }` was silently losing to it — this actually shipped
+   showing the button on desktop before this fix). */
+.btn.mobile-menu-btn { display: none; }
 
 /* Only ever present in the DOM while the mobile drawer is open (see DashboardChrome.tsx) — sits
    between the topbar (z-index 40) and the sidebar drawer itself (z-index 50) so it dims the page
@@ -1217,7 +1221,7 @@ input, textarea, select { font-family: inherit; }
 @media (max-width: 768px) {
   .erp-sidebar { transform: translateX(-100%); }
   .erp-main { margin-left: 0; }
-  .mobile-menu-btn { align-items: center; display: inline-flex; justify-content: center; }
+  .btn.mobile-menu-btn { align-items: center; display: inline-flex; justify-content: center; }
 
   /* The drawer overlays content when open, so it can afford the full labeled width instead of
      the icon-only 72px rail used at tablet widths (see the 1024px breakpoint above) — restore
