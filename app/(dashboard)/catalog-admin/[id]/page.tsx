@@ -179,8 +179,13 @@ export default function CatalogAdminDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ catalogId: row.id, prompt: promptText, referenceImageUrl: row.selected_reference_url }),
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Image generation failed.');
+      if (!res.ok) {
+        // A non-2xx response isn't guaranteed to have a JSON body (a platform-level timeout
+        // or infra error returns plain text/HTML) — parsing it unconditionally, as before, meant
+        // a raw "Unexpected token... is not valid JSON" leaked to the screen instead of a real message.
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `Image generation failed (${res.status}).`);
+      }
       await reload();
     } catch (err) {
       setImageError(err instanceof Error ? err.message : 'Image generation failed.');
@@ -202,8 +207,10 @@ export default function CatalogAdminDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ catalogId: row.id, base64, mimeType: file.type }),
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Upload failed.');
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error || `Upload failed (${res.status}).`);
+      }
       await reload();
     } catch (err) {
       setImageError(err instanceof Error ? err.message : 'Upload failed.');
