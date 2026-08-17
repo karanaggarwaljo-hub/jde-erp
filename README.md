@@ -5,7 +5,8 @@ An ERP web app for an auto spare parts trading business: inventory, sales, purch
 ## Tech Stack
 
 - **Frontend/Backend**: Next.js 16 (App Router) + React 19 + TypeScript, single Next.js server handling both UI and API routes.
-- **Database**: Supabase (managed Postgres). All data access happens server-side through Next.js API routes using a service-role key — the browser never talks to Supabase directly, and there's no user-facing auth layer today.
+- **Database**: Supabase (managed Postgres). All data access happens server-side through Next.js API routes using a service-role key — the browser never talks to Supabase directly.
+- **Auth**: Supabase Auth (email/password, via `@supabase/ssr`) gates the whole app in `proxy.ts`. A valid login isn't enough on its own — it must also match an active row in `jde_users` (role: owner/manager/salesman/accountant/warehouse), which is how staff are actually granted access. See "Authentication" below.
 - **AI**: Google Gemini (`@google/genai`) powers the Business Insights, Stock Reorder Forecast, and Daily Briefing features on `/dashboard` and `/analytics`. These degrade gracefully (a plain error message, not a crash) if no API key is configured or the free-tier quota is exhausted.
 
 ## Modules
@@ -20,11 +21,22 @@ An ERP web app for an auto spare parts trading business: inventory, sales, purch
 | Expenses | `/expenses` | Operational expense log by category. |
 | Reports | `/reports` | P&L, sales summary, stock valuation, and a GST summary (assumes 18% inclusive tax unless your figures say otherwise). |
 | Analytics | `/analytics` | AI-generated business insights and reorder recommendations, plus real stock-value rankings. |
-| Settings | `/settings` | Company management (create/switch/delete companies — each company's data is fully isolated), user roles, and local backup snapshots. |
+| Settings | `/settings` | **Owner only.** Company management (create/switch/delete companies — each company's data is fully isolated), inviting/managing user roles, and local backup snapshots. |
 
 ## Multi-Company Data Isolation
 
 Every business table has a `company_id` column, and exactly one company is "active" at a time (Settings → Companies). Every page reads and writes only the active company's data. Switching companies switches the entire app's view instantly — nothing is ever mixed between companies.
+
+## Authentication
+
+Every page and API route requires a real, signed-in staff account — enforced centrally in `proxy.ts` (Next.js 16's renamed `middleware.ts`), not just hidden in the UI. Two layers:
+
+- **Authentication** — Supabase Auth (email/password). No public signup; accounts exist only by invite.
+- **Authorization** — a matching `jde_users` row with `status = 'active'`. A valid Supabase login alone isn't enough — this is what stops anyone else who might have a login on the same Supabase project (e.g. if it's ever shared with another app) from getting into this one.
+
+**Roles**: `owner`, `manager`, `salesman`, `accountant`, `warehouse` — set per user in Settings → User Roles & Access. Only `owner` can reach `/settings` itself (company management, deleting a company, inviting/editing other users' roles); every other role currently sees the same rest of the app. Finer per-role restrictions may come later.
+
+**Inviting a teammate** (Settings → User Roles & Access → Invite User, owner only): sends a real Supabase invite email. They click it, land on `/accept-invite`, set their own password, and are active from then on. "Forgot password" isn't self-service yet — reset it for them directly in Supabase Dashboard → Authentication → Users.
 
 ## Setup
 
@@ -47,16 +59,23 @@ Every business table has a `company_id` column, and exactly one company is "acti
    cp .env.example .env.local
    ```
    - `NEXT_PUBLIC_SUPABASE_URL` — your Supabase project URL.
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — from Supabase dashboard → Project Settings → API → the `anon public` (or newer `publishable`) key. Safe to expose to the browser — it's what your own sign-in page uses.
    - `SUPABASE_SERVICE_ROLE_KEY` — from Supabase dashboard → Project Settings → API → `service_role` secret. **Never commit this or expose it to the browser.**
    - `GEMINI_API_KEY` — optional, only needed for the AI features. Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
-4. **Run it**:
+4. **Create the first owner account** — a valid Supabase Auth login isn't enough by itself; it also needs a matching `jde_users` row, and there's no signup form (accounts are created by invite — see "Authentication" below). For the very first account on a fresh project, create both halves manually once: add a user under Supabase Dashboard → Authentication → Users (or reuse one that's already there), then insert their `jde_users` row:
+   ```sql
+   insert into jde_users (email, company_id, name, role, status)
+   values ('you@example.com', '<a company id from jde_companies>', 'Your Name', 'owner', 'active');
+   ```
+
+5. **Run it**:
    ```bash
    npm run dev        # development
    # or
    npm run build && npm run start   # production
    ```
-   Open [http://localhost:3000](http://localhost:3000).
+   Open [http://localhost:3000](http://localhost:3000) and sign in.
 
 ### Running on a second computer
 

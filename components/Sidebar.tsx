@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Package,
@@ -16,6 +16,7 @@ import {
   Settings,
   LogOut
 } from 'lucide-react';
+import { logout } from '@/lib/client-auth';
 
 const navItems = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
@@ -31,11 +32,27 @@ const navItems = [
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
-export default function Sidebar() {
+type SidebarProps = {
+  /** Whether the mobile slide-out drawer is open — irrelevant/inert above the 768px breakpoint,
+   *  where the sidebar is always visible regardless of this prop. */
+  mobileOpen?: boolean;
+  /** Called after any navigation (a nav link or Sign Out) so the mobile drawer closes itself
+   *  instead of staying open over the newly-loaded page. */
+  onNavigate?: () => void;
+};
+
+export default function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const handleSignOut = async () => {
+    onNavigate?.();
+    await logout();
+    router.push('/login');
+  };
 
   return (
-    <aside className="erp-sidebar">
+    <aside className={`erp-sidebar ${mobileOpen ? 'open' : ''}`}>
       <div className="sidebar-logo">
         <div className="sidebar-logo-icon">JDE</div>
         <div className="sidebar-logo-text">
@@ -55,6 +72,7 @@ export default function Sidebar() {
               key={item.name}
               href={item.href}
               className={`sidebar-item ${isActive ? 'active' : ''}`}
+              onClick={onNavigate}
             >
               <Icon className="sidebar-item-icon" />
               <span>{item.name}</span>
@@ -64,10 +82,10 @@ export default function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <Link href="/login" className="sidebar-item" style={{ color: '#EF4444' }}>
+        <button type="button" onClick={handleSignOut} className="sidebar-item" style={{ color: '#EF4444', width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer' }}>
           <LogOut className="sidebar-item-icon" />
           <span>Sign Out</span>
-        </Link>
+        </button>
       </div>
     </aside>
   );

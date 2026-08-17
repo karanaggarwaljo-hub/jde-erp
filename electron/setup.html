@@ -41,7 +41,7 @@
     <div class="card">
       <div class="logo">JDE</div>
       <h1>Connect this computer</h1>
-      <p class="sub">One-time setup. These are the same three values from the app's README — every computer you install this on should use the <strong>same</strong> Supabase project so they all see the same live data.</p>
+      <p class="sub">One-time setup. These are the same values from the app's README — every computer you install this on should use the <strong>same</strong> Supabase project so they all see the same live data.</p>
 
       <div class="error" id="error"></div>
 
@@ -49,6 +49,11 @@
         <div class="field">
           <label for="supabaseUrl">Supabase URL *</label>
           <input id="supabaseUrl" type="text" placeholder="https://your-project-ref.supabase.co" required />
+        </div>
+        <div class="field">
+          <label for="anonKey">Supabase Anon / Publishable Key *</label>
+          <input id="anonKey" type="password" placeholder="Project Settings → API → anon public / publishable key" required />
+          <p class="hint">Safe to share — this is the key your own sign-in screen uses, separate from the service role key below.</p>
         </div>
         <div class="field">
           <label for="serviceKey">Supabase Service Role Key *</label>
@@ -76,6 +81,7 @@
 
     window.setup.onPrefill((config) => {
       if (config.NEXT_PUBLIC_SUPABASE_URL) document.getElementById('supabaseUrl').value = config.NEXT_PUBLIC_SUPABASE_URL;
+      if (config.NEXT_PUBLIC_SUPABASE_ANON_KEY) document.getElementById('anonKey').value = config.NEXT_PUBLIC_SUPABASE_ANON_KEY;
       if (config.SUPABASE_SERVICE_ROLE_KEY) document.getElementById('serviceKey').value = config.SUPABASE_SERVICE_ROLE_KEY;
       if (config.GEMINI_API_KEY) document.getElementById('geminiKey').value = config.GEMINI_API_KEY;
     });
@@ -88,6 +94,7 @@
 
       const config = {
         NEXT_PUBLIC_SUPABASE_URL: document.getElementById('supabaseUrl').value.trim(),
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: document.getElementById('anonKey').value.trim(),
         SUPABASE_SERVICE_ROLE_KEY: document.getElementById('serviceKey').value.trim(),
         GEMINI_API_KEY: document.getElementById('geminiKey').value.trim(),
       };

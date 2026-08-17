@@ -2,6 +2,54 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-16 — Fixed: no way to open the menu on a phone
+
+Now that this is reachable from a real web address, it needed to actually work on a phone —
+and it didn't. Below tablet width, the side menu (Inventory, Sales, Purchases, everything) slid
+completely off-screen with no button anywhere to bring it back. On a phone, after signing in,
+you'd see the top bar and the page content and nothing to tap to get anywhere else.
+
+Added a real menu button (top-left, phone-sized screens only) that slides the full menu in over
+the page, with a dark backdrop you can tap to dismiss — standard mobile-menu behavior. The menu
+also now closes itself automatically once you tap something in it, so it doesn't sit open over
+whatever page you just navigated to.
+
+## 2026-08-16 — Fixed: Dashboard and Inventory silently showing ₹0 and "0 parts"
+
+Right after the real-login work landed, the Executive Dashboard and Inventory could get stuck
+showing ₹0 for every KPI and "0 parts" — even with real data sitting in the database for the
+active company. No error, no loading spinner stuck on screen — it just quietly looked like an
+empty company. The same underlying gap silently affects every other page that reads company data
+(Sales, Customers, Purchases, etc.) too — Dashboard and Inventory are just the two that now show
+an honest error instead of fake zeros, matching the fix already proven out elsewhere in the app.
+
+**What was actually happening:** the one request every page makes on load to find out which
+company is "active" (`/api/companies/active`) had no error handling — if that single request
+ever failed for any reason (a slow/cold database connection, a brief hiccup), the app had no way
+to notice or recover. It just silently stayed convinced no company was active, which meant every
+other panel that depends on "the active company" (Inventory, Sales, Customers, everywhere) kept
+showing zero, forever, with nothing on screen to say why.
+
+This exact failure mode was already found and fixed once before, on a different branch of this
+app, the day before real login was added here — that fix (proper error handling, plus an honest
+"Can't reach the database right now" message instead of fake zeros) had just never made it onto
+this branch. Reapplied it here rather than re-solving it from scratch.
+
+## 2026-08-15 — Real login added — the app now has an actual lock on the door
+
+Until today, "Sign In" was fake: the login screen accepted anything you typed (it even had a fake password pre-filled) and every single page and API endpoint — Inventory, Sales, Customers, Reports, Settings, all of it — was reachable by anyone who had the URL, no password required. That was fine while the only way to reach this app at all was installing the desktop program on a specific PC. It stops being fine the moment this app is reachable at a real web address instead, which is the actual goal (see the next entry, once it lands) — so real login had to come first.
+
+**What changed:**
+- Signing in is now real, backed by Supabase Auth. A login also has to match an actual staff record (Settings → User Roles & Access) that's been marked active — so even someone who somehow got a valid Supabase login some other way still can't get into this ERP without being explicitly added as staff.
+- Every page and every API route now checks this before doing anything, enforced in one place (`proxy.ts`) rather than hoping each page remembers to check — confirmed by testing directly: a signed-out visitor hitting `/inventory` or the underlying data API gets bounced/blocked, not shown real data.
+- **Settings is now Owner-only** — it's the one screen that can delete an entire company or hand out other people's access, so only the Owner role can reach it. Every other role (Manager, Salesperson, Accountant, Warehouse) currently has the same access to the rest of the app as before; more fine-grained per-role limits (e.g. should a Salesperson see Reports) are intentionally left for later, once real staff are actually using their own accounts day to day.
+- **Inviting a teammate is now real**: Settings → Invite User sends an actual email with a sign-in link, instead of just adding a name to a list with no way to actually log in. They click it, set their own password, and they're in.
+- The desktop app's one-time setup screen has a new field (Supabase's anon/publishable key) — needed for the login screen to work; existing installs will be prompted for it once on next launch via "Reconfigure Supabase / AI keys" if it's missing.
+
+**Before this is usable day to day:** the very first (Owner) account needed a real password set, since the Supabase login that already existed for that email predated real password auth. Turned out to need a proper fix rather than a one-off: added a real "Forgot password?" link on the sign-in screen (`/forgot-password`) — enter your email, get a real reset link, set a new password yourself. The same "set a new password" screen now handles both finishing an invite and resetting a forgotten one.
+
+**Not done yet, on purpose:** actually hosting this app at a public web address. That's the point of doing the login work first — it was the blocker. Deployment is the next step.
+
 ## 2026-08-10 — Fixed: Daily Briefing crashed every time it actually loaded
 The Daily Briefing popup (the one that's meant to auto-open once a day, or open from the bell icon) was reading its receivables/payables figures under the wrong field names — so it crashed with a technical error screen every single time it successfully generated a briefing. It only ever appeared to "work" when Gemini wasn't set up, because that case never reached the broken code. Fixed and confirmed working end-to-end with a real briefing.
 

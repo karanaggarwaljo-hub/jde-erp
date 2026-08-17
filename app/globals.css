@@ -148,6 +148,24 @@ input, textarea, select { font-family: inherit; }
   backdrop-filter: blur(8px);
 }
 
+/* Opens the mobile drawer version of .erp-sidebar — hidden above the 768px breakpoint, where
+   the sidebar is always on screen and this button has nothing to do. Selector is .btn.mobile-
+   menu-btn (not just .mobile-menu-btn) to out-specificity .btn's own `display: inline-flex`
+   (same single-class specificity, but .btn is declared later in this file, so plain
+   `.mobile-menu-btn { display: none }` was silently losing to it — this actually shipped
+   showing the button on desktop before this fix). */
+.btn.mobile-menu-btn { display: none; }
+
+/* Only ever present in the DOM while the mobile drawer is open (see DashboardChrome.tsx) — sits
+   between the topbar (z-index 40) and the sidebar drawer itself (z-index 50) so it dims the page
+   content and topbar without covering the drawer it's meant to sit behind. */
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 45;
+}
+
 .erp-content {
   flex: 1;
   padding: 24px;
@@ -875,8 +893,9 @@ input, textarea, select { font-family: inherit; }
 .profile-copy strong { font-size: 13px; line-height: 1.2; }
 .profile-copy small { color: var(--text-muted); font-size: 11px; }
 .profile-popover { display: flex; flex-direction: column; padding: 6px; right: 0; width: 180px; }
-.profile-popover a { align-items: center; border-radius: var(--radius-sm); display: flex; font-size: 12.5px; gap: 8px; padding: 9px; }
-.profile-popover a:hover { background: var(--bg-hover); }
+.profile-popover a, .profile-popover button { align-items: center; border-radius: var(--radius-sm); display: flex; font-size: 12.5px; gap: 8px; padding: 9px; }
+.profile-popover a:hover, .profile-popover button:hover { background: var(--bg-hover); }
+.profile-popover button { width: 100%; background: none; border: none; color: inherit; font-family: inherit; text-align: left; cursor: pointer; }
 
 /* ===================================================
    Modal
@@ -1202,6 +1221,22 @@ input, textarea, select { font-family: inherit; }
 @media (max-width: 768px) {
   .erp-sidebar { transform: translateX(-100%); }
   .erp-main { margin-left: 0; }
+  .btn.mobile-menu-btn { align-items: center; display: inline-flex; justify-content: center; }
+
+  /* The drawer overlays content when open, so it can afford the full labeled width instead of
+     the icon-only 72px rail used at tablet widths (see the 1024px breakpoint above) — restore
+     everything that breakpoint hid or centered, since there's no shared-space constraint here. */
+  .erp-sidebar.open {
+    transform: translateX(0);
+    width: 280px;
+    box-shadow: var(--shadow-lg);
+  }
+  .erp-sidebar.open .sidebar-logo { justify-content: flex-start; padding: 0 20px; }
+  .erp-sidebar.open .sidebar-logo-text { display: flex; }
+  .erp-sidebar.open .sidebar-section-label { display: block; }
+  .erp-sidebar.open .sidebar-item { justify-content: flex-start; padding: 9px 12px; }
+  .erp-sidebar.open .sidebar-item span { display: inline; }
+
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .form-grid-2, .form-grid-3, .form-grid-4 { grid-template-columns: 1fr; }
   .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
