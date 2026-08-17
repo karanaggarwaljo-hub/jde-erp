@@ -122,6 +122,12 @@ export default function SalesPage() {
     event.preventDefault();
     if (!activeCompany) return;
 
+    const unmatchedLine = lines.find((line) => line.part.trim() && !partOptions.some((part) => part.value === line.part));
+    if (unmatchedLine) {
+      setInvoiceError(`"${unmatchedLine.part}" doesn't match a part in Inventory — pick one from the dropdown list.`);
+      return;
+    }
+
     const items = lines
       .filter((line) => line.part.trim())
       .map((line) => {
@@ -360,11 +366,16 @@ export default function SalesPage() {
                 <div className="form-group"><label className="form-label">Invoice Date</label><input type="date" className="form-input" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} /></div></div>
               <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Invoice Line Items</h4>
                 {partOptions.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Add parts in Inventory before creating an invoice.</p>}
+                <datalist id="sales-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>
                 {lines.map((line, index) => {
-                  const category = partOptions.find((part) => part.value === line.part)?.category ?? '-';
+                  const matched = partOptions.find((part) => part.value === line.part);
                   return <div key={index} className="form-grid-4 mb-2">
-                    <div className="form-group"><label className="form-label">Select Part</label><select className="form-input form-select" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }}><option value="" disabled>Select a part…</option>{partOptions.map((part) => <option key={part.value}>{part.value}</option>)}</select></div>
-                    <div className="form-group"><label className="form-label">Category</label><input type="text" className="form-input" value={category} disabled /></div>
+                    <div className="form-group">
+                      <label className="form-label">Select Part</label>
+                      <input list="sales-part-options" className="form-input" placeholder="Type to search a part…" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }} />
+                      {line.part.trim() && !matched && <small style={{ color: '#EF4444' }}>No matching part in Inventory</small>}
+                    </div>
+                    <div className="form-group"><label className="form-label">Category</label><input type="text" className="form-input" value={matched?.category ?? '-'} disabled /></div>
                     <div className="form-group"><label className="form-label">Qty</label><input type="number" min="1" className="form-input" value={line.qty} onChange={(event) => updateLine(index, { qty: Number(event.target.value) })} /></div>
                     <div className="form-group"><label className="form-label">Unit Price (₹)</label><input type="number" min="0" className="form-input" value={line.price} onChange={(event) => updateLine(index, { price: Number(event.target.value) })} /></div>
                   </div>;
