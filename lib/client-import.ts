@@ -211,6 +211,7 @@ export async function parseSpreadsheetFile(file: File): Promise<ImportedLine[]> 
 export type ImportedProduct = {
   part_number: string;
   oem_number: string;
+  hsn_code: string;
   name: string;
   brand: string;
   category: string;
@@ -226,6 +227,7 @@ export type ImportedProduct = {
 const PRODUCT_KEYS = {
   part_number: ['part number', 'part no', 'partno', 'p no', 'sku', 'code', 'item code', 'material code', 'material no', 'product code'],
   oem_number: ['oem number', 'oem', 'oem no', 'oem code'],
+  hsn_code: ['hsn code', 'hsn', 'hsn/sac', 'hsn sac', 'hsn no'],
   name: ['name', 'item name', 'part name', 'description', 'desc', 'item description', 'part description', 'product name', 'product', 'item', 'spare part', 'particulars'],
   brand: ['brand', 'manufacturer', 'make', 'company'],
   category: ['category', 'type', 'group', 'segment'],
@@ -265,6 +267,7 @@ export async function parseInventoryFile(file: File): Promise<InventoryImportRes
   const headerKeys = {
     part_number: findKey(sampleRow, PRODUCT_KEYS.part_number),
     oem_number: findKey(sampleRow, PRODUCT_KEYS.oem_number),
+    hsn_code: findKey(sampleRow, PRODUCT_KEYS.hsn_code),
     name: findKey(sampleRow, PRODUCT_KEYS.name) ?? fallbackNameKey,
     brand: findKey(sampleRow, PRODUCT_KEYS.brand),
     category: findKey(sampleRow, PRODUCT_KEYS.category),
@@ -313,6 +316,7 @@ export async function parseInventoryFile(file: File): Promise<InventoryImportRes
     products.push({
       part_number: partNumber,
       oem_number: get(row, PRODUCT_KEYS.oem_number),
+      hsn_code: get(row, PRODUCT_KEYS.hsn_code),
       name: name || partNumber,
       brand: get(row, PRODUCT_KEYS.brand),
       category: get(row, PRODUCT_KEYS.category),
@@ -338,6 +342,16 @@ export function fileToBase64(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+/** SHA-256 of the file's raw bytes, as a hex string — identifies this exact file (not its
+ *  filename) so the same invoice photo/PDF can't be scanned or recorded as a purchase twice,
+ *  even under a renamed copy. Content-based, not filename-based, so a re-saved or re-shared copy
+ *  of the same file is still recognized. */
+export async function hashFile(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export const SPREADSHEET_EXTENSIONS = ['.csv', '.xls', '.xlsx'];

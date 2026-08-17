@@ -20,7 +20,7 @@ import { logout } from '@/lib/client-auth';
 
 const navItems = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Inventory', href: '/inventory', icon: Package, badge: 'Low Stock' },
+  { name: 'Inventory', href: '/inventory', icon: Package },
   { name: 'Sales', href: '/sales', icon: ShoppingCart },
   { name: 'Purchases', href: '/purchases', icon: ShoppingBag },
   { name: 'Customers', href: '/customers', icon: Users },

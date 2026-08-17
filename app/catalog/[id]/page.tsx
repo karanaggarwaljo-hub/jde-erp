@@ -34,7 +34,17 @@ function buildWhatsAppUrl(phone: string | null | undefined, message: string): st
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
-  const product = await getProduct(id);
+  let product: Record<string, unknown> | undefined;
+  try {
+    product = await getProduct(id);
+  } catch (error) {
+    // Metadata generation runs as part of the same request as the page component below — if
+    // Supabase is unreachable here too, fall back to a generic title instead of letting this
+    // throw take down the whole route before the page's own try/catch gets a chance to render
+    // its friendly fallback.
+    console.error('generateMetadata: failed to load catalog product:', error);
+    return { title: 'Spare Parts Catalog — Jai Durga Enterprises' };
+  }
   if (!product) {
     return { title: 'Part Not Found — Jai Durga Enterprises' };
   }
@@ -60,7 +70,26 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 export default async function CatalogDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const product = await getProduct(id);
+
+  let product: Record<string, unknown> | undefined;
+  try {
+    product = await getProduct(id);
+  } catch (error) {
+    // Anonymous public visitors must never see a raw framework 500 page or a leaked Supabase
+    // error message — log the real cause server-side for diagnosis, and show the same friendly
+    // empty-state visual the list page uses for its zero-products case, just with different copy
+    // so it reads as "come back later" rather than "there's nothing here". Deliberately outside
+    // the notFound() call below: notFound() throws its own special error for Next's own routing
+    // machinery to catch, which must never be swallowed by this catch block.
+    console.error('CatalogDetailPage failed to load product:', error);
+    return (
+      <div className="empty-state">
+        <PackageSearch size={28} />
+        <p className="empty-state-title">Catalog temporarily unavailable</p>
+        <p className="empty-state-desc">Please check back soon.</p>
+      </div>
+    );
+  }
   if (!product) notFound();
 
   // The product has already loaded (and notFound() already had its chance to fire above) — a
@@ -72,7 +101,16 @@ export default async function CatalogDetailPage({ params }: { params: Promise<{ 
   }
 
   const companyId = product.company_id as string | undefined;
-  const contact = companyId ? await getCompanyPublicContact(companyId) : undefined;
+  let contact: { contact_email: string | null; contact_phone: string | null } | undefined;
+  try {
+    contact = companyId ? await getCompanyPublicContact(companyId) : undefined;
+  } catch (error) {
+    // Same isolation principle as logCatalogEvent above: contact info only gates the
+    // Request-a-Quote / WhatsApp / Call buttons further down, not the reason this page exists —
+    // a failure here shouldn't discard the part details that already loaded fine.
+    console.error('CatalogDetailPage failed to load company contact:', error);
+    contact = undefined;
+  }
   const quoteSubject = encodeURIComponent(`Quote request: ${product.title} (${product.part_number || ''})`);
   const mailtoHref = contact?.contact_email ? `mailto:${contact.contact_email}?subject=${quoteSubject}` : null;
   const waHref = buildWhatsAppUrl(

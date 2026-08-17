@@ -137,7 +137,7 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
                 ref={searchRef}
                 aria-label="Universal search"
                 type="text"
-                placeholder="Search Part #, Customer, Invoice, OEM..."
+                placeholder="Search app pages — Inventory, Sales, Purchases..."
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />

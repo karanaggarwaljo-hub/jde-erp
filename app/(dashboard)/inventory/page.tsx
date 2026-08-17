@@ -12,6 +12,7 @@ type Product = {
   company_id: string;
   part_number: string;
   oem_number: string;
+  hsn_code: string;
   name: string;
   brand: string;
   category: string;
@@ -31,7 +32,7 @@ const DEFAULT_CATEGORIES = ['Engine', 'Brakes', 'Filters', 'Clutch', 'Suspension
 export default function InventoryPage() {
   const { configError } = useCompany();
   const { rows: products, loading, create, update, remove, reload, activeCompany } = useCompanyTable<Product>('products');
-  const { rows: stockLayers } = useCompanyTable<StockLayer>('stock_layers');
+  const { rows: stockLayers, reload: reloadStockLayers } = useCompanyTable<StockLayer>('stock_layers');
 
   // Cost price shown per product = the oldest FIFO batch that still has stock left (i.e. what the
   // next sale will actually cost), falling back to the static cost_price field when a product has
@@ -54,10 +55,13 @@ export default function InventoryPage() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
   const [suggesting, setSuggesting] = useState(false);
+  const [savingProduct, setSavingProduct] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   const [formData, setFormData] = useState({
     part_number: '',
     oem_number: '',
+    hsn_code: '',
     name: '',
     brand: '',
     category: '',
@@ -71,6 +75,13 @@ export default function InventoryPage() {
   });
 
   const categoryOptions = Array.from(new Set([...DEFAULT_CATEGORIES, ...products.map((p) => p.category).filter(Boolean)])).sort();
+
+  // Warns before creating a likely-accidental duplicate (e.g. re-adding a part because a previous
+  // save gave no visible confirmation) without blocking a genuinely intentional re-add — same name,
+  // case-insensitive, only checked while adding a brand-new part, never while editing one.
+  const possibleDuplicate = !editingProduct && formData.name.trim()
+    ? products.find((p) => p.name.trim().toLowerCase() === formData.name.trim().toLowerCase())
+    : undefined;
 
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -107,9 +118,11 @@ export default function InventoryPage() {
 
   const handleOpenAdd = () => {
     setEditingProduct(null);
+    setSaveError('');
     setFormData({
       part_number: `SP-00${products.length + 1}`,
       oem_number: '',
+      hsn_code: '',
       name: '',
       brand: '',
       category: 'Engine',
@@ -126,51 +139,73 @@ export default function InventoryPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newCostPrice = Number(formData.cost_price);
-    const newStock = Number(formData.current_stock);
-    const payload = {
-      ...formData,
-      cost_price: newCostPrice,
-      mrp: Number(formData.mrp),
-      sale_price: Number(formData.sale_price),
-      current_stock: newStock,
-      min_stock: Number(formData.min_stock),
-    };
-    if (editingProduct) {
-      // current_stock is owned by the FIFO calls below, not this PATCH — writing it here too
-      // would double-count. A stock-unchanged edit (e.g. fixing a typo'd sale price) correctly
-      // touches only the static fields and opens no new batch.
-      const patch: Record<string, unknown> = { ...payload };
-      delete patch.current_stock;
-      await update(editingProduct.id, patch);
-      const delta = newStock - Number(editingProduct.current_stock);
-      if (delta > 0) {
-        await addStockLayer(editingProduct.id, delta, newCostPrice, null, true);
-      } else if (delta < 0) {
-        await consumeStockFifo(editingProduct.id, -delta, null);
-      } else if (newCostPrice !== Number(editingProduct.cost_price)) {
-        // Stock didn't change, only the cost figure did — correct the batch the display is
-        // currently reading from instead of silently leaving it stale (the bug that made typing
-        // a new cost price not actually change the shown cost/margin).
-        await correctOldestLayerCost(editingProduct.id, newCostPrice);
+    setSaveError('');
+    setSavingProduct(true);
+    try {
+      const newCostPrice = Number(formData.cost_price);
+      const newStock = Number(formData.current_stock);
+      if (!editingProduct && newStock <= 0) {
+        throw new Error('Initial stock must be greater than 0 for a new part — enter the quantity you actually have on hand.');
       }
-    } else {
-      const created = await create(payload);
-      if (newStock > 0) {
-        // adjustStock=false: current_stock was already set by the insert above, so this only
-        // opens the matching opening batch without bumping stock a second time.
-        await addStockLayer(created.id, newStock, newCostPrice, null, false);
+      const payload = {
+        ...formData,
+        cost_price: newCostPrice,
+        mrp: Number(formData.mrp),
+        sale_price: Number(formData.sale_price),
+        current_stock: newStock,
+        min_stock: Number(formData.min_stock),
+      };
+      if (editingProduct) {
+        // current_stock is owned by the FIFO calls below, not this PATCH — writing it here too
+        // would double-count. A stock-unchanged edit (e.g. fixing a typo'd sale price) correctly
+        // touches only the static fields and opens no new batch.
+        const patch: Record<string, unknown> = { ...payload };
+        delete patch.current_stock;
+        await update(editingProduct.id, patch);
+        const delta = newStock - Number(editingProduct.current_stock);
+        if (delta > 0) {
+          await addStockLayer(editingProduct.id, delta, newCostPrice, null, true);
+        } else if (delta < 0) {
+          await consumeStockFifo(editingProduct.id, -delta, null);
+        } else if (newCostPrice !== Number(editingProduct.cost_price)) {
+          // Stock didn't change, only the cost figure did — correct the batch the display is
+          // currently reading from instead of silently leaving it stale (the bug that made typing
+          // a new cost price not actually change the shown cost/margin).
+          await correctOldestLayerCost(editingProduct.id, newCostPrice);
+        }
+      } else {
+        const created = await create(payload);
+        if (newStock > 0) {
+          // adjustStock=false: current_stock was already set by the insert above, so this only
+          // opens the matching opening batch without bumping stock a second time.
+          await addStockLayer(created.id, newStock, newCostPrice, null, false);
+        }
       }
+      // Same class of bug, two different tables: update()/create() above reload `products`, but
+      // both run *before* addStockLayer/consumeStockFifo — which are what actually change
+      // current_stock in the database (deliberately excluded from the plain PATCH above, see its
+      // own comment) — so that first reload always captures the pre-change stock, and nothing
+      // reloaded `products` again afterward. Changing Initial Stock on an existing part, or the
+      // opening stock on a new one, genuinely saved every time; the Stock Level column just kept
+      // showing the old number until a full page reload. Reloading both tables here, after
+      // everything above has actually finished, is what makes the screen match the database.
+      await Promise.all([reload(), reloadStockLayers()]);
+      setShowModal(false);
+      setFeedback(editingProduct ? 'Part updated successfully.' : 'New part added to inventory.');
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save this part — please try again.');
+    } finally {
+      setSavingProduct(false);
     }
-    setShowModal(false);
-    setFeedback(editingProduct ? 'Part updated successfully.' : 'New part added to inventory.');
   };
 
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
+    setSaveError('');
     setFormData({
       part_number: product.part_number,
       oem_number: product.oem_number,
+      hsn_code: product.hsn_code || '',
       name: product.name,
       brand: product.brand,
       category: product.category,
@@ -287,6 +322,8 @@ export default function InventoryPage() {
           <thead>
             <tr>
               <th>Part Number</th>
+              <th>OEM Number</th>
+              <th>HSN Code</th>
               <th>Item Name</th>
               <th>Brand</th>
               <th>Category</th>
@@ -309,8 +346,9 @@ export default function InventoryPage() {
                 <tr key={p.id}>
                   <td>
                     <span style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>{p.part_number}</span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace', display: 'block' }}>{p.oem_number || '-'}</span>
                   </td>
+                  <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{p.oem_number || '-'}</td>
+                  <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{p.hsn_code || '-'}</td>
                   <td style={{ fontWeight: 600, maxWidth: '150px' }} className="truncate">{p.name}</td>
                   <td style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{p.brand}</td>
                   <td><span className="badge badge-info">{p.category}</span></td>
@@ -344,7 +382,7 @@ export default function InventoryPage() {
               );
             })}
             {filteredProducts.length === 0 && (
-              <tr><td colSpan={9}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term or category, or this company simply has no parts yet.'}</p></div></td></tr>
+              <tr><td colSpan={11}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term or category, or this company simply has no parts yet.'}</p></div></td></tr>
             )}
           </tbody>
         </table>
@@ -358,11 +396,17 @@ export default function InventoryPage() {
           <div className="modal-box">
             <div className="modal-header">
               <h3 className="modal-title">{editingProduct ? 'Edit Spare Part' : 'Add New Spare Part'}</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowModal(false)}>✕</button>
+              <button className="btn btn-ghost btn-sm" disabled={savingProduct} onClick={() => setShowModal(false)}>✕</button>
             </div>
             <form onSubmit={handleSave}>
               <div className="modal-body flex flex-col gap-4">
-                <div className="form-grid-2">
+                {saveError && <div className="alert alert-danger" role="alert">{saveError}</div>}
+                {possibleDuplicate && (
+                  <div className="alert alert-warning" role="alert">
+                    A part named &quot;{possibleDuplicate.name}&quot; already exists ({possibleDuplicate.part_number}, {possibleDuplicate.current_stock} in stock) — this will add a separate, second entry rather than update it. If you meant to edit the existing one, cancel and use its Edit button instead.
+                  </div>
+                )}
+                <div className="form-grid-3">
                   <div className="form-group">
                     <label className="form-label">Part Number *</label>
                     <input className="form-input" required value={formData.part_number} onChange={e => setFormData({ ...formData, part_number: e.target.value })} />
@@ -370,6 +414,10 @@ export default function InventoryPage() {
                   <div className="form-group">
                     <label className="form-label">OEM Number</label>
                     <input className="form-input" value={formData.oem_number} onChange={e => setFormData({ ...formData, oem_number: e.target.value })} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">HSN Code</label>
+                    <input className="form-input" placeholder="e.g. 84314990" value={formData.hsn_code} onChange={e => setFormData({ ...formData, hsn_code: e.target.value })} />
                   </div>
                 </div>
 
@@ -421,8 +469,8 @@ export default function InventoryPage() {
 
                 <div className="form-grid-3">
                   <div className="form-group">
-                    <label className="form-label">Initial Stock</label>
-                    <input type="number" className="form-input" value={formData.current_stock} onChange={e => setFormData({ ...formData, current_stock: e.target.value })} />
+                    <label className="form-label">Initial Stock{!editingProduct && ' *'}</label>
+                    <input type="number" className="form-input" min={editingProduct ? 0 : 1} required={!editingProduct} value={formData.current_stock} onChange={e => setFormData({ ...formData, current_stock: e.target.value })} />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Min Stock Threshold</label>
@@ -436,8 +484,8 @@ export default function InventoryPage() {
               </div>
 
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save Product</button>
+                <button type="button" className="btn btn-secondary" disabled={savingProduct} onClick={() => setShowModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={savingProduct}>{savingProduct ? 'Saving…' : 'Save Product'}</button>
               </div>
             </form>
           </div>

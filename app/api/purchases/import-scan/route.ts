@@ -1,4 +1,5 @@
 import { GoogleGenAI, createUserContent, createPartFromBase64 } from '@google/genai';
+import { findPurchaseByFileHash } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +10,7 @@ const SCAN_JSON_SCHEMA = {
   additionalProperties: false,
   properties: {
     supplier_name: { ...NULLABLE_STRING, description: 'The supplier/vendor company name as printed on the document. Null if not legible.' },
+    supplier_gstin: { ...NULLABLE_STRING, description: 'The supplier/vendor’s own GSTIN (15-character GST registration number, e.g. 04AAUPG7442A1ZT) as printed on the document — not the buyer’s GSTIN. Null if not present or not legible.' },
     po_date: { ...NULLABLE_STRING, description: 'Invoice or order date in YYYY-MM-DD format. Null if not present.' },
     expected_delivery: { ...NULLABLE_STRING, description: 'Expected delivery date in YYYY-MM-DD format, if stated. Null otherwise.' },
     items: {
@@ -26,16 +28,16 @@ const SCAN_JSON_SCHEMA = {
       },
     },
   },
-  required: ['supplier_name', 'po_date', 'expected_delivery', 'items'],
+  required: ['supplier_name', 'supplier_gstin', 'po_date', 'expected_delivery', 'items'],
 };
 
 const SYSTEM_PROMPT =
   'You are extracting structured purchase order / supplier invoice data from a scanned document or photo for an auto spare ' +
-  'parts trading ERP. Extract ONLY what is clearly legible and relevant: the supplier name, the order/invoice date, the ' +
-  'expected delivery date if stated, and the line items actually being ordered or billed (description, quantity, unit price). ' +
-  'Do not extract or fabricate letterhead boilerplate, terms and conditions, bank/payment details, signatures, stamps, or any ' +
-  'text unrelated to the order. If a field is not clearly present or legible, return null for it rather than guessing. ' +
-  'Never invent a number or item that is not actually visible in the document.';
+  'parts trading ERP. Extract ONLY what is clearly legible and relevant: the supplier name, the supplier’s own GSTIN (not ' +
+  'the buyer’s), the order/invoice date, the expected delivery date if stated, and the line items actually being ordered ' +
+  'or billed (description, quantity, unit price). Do not extract or fabricate letterhead boilerplate, terms and conditions, ' +
+  'bank/payment details, signatures, stamps, or any text unrelated to the order. If a field is not clearly present or ' +
+  'legible, return null for it rather than guessing. Never invent a number or item that is not actually visible in the document.';
 
 export async function POST(request: Request) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -47,9 +49,21 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { base64, mimeType } = await request.json();
+    const { base64, mimeType, fileHash, companyId } = await request.json();
     if (!base64 || !mimeType) {
       return Response.json({ error: 'Missing file data.' }, { status: 400 });
+    }
+
+    // Checked before spending an AI call: the exact same file already recorded as a purchase
+    // can't be scanned again either, not just re-recorded — cheaper and faster to reject here.
+    if (fileHash && companyId) {
+      const existingPoId = await findPurchaseByFileHash(companyId, fileHash);
+      if (existingPoId) {
+        return Response.json(
+          { error: `This exact invoice file has already been recorded as purchase ${existingPoId} — it cannot be scanned or recorded again.` },
+          { status: 409 }
+        );
+      }
     }
 
     const ai = new GoogleGenAI({ apiKey });

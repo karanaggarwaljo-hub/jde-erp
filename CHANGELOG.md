@@ -50,6 +50,65 @@ Until today, "Sign In" was fake: the login screen accepted anything you typed (i
 
 **Not done yet, on purpose:** actually hosting this app at a public web address. That's the point of doing the login work first — it was the blocker. Deployment is the next step.
 
+## 2026-08-10 — Fixed: Daily Briefing crashed every time it actually loaded
+The Daily Briefing popup (the one that's meant to auto-open once a day, or open from the bell icon) was reading its receivables/payables figures under the wrong field names — so it crashed with a technical error screen every single time it successfully generated a briefing. It only ever appeared to "work" when Gemini wasn't set up, because that case never reached the broken code. Fixed and confirmed working end-to-end with a real briefing.
+
+## 2026-08-10 — Swept the rest of the app for the same "saved but the screen didn't refresh" bug
+After finding it twice in Inventory, checked everywhere else that could have the same problem: Sales, Purchases, Customers, Suppliers, and Expenses. Found one more real (if not yet visibly noticeable) case — recording, editing, or deleting a Sales invoice was never refreshing Inventory's stock numbers in the background, even though the stock change itself was saving correctly. Fixed. Purchases, Customers, Suppliers, and Expenses were all already correct.
+
+## 2026-08-10 — Adding a new part now requires a real starting stock count
+"Initial Stock" can no longer be left blank or set to 0 when adding a new part — you have to enter how many you actually have on hand. Editing an existing part's stock down to 0 (e.g. it's sold out) is unaffected and still works normally; this only applies to creating a brand-new part.
+
+## 2026-08-10 — Recording a multi-line purchase is about twice as fast, and fixed a real duplicate-part-number bug along the way
+Measured it properly: recording a 14-item purchase used to take about 11.5 seconds, because adding each new part to Inventory was reloading the *entire* parts list before moving to the next one — 14 full reloads for one purchase. It's now closer to 5.5 seconds: each part is still added one at a time, but the list only reloads once, at the end. There's a further, bigger speedup possible (getting this down to roughly 1-2 seconds by combining all the part-matching into the same single database step that already saves everything else) — flagged for a future pass since it touches the same core save logic more deeply.
+
+Found and fixed a real bug while measuring this: because the app was checking "does this part already exist" against a list that never updated mid-purchase, two or more genuinely different new parts recorded in the *same* purchase could end up sharing one auto-generated part number (e.g. two unrelated parts both filed under "SP-235"). Fixed alongside the speed fix, since it was the same root cause.
+
+## 2026-08-10 — Scanned invoices now capture the supplier's GST number, and the same invoice file can never be recorded twice
+Two additions to the "Record Purchase from File" AI scan:
+- It now reads the supplier's GSTIN off the invoice too, alongside the existing supplier name/date/items, and saves it automatically when creating a new supplier record. Backfilled GANPATI AUTO TRADERS' real GSTIN from the invoice used to test this earlier.
+- **The exact same invoice file can no longer be scanned or recorded a second time.** This is enforced by the database itself, not just a warning in the app — every purchase records a fingerprint of its source file, and a second attempt with the same fingerprint is rejected outright, with a clear message naming the purchase it was already recorded as. Checked before the file is even sent to the AI (so a repeat attempt doesn't waste a scan), and enforced again as a hard guarantee at the moment of saving. This directly closes the door on the exact failure mode that caused this session's earlier duplicate-data cleanup — re-submitting the same invoice can no longer create a second copy of anything, no matter how many times it's tried.
+
+## 2026-08-10 — Fixed: Inventory parts were getting added multiple times, and cleaned up ~580 duplicate records already sitting in the database
+Found the cause after being asked why parts kept showing up two or three times: the "Add New Part" Save button had no confirmation it had actually saved (the same invisible-wait problem fixed in Purchases/Sales the same day) — so re-typing the same part because the first attempt looked like nothing happened just created another one, silently, every time. Fixed: the Save button now shows "Saving…" and disables itself, and — new — if you're about to add a part with the exact same name as one that already exists, you'll see a warning with the existing part's stock before you submit, so it's a choice, not an accident.
+
+Also cleaned up the actual damage this had already caused: 542 duplicate parts in Inventory (mostly in Jai Durga Enterprises, from repeated attempts to add the same 14-part GANPATI AUTO TRADERS invoice by hand) plus a smaller, separate mess in company "bkgkj" — 3 duplicate copies of that same purchase and 1 duplicate copy of another, both from before today, which needed properly reversing the stock and supplier-balance effects of each extra copy, not just deleting rows. None of the duplicates had been sold, so no sales history was touched. Verified with rollback-tested checks before anything was changed for real.
+
+## 2026-08-10 — Removed Credit Limit
+Taken out everywhere it showed up — Customers (the field on each customer card and the Add Customer form) and Sales (the over-limit warning when creating an invoice). Not used, so it's gone rather than left sitting unused.
+
+## 2026-08-10 — Fixed: Sales and Purchases could silently fail to save at all, depending which company you're in
+Found and fixed a serious bug while testing yesterday's Purchases fix against a real supplier invoice: recording a Sales invoice or a Purchase could fail every single time for a company that has fewer existing records than another company on the same account — which, for Jai Durga Enterprises specifically, meant **every** attempt to record its first-ever Purchase or Sales invoice was guaranteed to fail.
+
+**What was happening:** invoice/PO numbers (like "PO-1001") are shared across all your companies on this account, not separate per company — but the app was guessing the next number by looking only at the current company's own records. A company with zero purchases so far would always guess "PO-1001" as its first number, even when another company already had one. The save was then rejected as a duplicate — and because of yesterday's still-in-progress loading-indicator gap, that rejection was invisible, so it just looked like nothing happened.
+
+**Fixed at the source:** PO, GRN, and invoice numbers are now generated by the database itself, at the moment of saving, from the real record across every company — not guessed in the browser beforehand. This closes the bug for good, for every company, not just the one that surfaced it.
+
+**Also fixed while tracking this down:** importing a purchase from a scanned photo could garble a line item's name if the AI's description happened to contain a dash — e.g. "LOADER CUTTER KIT - JCB" was being split and stored backwards as a part named "JCB" with part number "LOADER CUTTER KIT". That auto-split was only ever meant for the manual entry form (where a dash means an already-formatted "part number - name" pair copied from the dropdown); it's now skipped for AI-scanned text, which is just a plain description.
+
+**Same root cause, found and fixed in Expenses too:** logging an expense had the identical bug — the next "EXP-" number was guessed from the current company's own records only. It hadn't caused a real failure yet (no company had logged an expense before now), but the first two companies to each log their own first expense would have collided the same way Purchases/Sales did. Fixed the same way: the database now generates the expense number itself.
+
+## 2026-08-09 — Independent audit review: crash-proof Sales/Purchases, security patches, honest error states
+An outside code audit reviewed the whole app. Most of what it flagged has been fixed now; a few larger items are logged below as deliberately not done yet, for a separate decision.
+
+**Sales and Purchases can no longer half-save.** Recording an invoice or a purchase used to be 4–9 separate steps sent one after another from the browser (create the invoice/PO, add each line item, update stock, adjust the customer/supplier balance...). If your connection dropped or the app crashed partway through, you could end up with a purchase on record but no stock added, or stock consumed but the customer never billed for it, with no clean way to tell. Both now happen as one all-or-nothing operation on the database side — either the whole thing saves correctly, or nothing does and you get a clear error to fix and retry. Editing or deleting a Sales invoice got the same fix.
+
+**Two real security holes in outside code libraries, closed.** Next.js (the framework this app is built on) bundled a component with two known high-severity issues — updated to the fixed version. The Excel/CSV file-import library had two more (a malicious spreadsheet could exploit them) with no fix available through the normal update channel — switched to the library's own official patched build instead. A production dependency scan went from 5 high-severity issues to 1 (an unrelated, low-exposure build-tool issue, left alone since it wasn't part of this fix).
+
+**Dashboard, Inventory, and the public Catalog now tell you when something's actually broken**, instead of quietly pretending everything's fine. Previously, if the app couldn't reach the database, the Dashboard silently showed ₹0 everywhere and Inventory silently showed "No parts found" — indistinguishable from an empty, working store. Both now show a clear "can't reach the database" message instead. The public Catalog page had the same gap the other way round: a database hiccup showed visitors a raw technical error page instead of your site's own "check back soon" message.
+
+**A few honesty fixes on things that looked more finished than they are:**
+- The top-bar "Search everything" box only ever searched page names (Inventory, Sales, etc.), never real parts/customers/invoices despite what its placeholder text implied — reworded so it's not overpromising.
+- The "Low Stock" badge next to Inventory in the sidebar was permanently on, not a live count — turns out it wasn't even wired up to render, so it's removed rather than left as dead code.
+- Purchases' "Supplier Invoices" tab always claimed "no unmatched supplier invoices," which reads like a working, empty inbox — there's no such matching feature built, so it now says so plainly instead.
+
+**Cleanup:** fixed all 11 lint errors the audit flagged (`npm run lint` now reports zero errors) — mostly Electron/build-script files being checked against web-app coding rules by mistake, plus a couple of real React mistakes in the Website Catalog editor.
+
+**Deliberately not done in this pass** (flagged by the audit, each worth its own decision before tackling):
+- Real staff login/passwords — today's login screen still accepts anything and routes straight in. The ERP itself still isn't exposed to the internet (only the read-only Website Catalog is), which is why this was lower urgency than the items above — still on the list.
+- The generic data API and the database's own access rules (RLS) still don't check who's asking, or which company a request should be scoped to — same reasoning as above, tied to the login decision.
+- No performance work yet — the Dashboard still makes far more database requests than it needs to as data grows.
+
 ## 2026-08-07 — Update 3.0: Website Catalog goes live — search, filter, WhatsApp, quote requests, and three real bugs fixed
 Built out the public Website Catalog based on a PRD review, closing the gaps the original build flagged as "not included yet," and put the result live on the real jd-enterprise.com — not just this app's own preview pages.
 

@@ -20,8 +20,12 @@ type Briefing = { priorities: Priority[] };
 type Digest = {
   date: string;
   yesterday_sales: { date: string; invoice_count: number; total: number };
-  receivables_due_today: { count: number; total: number };
-  payables_due_today: { count: number; total: number };
+  // Named to match lib/ai/digest.ts's buildDailyBriefingDigest() exactly — these are ALL
+  // outstanding receivables/payables (balance > 0), not filtered to what's due today; there's no
+  // due-date logic in that function, so a "_today"-suffixed name here would be misleading, not
+  // just mismatched.
+  outstanding_receivables: { count: number; total: number };
+  outstanding_payables: { count: number; total: number };
   low_stock: { count: number };
 };
 
@@ -125,9 +129,9 @@ export default function DailyBriefingModal() {
             <div className="flex items-center gap-2 flex-wrap mb-4" style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
               <span>Yesterday: <strong style={{ color: 'var(--text-primary)' }}>₹{digest.yesterday_sales.total.toLocaleString()}</strong> ({digest.yesterday_sales.invoice_count} invoices)</span>
               <span>·</span>
-              <span>Receivables due: <strong style={{ color: 'var(--text-primary)' }}>₹{digest.receivables_due_today.total.toLocaleString()}</strong></span>
+              <span>Receivables due: <strong style={{ color: 'var(--text-primary)' }}>₹{digest.outstanding_receivables.total.toLocaleString()}</strong></span>
               <span>·</span>
-              <span>Payables due: <strong style={{ color: 'var(--text-primary)' }}>₹{digest.payables_due_today.total.toLocaleString()}</strong></span>
+              <span>Payables due: <strong style={{ color: 'var(--text-primary)' }}>₹{digest.outstanding_payables.total.toLocaleString()}</strong></span>
               <span>·</span>
               <span>Low stock: <strong style={{ color: 'var(--text-primary)' }}>{digest.low_stock.count}</strong></span>
             </div>
