@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ChangeEvent, useState } from 'react';
 import { ArrowLeft, Sparkles, Upload, Search, CheckCircle2, XCircle, HelpCircle, ExternalLink, Trash2, RefreshCw, AlertTriangle, Copy } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
-import { fileToBase64 } from '@/lib/client-import';
+import { resizeImageForUpload } from '@/lib/imageResize';
 import { buildCatalogImagePrompt } from '@/lib/catalogPrompt';
 import { canPublish, catalogDisplayStatus, checkInventoryDrift, computeAvailabilityFromStock, missingRequiredFields, type CatalogProduct, type ReferenceCandidate } from '@/lib/catalogTypes';
 
@@ -201,11 +201,11 @@ export default function CatalogAdminDetailPage() {
     setImageBusy(true);
     setImageError('');
     try {
-      const base64 = await fileToBase64(file);
+      const { base64, mimeType } = await resizeImageForUpload(file);
       const res = await fetch('/api/catalog-image-upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ catalogId: row.id, base64, mimeType: file.type }),
+        body: JSON.stringify({ catalogId: row.id, base64, mimeType }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
