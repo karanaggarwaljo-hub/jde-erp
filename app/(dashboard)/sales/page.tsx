@@ -5,13 +5,14 @@ import { Plus, Printer, Search, Eye, Pencil, Trash2, ArrowRight, ArrowLeft } fro
 import { printCurrentPage } from '@/lib/client-export';
 import { saveSalesInvoice, deleteSalesInvoice } from '@/lib/client-sales';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import AddCustomerModal from '@/components/AddCustomerModal';
 
 type SalesTab = 'invoices' | 'quotations';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 type InvoiceLine = { part: string; qty: number; price: number };
 
 type Product = { id: string; company_id: string; part_number: string; name: string; category: string; sale_price: number; current_stock: number };
-type Customer = { id: string; company_id: string; name: string; balance: number };
+type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
 type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string; discount_percent: number; discount_amount: number };
 type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
 type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_price: number; line_total: number };
@@ -28,7 +29,7 @@ const WALK_IN_CUSTOMER = 'Walk-in Customer';
 
 export default function SalesPage() {
   const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
-  const { rows: customers, reload: reloadCustomers } = useCompanyTable<Customer>('customers');
+  const { rows: customers, create: createCustomer, reload: reloadCustomers } = useCompanyTable<Customer>('customers');
   const { rows: invoices, loading: invoicesLoading, reload: reloadInvoices } = useCompanyTable<Invoice>('invoices');
   const { rows: quotations, loading: quotationsLoading } = useCompanyTable<Quotation>('quotations');
   const { rows: invoiceItems, reload: reloadInvoiceItems } = useCompanyTable<InvoiceItem>('invoice_items');
@@ -42,6 +43,7 @@ export default function SalesPage() {
   const [activeTab, setActiveTab] = useState<SalesTab>('invoices');
   const [search, setSearch] = useState('');
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Invoice | null>(null);
@@ -363,8 +365,16 @@ export default function SalesPage() {
             <div className="modal-header"><h3 id="invoice-modal-title" className="modal-title">{editingInvoice ? `Edit ${editingInvoice.id}` : 'Create Sales Invoice'}</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>✕</button></div>
             <div className="modal-body flex flex-col gap-4">
               {invoiceError && <div className="alert alert-danger" role="alert">{invoiceError}</div>}
-              <div className="form-grid-2"><div className="form-group"><label className="form-label">Customer</label><select className="form-input form-select" value={customer} onChange={(event) => setCustomer(event.target.value)}><option value="">Walk-in Sale (no customer)</option>{customers.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</select></div>
-                <div className="form-group"><label className="form-label">Invoice Date</label><input type="date" className="form-input" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} /></div></div>
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label className="form-label">Customer</label>
+                  <div className="flex gap-2">
+                    <select className="form-input form-select" value={customer} onChange={(event) => setCustomer(event.target.value)}><option value="">Walk-in Sale (no customer)</option>{customers.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAddCustomer(true)}>+ New</button>
+                  </div>
+                </div>
+                <div className="form-group"><label className="form-label">Invoice Date</label><input type="date" className="form-input" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} /></div>
+              </div>
               <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Invoice Line Items</h4>
                 {partOptions.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Add parts in Inventory before creating an invoice.</p>}
                 <datalist id="sales-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>
@@ -415,6 +425,14 @@ export default function SalesPage() {
             <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || savingInvoice}>{savingInvoice ? 'Saving…' : editingInvoice ? 'Save Changes' : 'Generate & Save Invoice'}</button></div>
           </form>
         </div></div>
+      )}
+
+      {showAddCustomer && (
+        <AddCustomerModal
+          onClose={() => setShowAddCustomer(false)}
+          onSave={createCustomer}
+          onCreated={(newCustomer) => { setCustomer(newCustomer.name); setShowAddCustomer(false); }}
+        />
       )}
     </div>
   );

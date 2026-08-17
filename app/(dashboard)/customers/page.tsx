@@ -4,8 +4,7 @@ import { FormEvent, useState } from 'react';
 import { Plus, Phone, Mail, MapPin, Sparkles } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
-
-const emptyForm = { name: '', phone: '', email: '', gstin: '', address: '', type: 'retail' };
+import AddCustomerModal from '@/components/AddCustomerModal';
 
 type Customer = {
   id: string;
@@ -29,7 +28,6 @@ export default function CustomersPage() {
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [reminderCustomer, setReminderCustomer] = useState<Customer | null>(null);
   const [feedback, setFeedback] = useState('');
-  const [form, setForm] = useState(emptyForm);
 
   function overdueContext(customerName: string): string {
     const overdue = invoices
@@ -38,14 +36,6 @@ export default function CustomersPage() {
     if (overdue.length === 0) return '';
     return `${overdue.length} unpaid invoice${overdue.length > 1 ? 's' : ''}, oldest ${overdue[0].id} dated ${overdue[0].date}.`;
   }
-
-  const saveCustomer = async (event: FormEvent) => {
-    event.preventDefault();
-    await create({ ...form, balance: 0 });
-    setShowModal(false);
-    setFeedback(`${form.name} added to the customer directory.`);
-    setForm(emptyForm);
-  };
 
   const openPayment = (customer: Customer) => {
     setPaymentCustomer(customer);
@@ -101,16 +91,13 @@ export default function CustomersPage() {
         </div>)}
       </div>
 
-      {showModal && <div className="modal-overlay"><div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="customer-modal-title"><form onSubmit={saveCustomer}>
-        <div className="modal-header"><h3 id="customer-modal-title" className="modal-title">Add Customer Account</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setShowModal(false)}>✕</button></div>
-        <div className="modal-body flex flex-col gap-4">
-          <div className="form-group"><label className="form-label">Customer / Business Name *</label><input className="form-input" required placeholder="e.g. Acme Motors" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></div>
-          <div className="form-grid-2"><div className="form-group"><label className="form-label">Phone</label><input className="form-input" placeholder="10-digit number" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></div><div className="form-group"><label className="form-label">Email</label><input type="email" className="form-input" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></div></div>
-          <div className="form-grid-2"><div className="form-group"><label className="form-label">GSTIN</label><input className="form-input" placeholder="GST Number" value={form.gstin} onChange={(event) => setForm({ ...form, gstin: event.target.value })} /></div><div className="form-group"><label className="form-label">Customer Type</label><select className="form-input form-select" value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}><option value="retail">Retail</option><option value="wholesale">Wholesale</option><option value="dealer">Dealer</option></select></div></div>
-          <div className="form-group"><label className="form-label">Billing Address</label><textarea className="form-input" rows={2} placeholder="Full postal address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></div>
-        </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button><button type="submit" className="btn btn-primary">Save Customer</button></div>
-      </form></div></div>}
+      {showModal && (
+        <AddCustomerModal
+          onClose={() => setShowModal(false)}
+          onSave={create}
+          onCreated={(customer) => { setShowModal(false); setFeedback(`${customer.name} added to the customer directory.`); }}
+        />
+      )}
 
       {paymentCustomer && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="payment-modal-title"><form onSubmit={recordPayment}>
         <div className="modal-header"><h3 id="payment-modal-title" className="modal-title">Record Payment Received</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setPaymentCustomer(null)}>✕</button></div>
