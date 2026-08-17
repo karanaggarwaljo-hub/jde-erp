@@ -21,5 +21,6 @@ Compatible machines: ${fallback(fields.compatibility)}
 
 Show one accurate-looking generic replacement part on a neutral light workshop background.
 Do not add logos, labels, part numbers, text, packaging, people, machinery, or extra components unless they are in approved product data.
-Use a centered, high-resolution product-photo composition suitable for an industrial spare-parts catalog.`;
+Use a centered, high-resolution product-photo composition suitable for an industrial spare-parts catalog.
+Compose the shot as a wide banner, 1600 x 600 pixels — a short, wide rectangle, not a square. Center the part with even empty margin on the left and right so it stays fully visible even if the image is cropped slightly differently later.`;
 }
