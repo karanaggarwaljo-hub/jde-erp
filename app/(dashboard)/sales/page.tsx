@@ -60,8 +60,9 @@ export default function SalesPage() {
 
   const subtotal = lines.reduce((sum, line) => sum + line.qty * line.price, 0);
   const discountAmount = subtotal * (discountPercent / 100);
-  const total = subtotal - discountAmount;
-  const includedGst = gstPercent > 0 ? total - total / (1 + gstPercent / 100) : 0;
+  const taxableAmount = subtotal - discountAmount;
+  const gstAmount = taxableAmount * (gstPercent / 100);
+  const total = taxableAmount + gstAmount;
   const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
 
   const selectedCustomer = customers.find((c) => c.name === customer);
@@ -388,7 +389,7 @@ export default function SalesPage() {
               </div>
               <div className="form-grid-2">
                 <div className="form-group"><label className="form-label">GST Rate (%)</label><input type="number" min="0" max="28" step="0.1" className="form-input" value={gstPercent} onChange={(event) => setGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} /></div>
-                <div className="form-group"><label className="form-label">GST Amount (₹, included in total)</label><input type="text" className="form-input" value={includedGst.toFixed(2)} disabled /></div>
+                <div className="form-group"><label className="form-label">GST Amount (₹, included in total)</label><input type="text" className="form-input" value={gstAmount.toFixed(2)} disabled /></div>
               </div>
               <div className="form-grid-2">
                 <div className="form-group">
@@ -406,7 +407,7 @@ export default function SalesPage() {
               <div className="flex justify-between items-center invoice-summary">
                 <div><span className="text-muted">Subtotal: </span><strong>₹{subtotal.toLocaleString()}</strong></div>
                 {discountAmount > 0 && <div><span className="text-muted">Discount: </span><strong className="text-danger">-₹{discountAmount.toFixed(2)}</strong></div>}
-                <div><span className="text-muted">GST ({gstPercent}% included): </span><strong>₹{includedGst.toFixed(2)}</strong></div>
+                <div><span className="text-muted">GST ({gstPercent}% included): </span><strong>₹{gstAmount.toFixed(2)}</strong></div>
                 <div><span className="text-muted">Received: </span><strong className="text-success">₹{paidAmount.toLocaleString()}</strong></div>
                 <div><strong>Total Payable: </strong><span className="invoice-total">₹{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
               </div>
