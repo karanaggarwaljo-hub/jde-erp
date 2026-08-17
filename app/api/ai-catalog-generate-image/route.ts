@@ -3,6 +3,12 @@ import { friendlyAiErrorMessage } from '@/lib/ai/friendly-error';
 import { updateRow, uploadCatalogImage } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+// Fetching a reference image, calling Gemini, and writing the result to Supabase can together
+// take longer than Vercel's default 10s (Hobby plan) function timeout — especially on a slow or
+// retried call — which kills the function before it reaches its own error response and returns
+// a platform-level error instead (not guaranteed to be JSON, unlike everything this route itself
+// returns). 60s is the Hobby-plan ceiling; this gives real AI calls room to actually finish.
+export const maxDuration = 60;
 
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
 
