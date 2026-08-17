@@ -71,6 +71,10 @@ export async function POST(request: Request) {
     const response = await ai.models.generateContent({
       model: process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
       contents,
+      // Catalog photos need a wide banner shape (1600x600, ~8:3) — 21:9 is the closest ratio
+      // the API actually supports (a fixed list, no arbitrary custom ratio), paired with the
+      // literal pixel target already stated in the prompt text itself for extra signal.
+      config: { imageConfig: { aspectRatio: '21:9' } },
     });
 
     if (response.promptFeedback?.blockReason) {
