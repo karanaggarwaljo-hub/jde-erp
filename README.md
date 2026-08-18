@@ -7,7 +7,7 @@ An ERP web app for an auto spare parts trading business: inventory, sales, purch
 - **Frontend/Backend**: Next.js 16 (App Router) + React 19 + TypeScript, single Next.js server handling both UI and API routes.
 - **Database**: Supabase (managed Postgres). All data access happens server-side through Next.js API routes using a service-role key — the browser never talks to Supabase directly.
 - **Auth**: Supabase Auth (email/password, via `@supabase/ssr`) gates the whole app in `proxy.ts`. A valid login isn't enough on its own — it must also match an active row in `jde_users` (role: owner/manager/salesman/accountant/warehouse), which is how staff are actually granted access. See "Authentication" below.
-- **AI**: Google Gemini (`@google/genai`) powers the Business Insights, Stock Reorder Forecast, and Daily Briefing features on `/dashboard` and `/analytics`. These degrade gracefully (a plain error message, not a crash) if no API key is configured or the free-tier quota is exhausted.
+- **AI**: Google Gemini (`@google/genai`) powers the Business Insights and Stock Reorder Forecast features on `/analytics`. These degrade gracefully (a plain error message, not a crash) if no API key is configured or the free-tier quota is exhausted.
 
 ## Modules
 
