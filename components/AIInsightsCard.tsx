@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Sparkles, RefreshCw, TrendingUp, TrendingDown, Minus, AlertTriangle, Lightbulb } from 'lucide-react';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type Trend = { label: string; detail: string; direction: 'up' | 'down' | 'flat' };
 type Risk = { title: string; detail: string; severity: 'low' | 'medium' | 'high' };
@@ -31,10 +32,7 @@ export default function AIInsightsCard() {
     setError(null);
     try {
       const res = await fetch('/api/ai-insights');
-      const body = await res.json();
-      if (!res.ok) {
-        throw new Error(body.error || 'Failed to generate insights.');
-      }
+      const body = (await parseJsonOrThrow(res, 'Failed to generate insights.')) as { insights: Insights };
       setInsights(body.insights);
       setGeneratedAt(new Date());
     } catch (err) {

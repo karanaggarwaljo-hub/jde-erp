@@ -2,28 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useCompany } from '@/components/CompanyProvider';
-
-/** Throws a real Error with the server's message on a failed response, instead of letting
- *  callers hit `res.json()` on a body that may be empty (which fails with an opaque
- *  "Unexpected end of JSON input" that can't be caught meaningfully or shown to the user). */
-async function parseJsonOrThrow(res: Response, fallback: string): Promise<unknown> {
-  const text = await res.text();
-  let body: unknown = undefined;
-  if (text) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      // Non-JSON body (e.g. an HTML error page) — fall through to the generic/status-based message.
-    }
-  }
-  if (!res.ok) {
-    const message = body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string'
-      ? (body as { error: string }).error
-      : `${fallback} (${res.status})`;
-    throw new Error(message);
-  }
-  return body;
-}
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 export function useCompanyTable<T extends Record<string, unknown>>(table: string) {
   const { activeCompany } = useCompany();

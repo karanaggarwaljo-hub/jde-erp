@@ -21,11 +21,16 @@ export default function SettingsClient() {
   const [inviteSubmitting, setInviteSubmitting] = useState(false);
   const [editingEmail, setEditingEmail] = useState<string | null>(null);
   const [editingRole, setEditingRole] = useState('salesman');
+  const [roleError, setRoleError] = useState('');
+  const [roleSubmitting, setRoleSubmitting] = useState(false);
 
   const { companies, addCompany, updateCompany, switchCompany, setStorefrontCompany, removeCompany } = useCompany();
   const [companyModalOpen, setCompanyModalOpen] = useState(false);
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
   const [companyForm, setCompanyForm] = useState(emptyCompanyForm);
+  const [companyError, setCompanyError] = useState('');
+  const [companySubmitting, setCompanySubmitting] = useState(false);
+  const [companyListError, setCompanyListError] = useState('');
   const [deleteCompanyCandidate, setDeleteCompanyCandidate] = useState<Company | null>(null);
   const [deleteCompanyError, setDeleteCompanyError] = useState('');
 
@@ -49,45 +54,73 @@ export default function SettingsClient() {
   const saveRole = async (event: FormEvent) => {
     event.preventDefault();
     if (!editingEmail) return;
-    await updateUser(editingEmail, { role: editingRole });
-    setFeedback('User role updated.');
-    setEditingEmail(null);
+    setRoleError('');
+    setRoleSubmitting(true);
+    try {
+      await updateUser(editingEmail, { role: editingRole });
+      setFeedback('User role updated.');
+      setEditingEmail(null);
+    } catch (error) {
+      setRoleError(error instanceof Error ? error.message : 'Could not update this role.');
+    } finally {
+      setRoleSubmitting(false);
+    }
   };
 
   const openAddCompany = () => {
     setEditingCompanyId(null);
     setCompanyForm(emptyCompanyForm);
+    setCompanyError('');
     setCompanyModalOpen(true);
   };
 
   const openEditCompany = (company: Company) => {
     setEditingCompanyId(company.id);
     setCompanyForm({ name: company.name, gstin: company.gstin, invoice_prefix: company.invoice_prefix, po_prefix: company.po_prefix, address: company.address, contact_email: company.contact_email || '', contact_phone: company.contact_phone || '' });
+    setCompanyError('');
     setCompanyModalOpen(true);
   };
 
   const saveCompany = async (event: FormEvent) => {
     event.preventDefault();
-    if (editingCompanyId) {
-      await updateCompany(editingCompanyId, companyForm);
-      setFeedback(`${companyForm.name} updated.`);
-    } else {
-      await addCompany(companyForm);
-      setFeedback(`${companyForm.name} added with no data of its own yet. Click "Set Active" when you're ready to switch to it.`);
+    setCompanyError('');
+    setCompanySubmitting(true);
+    try {
+      if (editingCompanyId) {
+        await updateCompany(editingCompanyId, companyForm);
+        setFeedback(`${companyForm.name} updated.`);
+      } else {
+        await addCompany(companyForm);
+        setFeedback(`${companyForm.name} added with no data of its own yet. Click "Set Active" when you're ready to switch to it.`);
+      }
+      setCompanyModalOpen(false);
+    } catch (error) {
+      setCompanyError(error instanceof Error ? error.message : 'Could not save this company.');
+    } finally {
+      setCompanySubmitting(false);
     }
-    setCompanyModalOpen(false);
   };
 
   const handleSetActiveCompany = async (id: string) => {
     const target = companies.find((c) => c.id === id);
-    await switchCompany(id);
-    setFeedback(`${target?.name ?? 'Company'} is now the active company.`);
+    setCompanyListError('');
+    try {
+      await switchCompany(id);
+      setFeedback(`${target?.name ?? 'Company'} is now the active company.`);
+    } catch (error) {
+      setCompanyListError(error instanceof Error ? error.message : 'Could not switch the active company.');
+    }
   };
 
   const handleSetStorefrontCompany = async (id: string) => {
     const target = companies.find((c) => c.id === id);
-    await setStorefrontCompany(id);
-    setFeedback(`${target?.name ?? 'Company'}'s published listings now show on the public Website Catalog.`);
+    setCompanyListError('');
+    try {
+      await setStorefrontCompany(id);
+      setFeedback(`${target?.name ?? 'Company'}'s published listings now show on the public Website Catalog.`);
+    } catch (error) {
+      setCompanyListError(error instanceof Error ? error.message : 'Could not set the storefront company.');
+    }
   };
 
   const confirmDeleteCompany = async () => {
@@ -105,9 +138,10 @@ export default function SettingsClient() {
   return <div>
     <div className="page-header"><div><h1 className="page-title">System Settings & Administration</h1><p className="page-subtitle">Configure company details, role permissions, invoice formats and audit logs</p></div></div>
     {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
+    {companyListError && <div className="alert alert-danger mb-4" role="alert">{companyListError}</div>}
     <div className="tabs mb-6"><button className={`tab ${activeTab === 'users' ? 'active' : ''}`} onClick={() => setActiveTab('users')}>User Roles & Access ({users.length})</button><button className={`tab ${activeTab === 'company' ? 'active' : ''}`} onClick={() => setActiveTab('company')}>Companies ({companies.length})</button><button className={`tab ${activeTab === 'audit' ? 'active' : ''}`} onClick={() => setActiveTab('audit')}>Audit Logs</button><button className={`tab ${activeTab === 'backups' ? 'active' : ''}`} onClick={() => setActiveTab('backups')}>Data Backups</button></div>
 
-    {activeTab === 'users' && <div className="card"><div className="card-header"><h3 className="card-title">User Accounts & Roles</h3><button className="btn btn-primary btn-sm" onClick={() => setInviteOpen(true)}>+ Invite User</button></div><div className="table-wrap"><table className="erp-table"><thead><tr><th>User Name</th><th>Email</th><th>Role</th><th>Status</th><th className="text-center">Permissions</th></tr></thead><tbody>{users.map((user) => <tr key={user.email}><td className="font-semibold">{user.name}</td><td className="text-muted">{user.email}</td><td><span className={`badge ${user.role === 'owner' ? 'badge-warning' : user.role === 'manager' ? 'badge-info' : 'badge-muted'}`}>{user.role.toUpperCase()}</span></td><td><span className={`badge ${user.status === 'active' ? 'badge-success' : 'badge-warning'}`}>{user.status.toUpperCase()}</span></td><td className="text-center"><button className="btn btn-ghost btn-sm" disabled={user.role === 'owner'} onClick={() => { setEditingEmail(user.email); setEditingRole(user.role); }}>Edit Role</button></td></tr>)}
+    {activeTab === 'users' && <div className="card"><div className="card-header"><h3 className="card-title">User Accounts & Roles</h3><button className="btn btn-primary btn-sm" onClick={() => setInviteOpen(true)}>+ Invite User</button></div><div className="table-wrap"><table className="erp-table"><thead><tr><th>User Name</th><th>Email</th><th>Role</th><th>Status</th><th className="text-center">Permissions</th></tr></thead><tbody>{users.map((user) => <tr key={user.email}><td className="font-semibold">{user.name}</td><td className="text-muted">{user.email}</td><td><span className={`badge ${user.role === 'owner' ? 'badge-warning' : user.role === 'manager' ? 'badge-info' : 'badge-muted'}`}>{user.role.toUpperCase()}</span></td><td><span className={`badge ${user.status === 'active' ? 'badge-success' : 'badge-warning'}`}>{user.status.toUpperCase()}</span></td><td className="text-center"><button className="btn btn-ghost btn-sm" disabled={user.role === 'owner'} onClick={() => { setEditingEmail(user.email); setEditingRole(user.role); setRoleError(''); }}>Edit Role</button></td></tr>)}
       {users.length === 0 && (
         <tr><td colSpan={5}><div className="empty-state"><p className="empty-state-title">{usersLoading ? 'Loading users…' : 'No users yet'}</p><p className="empty-state-desc">{usersLoading ? 'Fetching accounts for the active company.' : 'Invite your first user to get started.'}</p></div></td></tr>
       )}
@@ -169,11 +203,12 @@ export default function SettingsClient() {
 
     {inviteOpen && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '480px' }} role="dialog" aria-modal="true" aria-labelledby="invite-title"><form onSubmit={inviteUser}><div className="modal-header"><h3 id="invite-title" className="modal-title">Invite User</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setInviteOpen(false)}>✕</button></div><div className="modal-body flex flex-col gap-4">{inviteError && <p className="form-error">{inviteError}</p>}<div className="form-group"><label className="form-label">Full Name</label><input required className="form-input" value={invite.name} onChange={(event) => setInvite({ ...invite, name: event.target.value })} /></div><div className="form-group"><label className="form-label">Email</label><input required type="email" className="form-input" value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} /></div><div className="form-group"><label className="form-label">Role</label><select className="form-input form-select" value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value })}><option value="manager">Manager</option><option value="salesman">Salesperson</option><option value="accountant">Accountant</option><option value="warehouse">Warehouse</option></select></div></div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setInviteOpen(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={inviteSubmitting}>{inviteSubmitting ? 'Sending…' : 'Send Invite'}</button></div></form></div></div>}
 
-    {editingEmail && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '420px' }} role="dialog" aria-modal="true" aria-labelledby="role-title"><form onSubmit={saveRole}><div className="modal-header"><h3 id="role-title" className="modal-title">Edit User Role</h3></div><div className="modal-body"><div className="form-group"><label className="form-label">Role</label><select className="form-input form-select" value={editingRole} onChange={(event) => setEditingRole(event.target.value)}><option value="manager">Manager</option><option value="salesman">Salesperson</option><option value="accountant">Accountant</option><option value="warehouse">Warehouse</option></select></div></div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setEditingEmail(null)}>Cancel</button><button type="submit" className="btn btn-primary">Save Role</button></div></form></div></div>}
+    {editingEmail && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '420px' }} role="dialog" aria-modal="true" aria-labelledby="role-title"><form onSubmit={saveRole}><div className="modal-header"><h3 id="role-title" className="modal-title">Edit User Role</h3></div><div className="modal-body flex flex-col gap-4">{roleError && <p className="form-error">{roleError}</p>}<div className="form-group"><label className="form-label">Role</label><select className="form-input form-select" value={editingRole} onChange={(event) => setEditingRole(event.target.value)}><option value="manager">Manager</option><option value="salesman">Salesperson</option><option value="accountant">Accountant</option><option value="warehouse">Warehouse</option></select></div></div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setEditingEmail(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={roleSubmitting}>{roleSubmitting ? 'Saving…' : 'Save Role'}</button></div></form></div></div>}
 
     {companyModalOpen && <div className="modal-overlay"><div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="company-modal-title"><form onSubmit={saveCompany}>
       <div className="modal-header"><h3 id="company-modal-title" className="modal-title">{editingCompanyId ? 'Edit Company' : 'Add New Company'}</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setCompanyModalOpen(false)}>✕</button></div>
       <div className="modal-body flex flex-col gap-4">
+        {companyError && <p className="form-error">{companyError}</p>}
         <div className="form-group"><label className="form-label">Company Business Name *</label><input className="form-input" required value={companyForm.name} onChange={(event) => setCompanyForm({ ...companyForm, name: event.target.value })} /></div>
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">GSTIN</label><input className="form-input" value={companyForm.gstin} onChange={(event) => setCompanyForm({ ...companyForm, gstin: event.target.value })} /></div>
@@ -190,7 +225,7 @@ export default function SettingsClient() {
         </div>
         <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '-8px' }}>Shown only on published Website Catalog listings, as a Request a Quote / Call button. Leave blank to hide it.</p>
       </div>
-      <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setCompanyModalOpen(false)}>Cancel</button><button type="submit" className="btn btn-primary">{editingCompanyId ? 'Save Changes' : 'Add Company'}</button></div>
+      <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setCompanyModalOpen(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={companySubmitting}>{companySubmitting ? 'Saving…' : editingCompanyId ? 'Save Changes' : 'Add Company'}</button></div>
     </form></div></div>}
 
     {deleteCompanyCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="delete-company-title">

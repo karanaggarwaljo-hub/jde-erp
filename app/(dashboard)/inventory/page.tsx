@@ -6,6 +6,7 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 import { useCompany } from '@/components/CompanyProvider';
 import { parseInventoryFile } from '@/lib/client-import';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type Product = {
   id: string;
@@ -55,6 +56,7 @@ export default function InventoryPage() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
   const [suggesting, setSuggesting] = useState(false);
+  const [suggestFailed, setSuggestFailed] = useState(false);
   const [savingProduct, setSavingProduct] = useState(false);
   const [saveError, setSaveError] = useState('');
 
@@ -95,22 +97,23 @@ export default function InventoryPage() {
   const suggestPartDetails = async () => {
     if (!formData.name.trim()) return;
     setSuggesting(true);
+    setSuggestFailed(false);
     try {
       const res = await fetch('/api/ai-suggest-part-details', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: formData.name, oem_number: formData.oem_number, existingCategories: categoryOptions }),
       });
-      const body = await res.json();
-      if (res.ok) {
-        setFormData((current) => ({
-          ...current,
-          category: body.category || current.category,
-          brand: !current.brand && body.brand ? body.brand : current.brand,
-        }));
-      }
+      const body = (await parseJsonOrThrow(res, 'Suggestion failed.')) as { category?: string; brand?: string };
+      setFormData((current) => ({
+        ...current,
+        category: body.category || current.category,
+        brand: !current.brand && body.brand ? body.brand : current.brand,
+      }));
     } catch {
       // Suggestion is a convenience, not required — both fields stay freely editable either way.
+      // Still worth a quiet heads-up though: silently doing nothing looks identical to "broken."
+      setSuggestFailed(true);
     } finally {
       setSuggesting(false);
     }
@@ -119,6 +122,7 @@ export default function InventoryPage() {
   const handleOpenAdd = () => {
     setEditingProduct(null);
     setSaveError('');
+    setSuggestFailed(false);
     setFormData({
       part_number: `SP-00${products.length + 1}`,
       oem_number: '',
@@ -202,6 +206,7 @@ export default function InventoryPage() {
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
     setSaveError('');
+    setSuggestFailed(false);
     setFormData({
       part_number: product.part_number,
       oem_number: product.oem_number,
@@ -424,7 +429,7 @@ export default function InventoryPage() {
                 <div className="form-group">
                   <label className="form-label">Part Name / Description *</label>
                   <input className="form-input" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} onBlur={suggestPartDetails} />
-                  <small style={{ color: 'var(--text-muted)' }}>Brand and category are suggested once you finish typing this — override either anytime.</small>
+                  <small style={{ color: 'var(--text-muted)' }}>{suggestFailed ? "Couldn't get a suggestion this time — go ahead and fill these in yourself." : 'Brand and category are suggested once you finish typing this — override either anytime.'}</small>
                 </div>
 
                 <div className="form-grid-2">
