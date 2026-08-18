@@ -2,6 +2,19 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-19 — Removed Daily Briefing
+
+Taken out completely, at the owner's request. That's the popup that used to open by itself once a
+day with a short AI-written summary of the business, plus the sunrise button in the top bar that
+let you bring it back up whenever you wanted. Both are gone — nothing opens on its own any more,
+and there's no longer a button for it. The AI request that generated that summary is gone with it,
+so the app isn't spending one every morning.
+
+**Nothing else that uses AI was touched** — Business Insights, the Stock Reorder Forecast,
+scanning a supplier document to record a purchase, Reports summaries, expense categorising,
+payment-reminder drafts and the Website Catalog's AI tools all still work exactly as before. Each
+generates its own thing from its own data; none of them had anything to do with the Daily Briefing.
+
 ## 2026-08-16 — Fixed: no way to open the menu on a phone
 
 Now that this is reachable from a real web address, it needed to actually work on a phone —

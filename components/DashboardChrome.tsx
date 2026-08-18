@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
-import DailyBriefingModal from './DailyBriefingModal';
 import { CompanyProvider } from './CompanyProvider';
 
 type CurrentUser = { email: string; name: string | null; role: string };
@@ -24,7 +23,6 @@ export default function DashboardChrome({ currentUser, children }: { currentUser
           <Topbar currentUser={currentUser} onMenuClick={() => setMobileNavOpen((open) => !open)} />
           <main className="erp-content">{children}</main>
         </div>
-        <DailyBriefingModal />
       </div>
     </CompanyProvider>
   );

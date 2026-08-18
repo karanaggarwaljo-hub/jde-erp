@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Bell, Sunrise, ChevronDown, Settings, LogOut, Menu } from 'lucide-react';
+import { Search, Bell, ChevronDown, Settings, LogOut, Menu } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { logout } from '@/lib/client-auth';
 import { ROLE_LABELS, isRole } from '@/lib/authTypes';
@@ -158,10 +158,6 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
       <div className="topbar-actions">
         <button className="btn btn-ghost btn-icon" aria-label="Search everything" onClick={() => setSearchOpen(true)}>
           <Search size={18} />
-        </button>
-
-        <button className="btn btn-ghost btn-icon" aria-label="Open daily briefing" onClick={() => window.dispatchEvent(new Event('open-daily-briefing'))}>
-          <Sunrise size={18} />
         </button>
 
         <div className="topbar-menu-wrap">

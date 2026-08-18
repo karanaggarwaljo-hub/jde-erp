@@ -14,10 +14,6 @@ function daysAgo(n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function sum(rows: Array<{ [key: string]: unknown }>, field: string): number {
   return rows.reduce((total, row) => total + (Number(row[field]) || 0), 0);
 }
@@ -125,55 +121,3 @@ export async function buildReorderDigest() {
 }
 
 export type ReorderDigest = Awaited<ReturnType<typeof buildReorderDigest>>;
-
-export async function buildDailyBriefingDigest() {
-  const companyId = await getActiveCompanyId();
-  const today = todayStr();
-  const yesterday = daysAgo(1);
-
-  const invoices = (await listRows('invoices', companyId)) as unknown as Invoice[];
-  const suppliers = (await listRows('suppliers', companyId)) as unknown as Supplier[];
-  const products = (await listRows('products', companyId)) as unknown as Product[];
-
-  const yesterdaySales = invoices.filter((i) => i.date === yesterday);
-  const outstandingInvoices = invoices.filter((i) => Number(i.total) - Number(i.paid) > 0);
-  const payableSuppliers = suppliers.filter((s) => Number(s.balance) > 0);
-  const lowStock = products.filter((p) => Number(p.min_stock) > 0 && Number(p.current_stock) <= Number(p.min_stock));
-
-  return {
-    date: today,
-    yesterday_sales: {
-      date: yesterday,
-      invoice_count: yesterdaySales.length,
-      total: sum(yesterdaySales, 'total'),
-    },
-    outstanding_receivables: {
-      count: outstandingInvoices.length,
-      total: outstandingInvoices.reduce((t, i) => t + (Number(i.total) - Number(i.paid)), 0),
-      items: outstandingInvoices.slice(0, 10).map((i) => ({
-        invoice_number: i.id,
-        customer_name: i.customer,
-        balance_due: Number(i.total) - Number(i.paid),
-      })),
-    },
-    outstanding_payables: {
-      count: payableSuppliers.length,
-      total: sum(payableSuppliers, 'balance'),
-      items: payableSuppliers.slice(0, 10).map((s) => ({
-        supplier_name: s.name,
-        balance_due: s.balance,
-      })),
-    },
-    low_stock: {
-      count: lowStock.length,
-      items: lowStock.slice(0, 10).map((p) => ({
-        name: p.name,
-        part_number: p.part_number,
-        current_stock: p.current_stock,
-        min_stock: p.min_stock,
-      })),
-    },
-  };
-}
-
-export type DailyBriefingDigest = Awaited<ReturnType<typeof buildDailyBriefingDigest>>;
