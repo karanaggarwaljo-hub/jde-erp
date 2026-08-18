@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 export type Company = {
   id: string;
@@ -32,32 +33,6 @@ type CompanyContextValue = {
 
 const CompanyContext = createContext<CompanyContextValue | null>(null);
 
-/** Mirrors lib/useCompanyTable.ts's parseJsonOrThrow — duplicated rather than imported because
- *  useCompanyTable.ts itself imports useCompany from this module, and importing the other way
- *  round would create a circular dependency (same reasoning as app/catalog/[id]/page.tsx's
- *  duplicated buildWhatsAppUrl). Reads the body as text first and parses defensively, so a
- *  failed response (including an empty 500 body from an unhandled server error) throws a real
- *  Error with the server's message instead of letting callers hit res.json() directly and blow
- *  up with an opaque "Unexpected end of JSON input". */
-async function parseJsonOrThrow(res: Response, fallback: string): Promise<unknown> {
-  const text = await res.text();
-  let body: unknown = undefined;
-  if (text) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      // Non-JSON body (e.g. an HTML error page) — fall through to the generic/status-based message.
-    }
-  }
-  if (!res.ok) {
-    const message = body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string'
-      ? (body as { error: string }).error
-      : `${fallback} (${res.status})`;
-    throw new Error(message);
-  }
-  return body;
-}
-
 export function CompanyProvider({ children }: { children: ReactNode }) {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,13 +61,20 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [refresh]);
 
+  // Every mutation below used to fire its request and call refresh() without ever looking at
+  // whether the request actually succeeded — a failed switch/update/add silently "succeeded"
+  // from the caller's point of view (refresh() would just show whatever's actually true, with
+  // no error surfaced anywhere). parseJsonOrThrow makes each of these genuinely throw on failure.
+
   const switchCompany = useCallback(async (id: string) => {
-    await fetch(`/api/companies/${encodeURIComponent(id)}/activate`, { method: 'POST' });
+    const res = await fetch(`/api/companies/${encodeURIComponent(id)}/activate`, { method: 'POST' });
+    await parseJsonOrThrow(res, 'Failed to switch the active company.');
     await refresh();
   }, [refresh]);
 
   const setStorefrontCompany = useCallback(async (id: string) => {
-    await fetch(`/api/companies/${encodeURIComponent(id)}/set-storefront`, { method: 'POST' });
+    const res = await fetch(`/api/companies/${encodeURIComponent(id)}/set-storefront`, { method: 'POST' });
+    await parseJsonOrThrow(res, 'Failed to set the storefront company.');
     await refresh();
   }, [refresh]);
 
@@ -102,26 +84,34 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...data, is_active: 0 }),
     });
-    const created = await res.json();
+    const created = await parseJsonOrThrow(res, 'Failed to add company.');
     await refresh();
     return created as Company;
   }, [refresh]);
 
   const updateCompany = useCallback(async (id: string, data: Partial<NewCompanyInput>) => {
-    await fetch(`/api/local/companies/${encodeURIComponent(id)}`, {
+    const res = await fetch(`/api/local/companies/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+    await parseJsonOrThrow(res, 'Failed to update company.');
     await refresh();
   }, [refresh]);
 
+  // Kept as a returned {error} rather than a throw, unlike the mutations above — deleting a
+  // company is destructive enough that its caller (a confirmation dialog) wants to keep the
+  // dialog open and show the error in place, not unwind via a catch block.
   const removeCompany = useCallback(async (id: string) => {
     const res = await fetch(`/api/local/companies/${encodeURIComponent(id)}`, { method: 'DELETE' });
-    const body = await res.json();
-    await refresh();
-    if (!res.ok) return { error: body.error as string };
-    return { ok: true as const };
+    try {
+      await parseJsonOrThrow(res, 'Failed to delete company.');
+      return { ok: true as const };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Failed to delete company.' };
+    } finally {
+      await refresh();
+    }
   }, [refresh]);
 
   const activeCompany = companies.find((c) => c.is_active) ?? null;

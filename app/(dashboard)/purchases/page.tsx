@@ -5,6 +5,7 @@ import { Plus, FileCheck, Upload } from 'lucide-react';
 import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
 import { savePurchase, receivePurchaseStock } from '@/lib/client-purchases';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type PurchaseTab = 'purchases' | 'invoices';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
@@ -30,25 +31,6 @@ function isScannableFile(file: File) {
 
 function cleanedGuess(text: string): string {
   return text.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
-}
-
-async function parseJsonOrThrow(res: Response, fallback: string): Promise<unknown> {
-  const text = await res.text();
-  let body: unknown = undefined;
-  if (text) {
-    try {
-      body = JSON.parse(text);
-    } catch {
-      // Non-JSON body (e.g. an HTML error page) — fall through to the generic/status-based message.
-    }
-  }
-  if (!res.ok) {
-    const message = body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string'
-      ? (body as { error: string }).error
-      : `${fallback} (${res.status})`;
-    throw new Error(message);
-  }
-  return body;
 }
 
 export default function PurchasesPage() {
@@ -281,8 +263,7 @@ export default function PurchasesPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ base64, mimeType: file.type, fileHash, companyId: activeCompany?.id }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Failed to scan document.');
+        const data = (await parseJsonOrThrow(res, 'Failed to scan document.')) as { items?: unknown; supplier_name?: string; supplier_gstin?: string };
 
         const items: ImportedLine[] = Array.isArray(data.items) ? data.items : [];
         if (items.length === 0) {

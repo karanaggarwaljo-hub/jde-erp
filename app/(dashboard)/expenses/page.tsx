@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Plus, Sparkles } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { createExpense } from '@/lib/client-expenses';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type Expense = { id: string; company_id: string; category: string; description: string; amount: number; date: string; paid_by: string; mode: string };
 
@@ -15,6 +16,7 @@ export default function ExpensesPage() {
   const [expenseError, setExpenseError] = useState('');
   const [savingExpense, setSavingExpense] = useState(false);
   const [categorizing, setCategorizing] = useState(false);
+  const [categorizeFailed, setCategorizeFailed] = useState(false);
   const [newExp, setNewExp] = useState({
     category: 'transport',
     description: '',
@@ -26,18 +28,21 @@ export default function ExpensesPage() {
   const suggestCategory = async () => {
     if (!newExp.description.trim()) return;
     setCategorizing(true);
+    setCategorizeFailed(false);
     try {
       const res = await fetch('/api/ai-categorize-expense', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ description: newExp.description }),
       });
-      const body = await res.json();
-      if (res.ok && body.category) {
-        setNewExp((current) => ({ ...current, category: body.category }));
+      const body = (await parseJsonOrThrow(res, 'Categorization failed.')) as { category?: string };
+      if (body.category) {
+        setNewExp((current) => ({ ...current, category: body.category as string }));
       }
     } catch {
       // Suggestion is a convenience, not required — the category dropdown stays usable either way.
+      // Still worth a quiet heads-up though: silently doing nothing looks identical to "broken."
+      setCategorizeFailed(true);
     } finally {
       setCategorizing(false);
     }
@@ -85,7 +90,7 @@ export default function ExpensesPage() {
           <h1 className="page-title">Expense Management</h1>
           <p className="page-subtitle">Log operational costs, freight, salaries, rent & utility expenditures</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+        <button className="btn btn-primary" onClick={() => { setCategorizeFailed(false); setShowModal(true); }}>
           <Plus size={16} /> Log New Expense
         </button>
       </div>
@@ -176,7 +181,7 @@ export default function ExpensesPage() {
                 <div className="form-group">
                   <label className="form-label">Expense Description *</label>
                   <input className="form-input" required placeholder="e.g. Courier charges for spare shipment" value={newExp.description} onChange={e => setNewExp({ ...newExp, description: e.target.value })} onBlur={suggestCategory} />
-                  <small style={{ color: 'var(--text-muted)' }}>Category is suggested automatically once you finish typing this — override it anytime.</small>
+                  <small style={{ color: 'var(--text-muted)' }}>{categorizeFailed ? "Couldn't suggest a category this time — pick one yourself above." : 'Category is suggested automatically once you finish typing this — override it anytime.'}</small>
                 </div>
 
                 <div className="form-grid-2">

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles, RefreshCw } from 'lucide-react';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type Props = {
   reportType: string;
@@ -29,9 +30,8 @@ export default function AIReportSummary({ reportType, data }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reportType, data }),
       });
-      const body = await res.json();
+      const body = (await parseJsonOrThrow(res, 'Failed to summarize this report.')) as { summary: string };
       if (thisRequest !== requestId.current) return;
-      if (!res.ok) throw new Error(body.error || 'Failed to summarize this report.');
       setSummary(body.summary);
     } catch (err) {
       if (thisRequest !== requestId.current) return;

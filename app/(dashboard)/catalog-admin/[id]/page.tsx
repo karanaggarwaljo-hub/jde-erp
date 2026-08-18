@@ -6,6 +6,7 @@ import { ChangeEvent, useState } from 'react';
 import { ArrowLeft, Sparkles, Upload, Search, CheckCircle2, XCircle, HelpCircle, ExternalLink, Trash2, RefreshCw, AlertTriangle, Copy } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { resizeImageForUpload } from '@/lib/imageResize';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { buildCatalogImagePrompt } from '@/lib/catalogPrompt';
 import { canPublish, catalogDisplayStatus, checkInventoryDrift, computeAvailabilityFromStock, missingRequiredFields, type CatalogProduct, type ReferenceCandidate } from '@/lib/catalogTypes';
 
@@ -129,9 +130,8 @@ export default function CatalogAdminDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: form.title, part_number: form.part_number, oem_number: form.oem_number, brand: form.brand, category: form.category }),
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Reference search failed.');
-      await update(row.id, { reference_query: referenceQuery, reference_candidates: body.candidates as ReferenceCandidate[] });
+      const body = (await parseJsonOrThrow(res, 'Reference search failed.')) as { candidates: ReferenceCandidate[] };
+      await update(row.id, { reference_query: referenceQuery, reference_candidates: body.candidates });
     } catch (err) {
       setReferenceError(err instanceof Error ? err.message : 'Reference search failed.');
     } finally {
@@ -179,13 +179,7 @@ export default function CatalogAdminDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ catalogId: row.id, prompt: promptText, referenceImageUrl: row.selected_reference_url }),
       });
-      if (!res.ok) {
-        // A non-2xx response isn't guaranteed to have a JSON body (a platform-level timeout
-        // or infra error returns plain text/HTML) — parsing it unconditionally, as before, meant
-        // a raw "Unexpected token... is not valid JSON" leaked to the screen instead of a real message.
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error || `Image generation failed (${res.status}).`);
-      }
+      await parseJsonOrThrow(res, 'Image generation failed.');
       await reload();
     } catch (err) {
       setImageError(err instanceof Error ? err.message : 'Image generation failed.');
@@ -207,10 +201,7 @@ export default function CatalogAdminDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ catalogId: row.id, base64, mimeType }),
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error || `Upload failed (${res.status}).`);
-      }
+      await parseJsonOrThrow(res, 'Upload failed.');
       await reload();
     } catch (err) {
       setImageError(err instanceof Error ? err.message : 'Upload failed.');
@@ -228,8 +219,9 @@ export default function CatalogAdminDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: form.title, part_number: form.part_number, oem_number: form.oem_number, brand: form.brand, category: form.category, compatibility: form.compatibility, description: form.description }),
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Description draft failed.');
+      const body = (await parseJsonOrThrow(res, 'Description draft failed.')) as {
+        short_description?: string; key_features?: string[]; compatible_machines?: string[]; search_keywords?: string[]; warnings?: string[];
+      };
       setDescDraft({
         short_description: body.short_description || '',
         key_features: (body.key_features || []).join('\n'),

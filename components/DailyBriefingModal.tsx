@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sunrise, Wallet2, HandCoins, PackageSearch, TrendingUp, X } from 'lucide-react';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type PriorityType = 'collect_receivable' | 'pay_supplier' | 'restock' | 'sales_note';
 
@@ -55,8 +56,7 @@ export default function DailyBriefingModal() {
     setError(null);
     try {
       const res = await fetch('/api/daily-briefing');
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Failed to generate the daily briefing.');
+      const body = (await parseJsonOrThrow(res, 'Failed to generate the daily briefing.')) as { briefing: Briefing; digest: Digest };
       setBriefing(body.briefing);
       setDigest(body.digest);
     } catch (err) {

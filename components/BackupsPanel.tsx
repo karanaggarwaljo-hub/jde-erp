@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { DatabaseBackup } from 'lucide-react';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type Backup = { filename: string; size_bytes: number; created_at: string };
 
@@ -23,8 +24,7 @@ export default function BackupsPanel() {
     setError('');
     try {
       const res = await fetch('/api/backup');
-      if (!res.ok) throw new Error('Failed to load backups.');
-      setBackups(await res.json());
+      setBackups((await parseJsonOrThrow(res, 'Failed to load backups.')) as Backup[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load backups.');
     } finally {
@@ -43,8 +43,7 @@ export default function BackupsPanel() {
     setError('');
     try {
       const res = await fetch('/api/backup', { method: 'POST' });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Backup failed.');
+      const body = (await parseJsonOrThrow(res, 'Backup failed.')) as { filename: string };
       setFeedback(`Backup saved: ${body.filename}`);
       await load();
     } catch (err) {

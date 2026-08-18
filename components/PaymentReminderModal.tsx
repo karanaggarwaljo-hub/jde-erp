@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Sparkles, Copy, Check } from 'lucide-react';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type Props = {
   direction: 'receivable' | 'payable';
@@ -28,8 +29,7 @@ export default function PaymentReminderModal({ direction, name, balance, context
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ direction, name, balance, context }),
         });
-        const body = await res.json();
-        if (!res.ok) throw new Error(body.error || 'Failed to draft a message.');
+        const body = (await parseJsonOrThrow(res, 'Failed to draft a message.')) as { message: string };
         if (!cancelled) setMessage(body.message);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to draft a message.');

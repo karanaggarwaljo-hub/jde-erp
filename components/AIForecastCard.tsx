@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles, RefreshCw, ArrowRight, PackageSearch } from 'lucide-react';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type ForecastItem = {
   part_number: string;
@@ -35,10 +36,7 @@ export default function AIForecastCard() {
     setError(null);
     try {
       const res = await fetch('/api/ai-forecast');
-      const body = await res.json();
-      if (!res.ok) {
-        throw new Error(body.error || 'Failed to generate forecast.');
-      }
+      const body = (await parseJsonOrThrow(res, 'Failed to generate forecast.')) as { forecast: Forecast };
       setForecast(body.forecast);
       setGeneratedAt(new Date());
     } catch (err) {

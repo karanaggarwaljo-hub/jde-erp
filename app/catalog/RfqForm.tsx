@@ -3,6 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import { buildWhatsAppUrl } from './CatalogBrowser';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type Props = {
   catalogProductId: string;
@@ -58,8 +59,7 @@ export default function RfqForm({ catalogProductId, partTitle, partNumber, conta
           message: form.message.trim() || null,
         }),
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error || 'Could not submit your request. Please try again.');
+      await parseJsonOrThrow(res, 'Could not submit your request. Please try again.');
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not submit your request. Please try again.');
