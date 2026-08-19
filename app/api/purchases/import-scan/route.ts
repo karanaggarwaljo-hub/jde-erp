@@ -1,5 +1,6 @@
-import { GoogleGenAI, createUserContent, createPartFromBase64 } from '@google/genai';
 import { findPurchaseByFileHash } from '@/lib/db';
+import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
+import { AiUnavailableError } from '@/lib/ai/errors';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,16 +41,14 @@ const SYSTEM_PROMPT =
   'legible, return null for it rather than guessing. Never invent a number or item that is not actually visible in the document.';
 
 export async function POST(request: Request) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return Response.json(
-      { error: 'GEMINI_API_KEY is not configured. Add it to .env.local and restart the dev server.' },
-      { status: 501 }
-    );
-  }
+  // Kept in scope for the catch block, which gives PDFs their own advice — they are the one
+  // file type with no backup provider to fall back to.
+  let mimeType = '';
 
   try {
-    const { base64, mimeType, fileHash, companyId } = await request.json();
+    const body = await request.json();
+    const { base64, fileHash, companyId } = body;
+    mimeType = typeof body.mimeType === 'string' ? body.mimeType : '';
     if (!base64 || !mimeType) {
       return Response.json({ error: 'Missing file data.' }, { status: 400 });
     }
@@ -66,33 +65,30 @@ export async function POST(request: Request) {
       }
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
-      contents: createUserContent([
-        'Extract the purchase order / supplier invoice details from this document.',
-        createPartFromBase64(base64, mimeType),
-      ]),
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        responseMimeType: 'application/json',
-        responseJsonSchema: SCAN_JSON_SCHEMA,
-      },
+    // A photographed invoice can fall back to the backup provider; a PDF cannot — only Gemini
+    // reads those — so a PDF scan while Gemini is down fails with the message below rather than
+    // silently producing nothing.
+    const { data } = await generateJson({
+      system: SYSTEM_PROMPT,
+      prompt: 'Extract the purchase order / supplier invoice details from this document.',
+      schema: SCAN_JSON_SCHEMA,
+      schemaName: 'purchase_document',
+      attachments: [{ base64, mimeType }],
     });
 
-    if (response.promptFeedback?.blockReason) {
-      return Response.json({ error: `Gemini declined to process this file (${response.promptFeedback.blockReason}).` }, { status: 502 });
-    }
-
-    const text = response.text;
-    if (!text) {
-      return Response.json({ error: 'AI provider returned an empty response.' }, { status: 502 });
-    }
-
-    return Response.json(JSON.parse(text));
+    return Response.json(data);
   } catch (error) {
     console.error('purchases/import-scan failed:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error scanning document.';
-    return Response.json({ error: message }, { status: 500 });
+    if (mimeType === 'application/pdf' && error instanceof AiUnavailableError) {
+      return Response.json(
+        {
+          error:
+            'Scanning a PDF needs Google’s AI, which is unavailable right now. Take a photo of the invoice ' +
+            'and scan that instead — photos use the backup service — or try the PDF again in a few minutes.',
+        },
+        { status: 503 }
+      );
+    }
+    return aiErrorResponse(error, 'Unknown error scanning document.');
   }
 }

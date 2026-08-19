@@ -1,5 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
-import { friendlyAiErrorMessage } from '@/lib/ai/friendly-error';
+import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,14 +28,6 @@ const REPORT_LABELS: Record<string, string> = {
 };
 
 export async function POST(request: Request) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return Response.json(
-      { error: 'GEMINI_API_KEY is not configured. Add it to .env.local and restart the dev server.' },
-      { status: 501 }
-    );
-  }
-
   const { reportType, data } = await request.json();
   const label = REPORT_LABELS[reportType];
   if (!label) {
@@ -47,30 +38,16 @@ export async function POST(request: Request) {
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
-      contents: `Report: ${label}\nData:\n${JSON.stringify(data)}`,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        responseMimeType: 'application/json',
-        responseJsonSchema: SUMMARY_JSON_SCHEMA,
-      },
+    const { data: summary } = await generateJson({
+      system: SYSTEM_PROMPT,
+      prompt: `Report: ${label}\nData:\n${JSON.stringify(data)}`,
+      schema: SUMMARY_JSON_SCHEMA,
+      schemaName: 'report_summary',
     });
 
-    if (response.promptFeedback?.blockReason) {
-      return Response.json({ error: `Gemini declined to summarize this report (${response.promptFeedback.blockReason}).` }, { status: 502 });
-    }
-
-    const text = response.text;
-    if (!text) {
-      return Response.json({ error: 'AI provider returned an empty response.' }, { status: 502 });
-    }
-
-    return Response.json(JSON.parse(text));
+    return Response.json(summary);
   } catch (error) {
     console.error('ai-report-summary route failed:', error);
-    const message = friendlyAiErrorMessage(error, 'Unknown error generating summary.');
-    return Response.json({ error: message }, { status: 500 });
+    return aiErrorResponse(error, 'Unknown error generating summary.');
   }
 }

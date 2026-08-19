@@ -1,5 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
 import { buildBusinessDigest } from '@/lib/ai/digest';
+import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,41 +74,18 @@ const SYSTEM_PROMPT =
   'in data_confidence and avoid inventing numbers that are not derivable from the digest. Currency is INR (₹).';
 
 export async function GET() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return Response.json(
-      { error: 'GEMINI_API_KEY is not configured. Add it to .env.local and restart the dev server.' },
-      { status: 501 }
-    );
-  }
-
   try {
     const digest = await buildBusinessDigest();
-    const ai = new GoogleGenAI({ apiKey });
-
-    const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
-      contents: `Business data digest:\n${JSON.stringify(digest)}`,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        responseMimeType: 'application/json',
-        responseJsonSchema: INSIGHTS_JSON_SCHEMA,
-      },
+    const { data, provider } = await generateJson({
+      system: SYSTEM_PROMPT,
+      prompt: `Business data digest:\n${JSON.stringify(digest)}`,
+      schema: INSIGHTS_JSON_SCHEMA,
+      schemaName: 'business_insights',
     });
 
-    if (response.promptFeedback?.blockReason) {
-      return Response.json({ error: `Gemini declined to analyze this data (${response.promptFeedback.blockReason}).` }, { status: 502 });
-    }
-
-    const text = response.text;
-    if (!text) {
-      return Response.json({ error: 'AI provider returned an empty response.' }, { status: 502 });
-    }
-
-    return Response.json({ insights: JSON.parse(text), digest });
+    return Response.json({ insights: data, digest, provider });
   } catch (error) {
     console.error('ai-insights route failed:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error generating insights.';
-    return Response.json({ error: message }, { status: 500 });
+    return aiErrorResponse(error, 'Unknown error generating insights.');
   }
 }
