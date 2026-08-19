@@ -82,7 +82,7 @@ export default function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps
       </nav>
 
       <div className="sidebar-footer">
-        <button type="button" onClick={handleSignOut} className="sidebar-item" style={{ color: '#EF4444', width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer' }}>
+        <button type="button" onClick={handleSignOut} className="sidebar-item" style={{ color: 'var(--color-danger)', width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer' }}>
           <LogOut className="sidebar-item-icon" />
           <span>Sign Out</span>
         </button>

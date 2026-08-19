@@ -384,7 +384,7 @@ export default function SalesPage() {
                     <div className="form-group">
                       <label className="form-label">Select Part</label>
                       <input list="sales-part-options" className="form-input" placeholder="Type to search a part…" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }} />
-                      {line.part.trim() && !matched && <small style={{ color: '#EF4444' }}>No matching part in Inventory</small>}
+                      {line.part.trim() && !matched && <small className="text-danger">No matching part in Inventory</small>}
                     </div>
                     <div className="form-group"><label className="form-label">Category</label><input type="text" className="form-input" value={matched?.category ?? '-'} disabled /></div>
                     <div className="form-group"><label className="form-label">Qty</label><input type="number" min="1" className="form-input" value={line.qty} onChange={(event) => updateLine(index, { qty: Number(event.target.value) })} /></div>

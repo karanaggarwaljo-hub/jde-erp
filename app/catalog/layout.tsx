@@ -12,7 +12,7 @@ export default function CatalogLayout({ children }: { children: React.ReactNode 
       <header style={{ borderBottom: '1px solid var(--border-default)', padding: '18px 24px' }}>
         <div style={{ maxWidth: '1180px', margin: '0 auto', display: 'flex', alignItems: 'center', gap: '12px' }}>
           <Link href="/catalog" style={{ display: 'flex', alignItems: 'center', gap: '12px', textDecoration: 'none' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'linear-gradient(135deg, #F59E0B, #F97316)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: '#000' }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'var(--brand-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, color: 'var(--ink)' }}>
               JDE
             </div>
             <div>
