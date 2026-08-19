@@ -1,0 +1,119 @@
+/**
+ * Proves the AI fallback chain actually works, without needing a login or the dev server.
+ *
+ *   npx tsx scripts/ai-fallback-check.ts
+ *
+ * Three checks, in order:
+ *   1. each configured provider answers correctly on its own
+ *   2. a deliberately broken primary key falls through to the next provider
+ *   3. every provider broken produces one plain-language error, not a crash
+ *
+ * It spends a few real API calls (a couple of sentences each), so it is a manual check to run
+ * after touching lib/ai — not something wired into a build.
+ */
+import { readFileSync } from 'node:fs';
+import { generateJson } from '../lib/ai/generate';
+import { AiUnavailableError } from '../lib/ai/errors';
+
+// Loaded by hand: this runs as a plain Node script, outside Next's env handling.
+function loadEnvLocal(): void {
+  let contents: string;
+  try {
+    contents = readFileSync(new URL('../.env.local', import.meta.url), 'utf8');
+  } catch {
+    console.error('No .env.local found next to package.json — nothing to test with.');
+    process.exit(1);
+  }
+  for (const line of contents.split('\n')) {
+    const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
+    if (match && !process.env[match[1]]) process.env[match[1]] = match[2];
+  }
+}
+
+const SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    category: { type: 'string', enum: ['transport', 'office', 'other'] },
+    reason: { type: 'string', description: 'One short sentence.' },
+    // Present only to exercise the keyword-stripping in toStrictJsonSchema().
+    tags: { type: 'array', maxItems: 3, items: { type: 'string' } },
+  },
+  required: ['category', 'reason', 'tags'],
+};
+
+const REQUEST = {
+  system: 'You categorize expenses for an auto parts business.',
+  prompt: 'Expense description: "paid courier charges for sending parts to Ludhiana"',
+  schema: SCHEMA,
+  schemaName: 'expense_category',
+};
+
+type Answer = { category: string; reason: string; tags: string[] };
+
+async function check(label: string, env: Record<string, string>, expect: 'ok' | 'fail'): Promise<boolean> {
+  const saved = { ...process.env };
+  Object.assign(process.env, env);
+  const started = Date.now();
+  try {
+    const { data, provider, model } = await generateJson<Answer>(REQUEST);
+    const ms = Date.now() - started;
+    if (expect === 'fail') {
+      console.log(`FAIL  ${label} — expected an error, got an answer from ${provider}`);
+      return false;
+    }
+    const sane = data.category === 'transport';
+    console.log(
+      `${sane ? 'PASS' : 'WARN'}  ${label} — ${provider} (${model}) in ${ms}ms → ` +
+        `category=${data.category}, tags=${data.tags.length}`
+    );
+    if (!sane) console.log(`      expected category "transport", got "${data.category}"`);
+    return sane;
+  } catch (error) {
+    if (expect === 'fail' && error instanceof AiUnavailableError) {
+      console.log(`PASS  ${label} — refused cleanly: "${error.message}"`);
+      return true;
+    }
+    console.log(`FAIL  ${label} — ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  } finally {
+    process.env = saved;
+  }
+}
+
+async function main(): Promise<void> {
+  loadEnvLocal();
+
+  const hasGemini = Boolean(process.env.GEMINI_API_KEY);
+  const hasGroq = Boolean(process.env.GROQ_API_KEY);
+  console.log(`Configured: gemini=${hasGemini ? 'yes' : 'NO'}, groq=${hasGroq ? 'yes' : 'NO'}\n`);
+
+  const results: boolean[] = [];
+
+  if (hasGemini) results.push(await check('gemini alone', { AI_PROVIDER_ORDER: 'gemini' }, 'ok'));
+  if (hasGroq) results.push(await check('groq alone', { AI_PROVIDER_ORDER: 'groq' }, 'ok'));
+
+  if (hasGemini && hasGroq) {
+    results.push(
+      await check('failover (gemini key broken)', { AI_PROVIDER_ORDER: 'gemini,groq', GEMINI_API_KEY: 'broken-on-purpose' }, 'ok')
+    );
+    // The path the app actually takes, with both real keys. Which provider answers depends on
+    // whether Google is healthy at this moment — either result is a pass.
+    results.push(await check('default order, real keys', { AI_PROVIDER_ORDER: 'gemini,groq' }, 'ok'));
+  }
+
+  results.push(
+    await check(
+      'all providers broken',
+      { AI_PROVIDER_ORDER: 'gemini,groq', GEMINI_API_KEY: 'broken-on-purpose', GROQ_API_KEY: 'broken-on-purpose' },
+      'fail'
+    )
+  );
+
+  const failed = results.filter((ok) => !ok).length;
+  console.log(`\n${results.length - failed}/${results.length} checks passed.`);
+  if (!hasGroq) console.log('Add GROQ_API_KEY to .env.local to test the actual fallback path.');
+  process.exit(failed ? 1 : 0);
+}
+
+void main();

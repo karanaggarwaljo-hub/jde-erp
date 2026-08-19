@@ -1,5 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
 import { buildReorderDigest } from '@/lib/ai/digest';
+import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,41 +45,18 @@ const SYSTEM_PROMPT =
   'Prioritize products at or below their minimum stock. Currency is INR (₹).';
 
 export async function GET() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return Response.json(
-      { error: 'GEMINI_API_KEY is not configured. Add it to .env.local and restart the dev server.' },
-      { status: 501 }
-    );
-  }
-
   try {
     const digest = await buildReorderDigest();
-    const ai = new GoogleGenAI({ apiKey });
-
-    const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
-      contents: `Inventory digest:\n${JSON.stringify(digest)}`,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        responseMimeType: 'application/json',
-        responseJsonSchema: FORECAST_JSON_SCHEMA,
-      },
+    const { data, provider } = await generateJson({
+      system: SYSTEM_PROMPT,
+      prompt: `Inventory digest:\n${JSON.stringify(digest)}`,
+      schema: FORECAST_JSON_SCHEMA,
+      schemaName: 'reorder_forecast',
     });
 
-    if (response.promptFeedback?.blockReason) {
-      return Response.json({ error: `Gemini declined to analyze this data (${response.promptFeedback.blockReason}).` }, { status: 502 });
-    }
-
-    const text = response.text;
-    if (!text) {
-      return Response.json({ error: 'AI provider returned an empty response.' }, { status: 502 });
-    }
-
-    return Response.json({ forecast: JSON.parse(text), digest });
+    return Response.json({ forecast: data, digest, provider });
   } catch (error) {
     console.error('ai-forecast route failed:', error);
-    const message = error instanceof Error ? error.message : 'Unknown error generating forecast.';
-    return Response.json({ error: message }, { status: 500 });
+    return aiErrorResponse(error, 'Unknown error generating forecast.');
   }
 }

@@ -62,6 +62,7 @@ Every page and API route requires a real, signed-in staff account — enforced c
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — from Supabase dashboard → Project Settings → API → the `anon public` (or newer `publishable`) key. Safe to expose to the browser — it's what your own sign-in page uses.
    - `SUPABASE_SERVICE_ROLE_KEY` — from Supabase dashboard → Project Settings → API → `service_role` secret. **Never commit this or expose it to the browser.**
    - `GEMINI_API_KEY` — optional, only needed for the AI features. Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
+   - `GROQ_API_KEY` — optional but recommended. The backup AI provider: when Gemini is rate-limited or overloaded, the AI features automatically retry on Groq instead of failing. Free, no card, from [console.groq.com](https://console.groq.com) → API Keys. See "AI provider fallback" below.
 
 4. **Create the first owner account** — a valid Supabase Auth login isn't enough by itself; it also needs a matching `jde_users` row, and there's no signup form (accounts are created by invite — see "Authentication" below). For the very first account on a fresh project, create both halves manually once: add a user under Supabase Dashboard → Authentication → Users (or reuse one that's already there), then insert their `jde_users` row:
    ```sql
@@ -84,6 +85,30 @@ Since all data lives in Supabase (not a local file), there's nothing to copy or 
 ### Database schema
 
 The app expects these tables in your Supabase project's `public` schema, all prefixed `jde_`: `companies`, `products`, `customers`, `suppliers`, `invoices`, `quotations`, `purchase_orders`, `grns`, `expenses`, `users` — plus two RPC functions, `jde_activate_company` and `jde_delete_company`, used for atomic company-switch/delete operations. Row-level security is enabled on every table with no policies, so only the service-role key (used server-side only) can access the data.
+
+### AI provider fallback
+
+Google's free Gemini tier regularly answers "this model is currently experiencing high demand" under
+load, which used to surface as a failed AI feature. Every AI call now goes through `lib/ai/generate.ts`,
+which tries each configured provider in order (default `gemini,groq`) and only reports an error once
+they have all failed.
+
+- A rate-limit, overload, timeout or unparseable answer moves to the next provider; a genuinely
+  transient failure is retried once on the same provider first.
+- A provider that just failed is skipped for a short cooldown (10 min after a quota error) rather
+  than being re-tried on every request — unless it is the only one left.
+- A malformed request stops the chain immediately, since it would fail identically everywhere.
+- Providers with no key configured are skipped silently, so Gemini-only setups behave as before.
+
+Not everything can fail over. Gemini remains the only provider here that reads PDFs, does Google
+Search grounding (Website Catalog → Reference Search) or generates images, so those three keep their
+existing behaviour of failing safely with a message. Invoice scans of *images* do fall back to Groq.
+
+To verify the chain end to end, including a forced failure:
+
+```bash
+npx tsx scripts/ai-fallback-check.ts
+```
 
 ### Backups
 

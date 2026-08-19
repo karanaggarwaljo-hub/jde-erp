@@ -1,5 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
-import { friendlyAiErrorMessage } from '@/lib/ai/friendly-error';
+import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,21 +30,12 @@ const SYSTEM_PROMPT =
   'sound like a database dump either.';
 
 export async function POST(request: Request) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return Response.json(
-      { error: 'GEMINI_API_KEY is not configured. Add it to .env.local and restart the dev server.' },
-      { status: 501 }
-    );
-  }
-
   const { name, part_number, oem_number, brand, category, compatibility, description } = await request.json();
   if (typeof name !== 'string' || !name.trim()) {
     return Response.json({ error: 'name is required' }, { status: 400 });
   }
 
   try {
-    const ai = new GoogleGenAI({ apiKey });
     const contents = [
       `Product name: ${name}`,
       part_number ? `Part number: ${part_number}` : null,
@@ -56,29 +46,16 @@ export async function POST(request: Request) {
       description ? `Admin's existing notes/description (approved, mine this for real details): ${description}` : null,
     ].filter(Boolean).join('\n');
 
-    const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
-      contents,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        responseMimeType: 'application/json',
-        responseJsonSchema: DESCRIPTION_JSON_SCHEMA,
-      },
+    const { data } = await generateJson({
+      system: SYSTEM_PROMPT,
+      prompt: contents,
+      schema: DESCRIPTION_JSON_SCHEMA,
+      schemaName: 'catalog_description',
     });
 
-    if (response.promptFeedback?.blockReason) {
-      return Response.json({ error: `Gemini declined to draft a description (${response.promptFeedback.blockReason}).` }, { status: 502 });
-    }
-
-    const text = response.text;
-    if (!text) {
-      return Response.json({ error: 'AI provider returned an empty response.' }, { status: 502 });
-    }
-
-    return Response.json(JSON.parse(text));
+    return Response.json(data);
   } catch (error) {
     console.error('ai-catalog-description route failed:', error);
-    const message = friendlyAiErrorMessage(error, 'Unknown error drafting description.');
-    return Response.json({ error: message }, { status: 500 });
+    return aiErrorResponse(error, 'Unknown error drafting description.');
   }
 }
