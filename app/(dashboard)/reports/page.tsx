@@ -17,9 +17,9 @@ type Product = { category: string; current_stock: number; cost_price: number; sa
 const GST_RATE = 0.18;
 const AGE_BUCKETS = ['0-30', '31-60', '61-90', '90+'] as const;
 type AgeBucket = typeof AGE_BUCKETS[number];
-const BUCKET_COLORS: Record<AgeBucket, string> = { '0-30': '#10B981', '31-60': '#F59E0B', '61-90': '#F97316', '90+': '#EF4444' };
-const BUCKET_BG: Record<AgeBucket, string> = { '0-30': 'rgba(16,185,129,0.1)', '31-60': 'rgba(245,158,11,0.1)', '61-90': 'rgba(249,115,22,0.1)', '90+': 'rgba(239,68,68,0.1)' };
-const CATEGORY_COLORS = ['#F59E0B', '#3B82F6', '#10B981', '#8B5CF6', '#EC4899', '#06B6D4'];
+const BUCKET_COLORS: Record<AgeBucket, string> = { '0-30': 'var(--color-success)', '31-60': 'var(--chart-amber)', '61-90': 'var(--chart-orange)', '90+': 'var(--color-danger)' };
+const BUCKET_BG: Record<AgeBucket, string> = { '0-30': 'var(--color-success-bg)', '31-60': 'var(--amber-tint)', '61-90': 'color-mix(in srgb, var(--chart-orange) 12%, var(--surface))', '90+': 'var(--color-danger-bg)' };
+const CATEGORY_COLORS = ['var(--chart-amber)', 'var(--chart-blue)', 'var(--color-success)', 'var(--chart-violet)', 'var(--chart-pink)', 'var(--chart-teal)'];
 
 function emptyBuckets(): Record<AgeBucket, number> {
   return { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
@@ -148,19 +148,19 @@ export default function ReportsPage() {
 
     {reportType === 'pnl' && <>
       <div className="kpi-grid">
-        <Kpi title="Total Revenue" value={`₹${totalRevenue.toLocaleString()}`} icon={TrendingUp} color="#10B981" bg="rgba(16,185,129,0.1)" />
-        <Kpi title="Purchases (COGS)" value={`₹${totalPurchaseSpend.toLocaleString()}`} icon={ShoppingBag} color="#3B82F6" bg="rgba(59,130,246,0.1)" />
-        <Kpi title="Gross Margin" value={`₹${grossMargin.toLocaleString()}`} icon={Wallet} color="#F59E0B" bg="rgba(245,158,11,0.1)" />
-        <Kpi title="Net Result" value={`₹${netResult.toLocaleString()}`} icon={netResult >= 0 ? TrendingUp : TrendingDown} color={netResult >= 0 ? '#10B981' : '#EF4444'} bg={netResult >= 0 ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)'} />
+        <Kpi title="Total Revenue" value={`₹${totalRevenue.toLocaleString()}`} icon={TrendingUp} color="var(--color-success)" bg="var(--color-success-bg)" />
+        <Kpi title="Purchases (COGS)" value={`₹${totalPurchaseSpend.toLocaleString()}`} icon={ShoppingBag} color="var(--chart-blue)" bg="var(--color-info-bg)" />
+        <Kpi title="Gross Margin" value={`₹${grossMargin.toLocaleString()}`} icon={Wallet} color="var(--chart-amber)" bg="var(--amber-tint)" />
+        <Kpi title="Net Result" value={`₹${netResult.toLocaleString()}`} icon={netResult >= 0 ? TrendingUp : TrendingDown} color={netResult >= 0 ? 'var(--color-success)' : 'var(--color-danger)'} bg={netResult >= 0 ? 'var(--color-success-bg)' : 'var(--color-danger-bg)'} />
       </div>
       <div className="grid-2">
         <div className="card">
           <div className="card-header"><h3 className="card-title">Revenue vs. Costs</h3></div>
           <ValueBars rows={[
-            { label: 'Total Revenue', value: totalRevenue, color: '#10B981' },
-            { label: 'Purchases (COGS)', value: totalPurchaseSpend, color: '#3B82F6' },
-            { label: 'Operating Expenses', value: totalExpenses, color: '#F97316' },
-            { label: 'Net Result', value: netResult, color: netResult >= 0 ? '#F59E0B' : '#EF4444' },
+            { label: 'Total Revenue', value: totalRevenue, color: 'var(--color-success)' },
+            { label: 'Purchases (COGS)', value: totalPurchaseSpend, color: 'var(--chart-blue)' },
+            { label: 'Operating Expenses', value: totalExpenses, color: 'var(--chart-orange)' },
+            { label: 'Net Result', value: netResult, color: netResult >= 0 ? 'var(--chart-amber)' : 'var(--color-danger)' },
           ]} />
         </div>
         <div className="card">
@@ -178,10 +178,10 @@ export default function ReportsPage() {
 
     {reportType === 'sales' && <>
       <div className="kpi-grid">
-        <Kpi title="Total Invoices" value={`${invoices.length}`} icon={Receipt} color="#3B82F6" bg="rgba(59,130,246,0.1)" />
-        <Kpi title="Total Revenue" value={`₹${totalRevenue.toLocaleString()}`} icon={TrendingUp} color="#10B981" bg="rgba(16,185,129,0.1)" />
-        <Kpi title="Avg Order Value" value={`₹${avgOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={IndianRupee} color="#F59E0B" bg="rgba(245,158,11,0.1)" />
-        <Kpi title="Outstanding Due" value={`₹${salesOutstandingDue.toLocaleString()}`} icon={AlertCircle} color="#EF4444" bg="rgba(239,68,68,0.1)" />
+        <Kpi title="Total Invoices" value={`${invoices.length}`} icon={Receipt} color="var(--chart-blue)" bg="var(--color-info-bg)" />
+        <Kpi title="Total Revenue" value={`₹${totalRevenue.toLocaleString()}`} icon={TrendingUp} color="var(--color-success)" bg="var(--color-success-bg)" />
+        <Kpi title="Avg Order Value" value={`₹${avgOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={IndianRupee} color="var(--chart-amber)" bg="var(--amber-tint)" />
+        <Kpi title="Outstanding Due" value={`₹${salesOutstandingDue.toLocaleString()}`} icon={AlertCircle} color="var(--color-danger)" bg="var(--color-danger-bg)" />
       </div>
       <div className="card"><div className="card-header"><h3 className="card-title">Recent Invoices</h3><span className="badge badge-info">{salesRows.length} shown</span></div><div className="table-wrap"><table className="erp-table"><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th className="text-right">Amount</th><th>Status</th></tr></thead><tbody>{salesRows.map((row) => <tr key={row.id}><td className="text-brand font-semibold">{row.id}</td><td>{row.customer}</td><td className="text-muted">{row.date}</td><td className="text-right font-semibold">₹{Number(row.total).toLocaleString()}</td><td><span className={`badge ${row.status === 'paid' ? 'badge-success' : row.status === 'partial' ? 'badge-warning' : 'badge-danger'}`}>{row.status.toUpperCase()}</span></td></tr>)}
         {salesRows.length === 0 && <tr><td colSpan={5}><div className="empty-state"><p className="empty-state-title">No invoices yet</p><p className="empty-state-desc">This company has no sales on file.</p></div></td></tr>}
@@ -190,10 +190,10 @@ export default function ReportsPage() {
 
     {reportType === 'stock' && <>
       <div className="kpi-grid">
-        <Kpi title="Total Stock Units" value={`${totalStockUnits}`} icon={PackageCheck} color="#3B82F6" bg="rgba(59,130,246,0.1)" />
-        <Kpi title="Total Cost Value" value={`₹${totalCostValue.toLocaleString()}`} icon={Wallet} color="#F59E0B" bg="rgba(245,158,11,0.1)" />
-        <Kpi title="Total Retail Value" value={`₹${totalRetailValue.toLocaleString()}`} icon={TrendingUp} color="#10B981" bg="rgba(16,185,129,0.1)" />
-        <Kpi title="Expected Margin" value={`₹${(totalRetailValue - totalCostValue).toLocaleString()}`} icon={Percent} color="#8B5CF6" bg="rgba(139,92,246,0.1)" />
+        <Kpi title="Total Stock Units" value={`${totalStockUnits}`} icon={PackageCheck} color="var(--chart-blue)" bg="var(--color-info-bg)" />
+        <Kpi title="Total Cost Value" value={`₹${totalCostValue.toLocaleString()}`} icon={Wallet} color="var(--chart-amber)" bg="var(--amber-tint)" />
+        <Kpi title="Total Retail Value" value={`₹${totalRetailValue.toLocaleString()}`} icon={TrendingUp} color="var(--color-success)" bg="var(--color-success-bg)" />
+        <Kpi title="Expected Margin" value={`₹${(totalRetailValue - totalCostValue).toLocaleString()}`} icon={Percent} color="var(--chart-violet)" bg="color-mix(in srgb, var(--chart-violet) 12%, var(--surface))" />
       </div>
       <div className="grid-2">
         <div className="card">
@@ -214,10 +214,10 @@ export default function ReportsPage() {
 
     {reportType === 'gst' && <>
       <div className="kpi-grid">
-        <Kpi title="Taxable Sales" value={`₹${taxableSales.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={Receipt} color="#3B82F6" bg="rgba(59,130,246,0.1)" />
-        <Kpi title="Output GST Collected" value={`₹${outputGst.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={TrendingUp} color="#F97316" bg="rgba(249,115,22,0.1)" />
-        <Kpi title="Input Tax Credit" value={`₹${inputTaxCredit.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={TrendingDown} color="#10B981" bg="rgba(16,185,129,0.1)" />
-        <Kpi title="Net GST Payable" value={`₹${Math.max(0, netGstPayable).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={IndianRupee} color="#EF4444" bg="rgba(239,68,68,0.1)" />
+        <Kpi title="Taxable Sales" value={`₹${taxableSales.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={Receipt} color="var(--chart-blue)" bg="var(--color-info-bg)" />
+        <Kpi title="Output GST Collected" value={`₹${outputGst.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={TrendingUp} color="var(--chart-orange)" bg="color-mix(in srgb, var(--chart-orange) 12%, var(--surface))" />
+        <Kpi title="Input Tax Credit" value={`₹${inputTaxCredit.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={TrendingDown} color="var(--color-success)" bg="var(--color-success-bg)" />
+        <Kpi title="Net GST Payable" value={`₹${Math.max(0, netGstPayable).toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={IndianRupee} color="var(--color-danger)" bg="var(--color-danger-bg)" />
       </div>
       <div className="grid-2">
         <div className="card"><h3 className="card-title mb-4">GSTR-1 Sales Summary</h3><p className="text-muted text-sm mb-2">Assumes {(GST_RATE * 100).toFixed(0)}% GST inclusive in invoice totals</p><div className="report-line"><span>Taxable sales</span><strong>₹{taxableSales.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong></div><div className="report-line"><span>Output GST collected</span><strong>₹{outputGst.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong></div><div className="report-line"><span>Invoices</span><strong>{invoices.length}</strong></div></div>

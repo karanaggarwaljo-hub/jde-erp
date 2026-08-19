@@ -87,14 +87,14 @@ export default function DashboardPage() {
   const spendChange = pctChange(spend30, spendPrev30);
 
   const kpis = [
-    { title: "Today's Sales", value: `₹${todaySales.toLocaleString()}`, change: salesChange.label, context: 'vs yesterday', positive: salesChange.positive, icon: ShoppingCart, color: '#F59E0B', colorBg: 'rgba(245,158,11,0.1)' },
-    { title: "Today's Purchases", value: `₹${todayPurchases.toLocaleString()}`, change: purchasesChange.label, context: 'vs yesterday', positive: purchasesChange.positive, icon: ShoppingBag, color: '#3B82F6', colorBg: 'rgba(59,130,246,0.1)' },
-    { title: 'Revenue (30 Days)', value: `₹${revenue30.toLocaleString()}`, change: revenueChange.label, context: 'vs prior 30 days', positive: revenueChange.positive, icon: TrendingUp, color: '#10B981', colorBg: 'rgba(16,185,129,0.1)' },
-    { title: 'Purchase Spend (30 Days)', value: `₹${spend30.toLocaleString()}`, change: spendChange.label, context: 'vs prior 30 days', positive: spend30 <= spendPrev30, icon: ShoppingBag, color: '#8B5CF6', colorBg: 'rgba(139,92,246,0.1)' },
-    { title: 'Inventory Value', value: `₹${inventoryValue.toLocaleString()}`, change: `${products.length} parts`, context: 'at cost price', positive: true, icon: PackageCheck, color: '#EC4899', colorBg: 'rgba(236,72,153,0.1)' },
-    { title: 'Total Receivables', value: `₹${totalReceivables.toLocaleString()}`, change: `${overdueCustomerCount} outstanding`, context: 'follow up soon', positive: overdueCustomerCount === 0, icon: Users, color: '#F97316', colorBg: 'rgba(249,115,22,0.1)' },
-    { title: 'Total Payables', value: `₹${totalPayables.toLocaleString()}`, change: `${payableSupplierCount} outstanding`, context: 'to suppliers', positive: payableSupplierCount === 0, icon: Clock, color: '#06B6D4', colorBg: 'rgba(6,182,212,0.1)' },
-    { title: 'Low Stock Items', value: `${lowStockProducts.length} parts`, change: lowStockProducts.length > 0 ? 'Action required' : 'All stocked', context: `${lowStockProducts.length} at or below minimum`, positive: lowStockProducts.length === 0, icon: AlertTriangle, color: '#EF4444', colorBg: 'rgba(239,68,68,0.1)' },
+    { title: "Today's Sales", value: `₹${todaySales.toLocaleString()}`, change: salesChange.label, context: 'vs yesterday', positive: salesChange.positive, icon: ShoppingCart, color: 'var(--chart-amber)', colorBg: 'var(--amber-tint)' },
+    { title: "Today's Purchases", value: `₹${todayPurchases.toLocaleString()}`, change: purchasesChange.label, context: 'vs yesterday', positive: purchasesChange.positive, icon: ShoppingBag, color: 'var(--chart-blue)', colorBg: 'var(--color-info-bg)' },
+    { title: 'Revenue (30 Days)', value: `₹${revenue30.toLocaleString()}`, change: revenueChange.label, context: 'vs prior 30 days', positive: revenueChange.positive, icon: TrendingUp, color: 'var(--chart-green)', colorBg: 'var(--em-tint)' },
+    { title: 'Purchase Spend (30 Days)', value: `₹${spend30.toLocaleString()}`, change: spendChange.label, context: 'vs prior 30 days', positive: spend30 <= spendPrev30, icon: ShoppingBag, color: 'var(--chart-violet)', colorBg: 'rgba(109,40,217,0.1)' },
+    { title: 'Inventory Value', value: `₹${inventoryValue.toLocaleString()}`, change: `${products.length} parts`, context: 'at cost price', positive: true, icon: PackageCheck, color: 'var(--chart-pink)', colorBg: 'rgba(190,24,93,0.1)' },
+    { title: 'Total Receivables', value: `₹${totalReceivables.toLocaleString()}`, change: `${overdueCustomerCount} outstanding`, context: 'follow up soon', positive: overdueCustomerCount === 0, icon: Users, color: 'var(--chart-orange)', colorBg: 'rgba(194,65,12,0.1)' },
+    { title: 'Total Payables', value: `₹${totalPayables.toLocaleString()}`, change: `${payableSupplierCount} outstanding`, context: 'to suppliers', positive: payableSupplierCount === 0, icon: Clock, color: 'var(--chart-teal)', colorBg: 'rgba(14,116,144,0.1)' },
+    { title: 'Low Stock Items', value: `${lowStockProducts.length} parts`, change: lowStockProducts.length > 0 ? 'Action required' : 'All stocked', context: `${lowStockProducts.length} at or below minimum`, positive: lowStockProducts.length === 0, icon: AlertTriangle, color: 'var(--chart-red)', colorBg: 'var(--rose-tint)' },
   ];
 
   const recentActivities = useMemo(() => {

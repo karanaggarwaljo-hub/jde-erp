@@ -22,7 +22,7 @@ export default function ForgotPasswordPage() {
     <div className="login-bg">
       <div className="login-card">
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', marginBottom: '24px' }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'linear-gradient(135deg, #F59E0B, #F97316)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '20px', color: '#000', marginBottom: '12px', boxShadow: 'var(--shadow-glow)' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'var(--brand-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '20px', color: 'var(--ink)', marginBottom: '12px', boxShadow: 'var(--shadow-sm)' }}>
             JDE
           </div>
           <h2 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)' }}>Reset Password</h2>

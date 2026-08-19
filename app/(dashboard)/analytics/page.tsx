@@ -6,7 +6,7 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 
 type Product = { id: string; part_number: string; name: string; brand: string; category: string; current_stock: number; cost_price: number };
 
-const CATEGORY_COLORS = ['#F59E0B', '#3B82F6', '#10B981', '#8B5CF6', '#EC4899', '#06B6D4'];
+const CATEGORY_COLORS = ['var(--chart-amber)', 'var(--chart-blue)', 'var(--chart-green)', 'var(--chart-violet)', 'var(--chart-pink)', 'var(--chart-teal)'];
 
 export default function AnalyticsPage() {
   const { rows: products } = useCompanyTable<Product>('products');
