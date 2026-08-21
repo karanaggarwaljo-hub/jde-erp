@@ -1,14 +1,35 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
-import { Plus, Search, Phone, Mail, Sparkles } from 'lucide-react';
+import { Fragment, FormEvent, useMemo, useState } from 'react';
+import { Plus, Search, Phone, Mail, Sparkles, IndianRupee, Truck, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
 
 type Supplier = { id: string; company_id: string; name: string; category: string; phone: string; email: string; gstin: string; terms: number; balance: number };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string };
 
+type LedgerFilter = 'all' | 'balance' | 'settled';
+
 const categoryOptions = ['Engine', 'Brakes', 'Filters', 'Clutch', 'Suspension', 'Electrical'];
+
+const PAGE_SIZE = 12;
+
+// Categorical hues only, and never green / amber / rose: on this screen those three already mean
+// settled / outstanding, and a category dot must not borrow that meaning.
+const CATEGORY_CHIP_COLORS = [
+  'var(--chart-blue)',
+  'var(--chart-teal)',
+  'var(--chart-violet)',
+  'var(--chart-orange)',
+  'var(--chart-pink)',
+];
+
+// Same category always gets the same dot, without storing anything — a reading aid, not data.
+const categoryChipColor = (category: string) => {
+  let hash = 0;
+  for (let i = 0; i < category.length; i += 1) hash = (hash * 31 + category.charCodeAt(i)) % 100003;
+  return CATEGORY_CHIP_COLORS[hash % CATEGORY_CHIP_COLORS.length];
+};
 
 export default function SuppliersPage() {
   const { rows: suppliers, loading, create, adjust } = useCompanyTable<Supplier>('suppliers');
@@ -20,6 +41,8 @@ export default function SuppliersPage() {
   const [reminderSupplier, setReminderSupplier] = useState<Supplier | null>(null);
   const [feedback, setFeedback] = useState('');
   const [form, setForm] = useState({ name: '', category: categoryOptions[0], phone: '', email: '', gstin: '', terms: 30 });
+  const [filter, setFilter] = useState<LedgerFilter>('all');
+  const [page, setPage] = useState(1);
 
   function overdueContext(supplierName: string): string {
     const overdue = purchaseOrders
@@ -77,10 +100,54 @@ export default function SuppliersPage() {
     setPaymentSupplier(null);
   };
 
+  // How many purchase orders this vendor still has open. Counted with exactly the same test the
+  // payment flow above uses, off orders this page already loads — nothing estimated.
+  const unpaidOrderCount = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const po of purchaseOrders) {
+      if (po.status === 'received' && Number(po.total) > Number(po.paid)) counts.set(po.supplier, (counts.get(po.supplier) ?? 0) + 1);
+    }
+    return counts;
+  }, [purchaseOrders]);
+
+  const balanceOf = (supplier: Supplier) => Number(supplier.balance) || 0;
+
+  // Headline figures — a straight roll-up of the supplier rows this page already loaded. There is
+  // no month-on-month movement here because the page holds no historical series to compare with.
+  const owing = suppliers.filter((supplier) => balanceOf(supplier) > 0);
+  const settled = suppliers.filter((supplier) => balanceOf(supplier) <= 0);
+  const largestCreditor = owing.reduce<Supplier | null>(
+    (top, supplier) => (!top || balanceOf(supplier) > balanceOf(top) ? supplier : top),
+    null,
+  );
+
+  const selectFilter = (next: LedgerFilter) => {
+    setFilter(next);
+    setPage(1);
+  };
+
+  // Tab counts are taken from the search result rather than the whole directory, so the number on
+  // a tab is always exactly how many rows clicking it will show.
+  const searchedOwing = filteredSuppliers.filter((supplier) => balanceOf(supplier) > 0);
+  const searchedSettled = filteredSuppliers.filter((supplier) => balanceOf(supplier) <= 0);
+  const filtered = filter === 'balance' ? searchedOwing : filter === 'settled' ? searchedSettled : filteredSuppliers;
+
+  // Paging is clamped rather than reset by an effect: paying off the last vendor on page 3 lands
+  // the view on the new last page instead of showing an empty table.
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const firstIndex = (currentPage - 1) * PAGE_SIZE;
+  const visible = filtered.slice(firstIndex, firstIndex + PAGE_SIZE);
+  const pagePayable = visible.reduce((sum, supplier) => sum + balanceOf(supplier), 0);
+  const pageNumbers = Array.from({ length: totalPages }, (_, index) => index + 1).filter(
+    (number) => number === 1 || number === totalPages || Math.abs(number - currentPage) <= 1,
+  );
+
   return <div>
     <div className="page-header">
       <div>
-        <h1 className="page-title">Supplier & Vendor Directory</h1>
+        <div className="eyebrow">Accounts payable</div>
+        <h1 className="page-title">Supplier &amp; Vendor Directory</h1>
         <p className="page-subtitle">Manage spare parts manufacturers, distributors, payment terms and payables</p>
       </div>
       <button className="btn btn-primary" onClick={() => setShowModal(true)}><Plus size={16} /> Add Supplier</button>
@@ -88,67 +155,191 @@ export default function SuppliersPage() {
 
     {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
 
-    <div className="card mb-6 p-4">
-      <div className="flex gap-4 items-center flex-wrap">
-        <div className="search-bar" style={{ flex: 1, minWidth: '240px' }}>
-          <Search className="search-bar-icon" size={16} />
-          <input
-            type="text"
-            placeholder="Search by name, phone, email, GSTIN..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+    {/* auto-fit rather than the shared auto-fill so three cards stretch across the row
+        instead of leaving two empty tracks on a wide screen. */}
+    {suppliers.length > 0 && (
+      <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
+          <div className="flex justify-between items-center">
+            <span className="kpi-label">Total payable</span>
+            <div className="kpi-icon-wrap"><IndianRupee size={18} /></div>
+          </div>
+          <div className="kpi-value">₹{totalPayables.toLocaleString()}</div>
+          <span className="kpi-context">Sum of every supplier balance on file</span>
         </div>
-        <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-          {suppliers.length} suppliers · <strong style={{ color: 'var(--text-primary)' }}>₹{totalPayables.toLocaleString()}</strong> total payable
-        </span>
-      </div>
-    </div>
 
-    <div className="table-wrap">
-      <table className="erp-table">
-        <thead>
-          <tr>
-            <th>Supplier</th>
-            <th>Category</th>
-            <th>GSTIN</th>
-            <th>Contact</th>
-            <th>Terms</th>
-            <th className="text-right">Payable Balance</th>
-            <th className="text-center">Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredSuppliers.map((supplier) => (
-            <tr key={supplier.id}>
-              <td style={{ fontWeight: 600 }}>{supplier.name}</td>
-              <td><span className="badge badge-info">{supplier.category}</span></td>
-              <td style={{ color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: '12px' }}>{supplier.gstin || 'Not provided'}</td>
-              <td>
-                <div className="flex items-center gap-2" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  <Phone size={12} /><span>{supplier.phone || 'No phone'}</span>
-                </div>
-                <div className="flex items-center gap-2" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  <Mail size={12} /><span>{supplier.email || 'No email'}</span>
-                </div>
-              </td>
-              <td><span className="badge badge-warning">{supplier.terms} Days</span></td>
-              <td className="text-right">
-                <strong className={supplier.balance > 0 ? 'text-warning' : 'text-success'}>₹{supplier.balance.toLocaleString()}</strong>
-              </td>
-              <td className="text-center">
-                <div className="flex gap-1 justify-center">
-                  <button className="btn btn-secondary btn-sm" disabled={!supplier.balance} onClick={() => openPayment(supplier)}>Pay Vendor</button>
-                  <button className="btn btn-ghost btn-sm" aria-label={`Draft payment follow-up for ${supplier.name}`} title="Draft a payment follow-up message" disabled={!supplier.balance} onClick={() => setReminderSupplier(supplier)}><Sparkles size={14} /></button>
-                </div>
-              </td>
-            </tr>
-          ))}
-          {filteredSuppliers.length === 0 && (
-            <tr><td colSpan={7}><div className="empty-state"><p className="empty-state-title">{loading ? 'Loading suppliers…' : 'No suppliers found'}</p><p className="empty-state-desc">{loading ? 'Fetching vendors for the active company.' : 'Try another search term, or this company simply has no suppliers yet.'}</p></div></td></tr>
-          )}
-        </tbody>
-      </table>
+        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-blue)', '--kpi-color-bg': 'var(--color-info-bg)' } as React.CSSProperties}>
+          <div className="flex justify-between items-center">
+            <span className="kpi-label">Suppliers awaiting payment</span>
+            <div className="kpi-icon-wrap"><Truck size={18} /></div>
+          </div>
+          <div className="kpi-value">{owing.length}</div>
+          <span className="kpi-context">of {suppliers.length} vendors · {settled.length} settled</span>
+        </div>
+
+        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-red)', '--kpi-color-bg': 'var(--rose-tint)' } as React.CSSProperties}>
+          <div className="flex justify-between items-center">
+            <span className="kpi-label">Largest balance</span>
+            <div className="kpi-icon-wrap"><TrendingUp size={18} /></div>
+          </div>
+          <div className="kpi-value">₹{(largestCreditor ? balanceOf(largestCreditor) : 0).toLocaleString()}</div>
+          <span className="kpi-context">{largestCreditor ? largestCreditor.name : 'No supplier is carrying a balance'}</span>
+        </div>
+      </div>
+    )}
+
+    {owing.length > 0 && (
+      <div className="alert alert-warning mb-4">
+        <AlertTriangle size={16} style={{ flex: 'none', marginTop: '1px' }} />
+        <span>
+          {owing.length} supplier{owing.length > 1 ? 's are' : ' is'} awaiting payment, ₹{totalPayables.toLocaleString()} in total.
+        </span>
+        <button type="button" className="alert-action" onClick={() => selectFilter('balance')}>Show who we owe</button>
+      </div>
+    )}
+
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="tbl-toolbar">
+        <div className="tbl-toolbar-title">
+          <strong>Supplier ledger</strong>
+          <small>Payable balances, credit terms and contact details</small>
+        </div>
+        <div className="tbl-tools">
+          <div className="tabs" role="tablist" aria-label="Filter suppliers">
+            <button type="button" role="tab" aria-selected={filter === 'all'} className={`tab ${filter === 'all' ? 'active' : ''}`} onClick={() => selectFilter('all')}>
+              All <span className="tab-count">{filteredSuppliers.length}</span>
+            </button>
+            <button type="button" role="tab" aria-selected={filter === 'balance'} className={`tab ${filter === 'balance' ? 'active' : ''}`} onClick={() => selectFilter('balance')}>
+              With balance <span className="tab-count">{searchedOwing.length}</span>
+            </button>
+            <button type="button" role="tab" aria-selected={filter === 'settled'} className={`tab ${filter === 'settled' ? 'active' : ''}`} onClick={() => selectFilter('settled')}>
+              Settled <span className="tab-count">{searchedSettled.length}</span>
+            </button>
+          </div>
+
+          <div className="search-bar" style={{ minWidth: '240px' }}>
+            <Search className="search-bar-icon" size={16} />
+            <input
+              type="text"
+              placeholder="Search by name, phone, email, GSTIN..."
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+            />
+          </div>
+        </div>
+      </div>
+
+      {suppliers.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-icon"><Truck size={22} /></div>
+          <div className="empty-state-title">{loading ? 'Loading suppliers…' : 'No suppliers yet'}</div>
+          <p className="empty-state-desc">
+            {loading ? 'Fetching vendors for the active company.' : 'Add your first supplier to get started.'}
+          </p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-title">Nothing in this view</div>
+          <p className="empty-state-desc">
+            {search
+              ? 'No supplier matches this search in the selected tab.'
+              : filter === 'balance'
+                ? 'No supplier is carrying a balance right now.'
+                : 'Every supplier on file is carrying a balance.'}
+          </p>
+        </div>
+      ) : (
+        <>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="erp-table" style={{ minWidth: '1040px' }}>
+              <thead>
+                <tr>
+                  <th>Supplier</th>
+                  <th>Contact</th>
+                  <th>GSTIN</th>
+                  <th>Category</th>
+                  <th>Terms</th>
+                  <th className="text-right" style={{ textAlign: 'right' }}>Payable</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((supplier) => {
+                  const balance = balanceOf(supplier);
+                  const openOrders = unpaidOrderCount.get(supplier.name) ?? 0;
+                  return (
+                    <tr key={supplier.id}>
+                      <td>
+                        <div className="font-semibold">{supplier.name}</div>
+                      </td>
+                      <td>
+                        <div className="directory-details">
+                          <div className="flex items-center gap-2"><Phone size={13} /><span>{supplier.phone || 'No phone'}</span></div>
+                          <div className="flex items-center gap-2"><Mail size={13} /><span className="truncate" style={{ maxWidth: '190px' }}>{supplier.email || 'No email'}</span></div>
+                        </div>
+                      </td>
+                      <td>
+                        {supplier.gstin
+                          ? <span className="pn-chip">{supplier.gstin}</span>
+                          : <span className="text-muted text-sm">Not provided</span>}
+                      </td>
+                      <td>
+                        {supplier.category
+                          ? <span className="brand-chip" style={{ '--brand-chip-color': categoryChipColor(supplier.category) } as React.CSSProperties}>{supplier.category}</span>
+                          : <span className="text-muted text-sm">—</span>}
+                      </td>
+                      <td><span className="badge badge-muted">{supplier.terms} days</span></td>
+                      <td className="text-right">
+                        {balance > 0 ? (
+                          <>
+                            <strong>₹{balance.toLocaleString()}</strong>
+                            {openOrders > 0 && (
+                              <div className="text-muted text-sm">{openOrders} unpaid order{openOrders > 1 ? 's' : ''}</div>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-muted">₹0</span>
+                        )}
+                      </td>
+                      <td>
+                        {balance > 0
+                          ? <span className="badge badge-warning">Outstanding</span>
+                          : <span className="badge badge-success">Settled</span>}
+                      </td>
+                      <td>
+                        <div className="flex items-center gap-2">
+                          <button className="btn btn-secondary btn-sm" disabled={!supplier.balance} onClick={() => openPayment(supplier)}>Pay Vendor</button>
+                          <button className="btn btn-ghost btn-sm" aria-label={`Draft payment follow-up for ${supplier.name}`} title="Draft a payment follow-up message" disabled={!supplier.balance} onClick={() => setReminderSupplier(supplier)}><Sparkles size={14} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="pager">
+            <div className="pager-info">
+              Showing <strong>{firstIndex + 1}–{firstIndex + visible.length}</strong> of <strong>{filtered.length}</strong> suppliers
+              {pagePayable > 0 && <> · <strong>₹{pagePayable.toLocaleString()}</strong> payable on this page</>}
+            </div>
+            {totalPages > 1 && (
+              <div className="pager-controls">
+                <button type="button" className="pager-btn" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={15} /></button>
+                {pageNumbers.map((number, index) => (
+                  <Fragment key={number}>
+                    {index > 0 && number - pageNumbers[index - 1] > 1 && <span className="pager-info">…</span>}
+                    <button type="button" className={`pager-btn ${number === currentPage ? 'active' : ''}`} aria-current={number === currentPage ? 'page' : undefined} onClick={() => setPage(number)}>{number}</button>
+                  </Fragment>
+                ))}
+                <button type="button" className="pager-btn" aria-label="Next page" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={15} /></button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
 
     {showModal && <div className="modal-overlay"><div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="supplier-modal-title"><form onSubmit={saveSupplier}>

@@ -393,7 +393,7 @@ export default function InventoryPage() {
         <div>
           <div className="eyebrow">Stock control</div>
           <h1 className="page-title">Spare Parts Inventory</h1>
-          <p className="page-subtitle">Track stock levels, OEM cross-references, locations & pricing{catalogueSummary}</p>
+          <p className="page-subtitle">Track stock levels, locations & pricing{catalogueSummary}</p>
         </div>
         <div className="flex gap-2">
           <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
@@ -529,7 +529,6 @@ export default function InventoryPage() {
           <thead>
             <tr>
               <th>Part Number</th>
-              <th>OEM Number</th>
               <th>HSN Code</th>
               <th>Item Name</th>
               <th>Brand</th>
@@ -554,7 +553,6 @@ export default function InventoryPage() {
               return (
                 <tr key={p.id}>
                   <td><span className="pn-chip">{p.part_number}</span></td>
-                  <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{p.oem_number || '-'}</td>
                   <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{p.hsn_code || '-'}</td>
                   <td style={{ fontWeight: 600, maxWidth: '150px' }} className="truncate">{p.name}</td>
                   <td>
@@ -601,7 +599,7 @@ export default function InventoryPage() {
               );
             })}
             {pagedProducts.length === 0 && (
-              <tr><td colSpan={12}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term, category or stock filter, or this company simply has no parts yet.'}</p></div></td></tr>
+              <tr><td colSpan={11}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term, category or stock filter, or this company simply has no parts yet.'}</p></div></td></tr>
             )}
           </tbody>
         </table>

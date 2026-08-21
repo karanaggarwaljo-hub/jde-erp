@@ -1,15 +1,62 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
+import {
+  CheckCircle2,
+  Clock,
+  Edit,
+  Globe,
+  Lock,
+  Plus,
+  ScrollText,
+  Trash2,
+  UserPlus,
+} from 'lucide-react';
 import BackupsPanel from '@/components/BackupsPanel';
 import { useCompany, type Company } from '@/components/CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { inviteUser as sendInvite } from '@/lib/client-auth';
+import { ROLE_LABELS, isRole } from '@/lib/authTypes';
 
 type SettingsTab = 'users' | 'company' | 'audit' | 'backups';
 type UserAccount = { email: string; company_id: string; name: string; role: string; status: string };
 
+// Which people the table is showing. Purely a view filter over rows already loaded — it changes
+// nothing about who has access, and adds no request.
+type UserFilter = 'all' | 'active' | 'invited';
+
 const emptyCompanyForm = { name: '', gstin: '', invoice_prefix: 'INV', po_prefix: 'PO', address: '', contact_email: '', contact_phone: '' };
+
+// Categorical dot colours for the role chip — the dot only tells roles apart, it carries no
+// status meaning, so green / amber / rose are deliberately absent here: on this screen those
+// three are already spoken for by the Active / Invited / danger badges.
+const ROLE_DOT: Record<string, string | undefined> = {
+  owner: 'var(--chart-violet)',
+  manager: 'var(--chart-blue)',
+  salesman: 'var(--chart-teal)',
+  accountant: 'var(--chart-pink)',
+  warehouse: 'var(--ink-3)',
+};
+
+// Reuses the shared avatar chip at table scale. The owner keeps the class's amber fill; everyone
+// else gets the neutral panel tone, so the one account that cannot be edited stands out.
+const AVATAR_BASE = { width: '28px', height: '28px', minWidth: '28px', fontSize: '11px', borderRadius: 'var(--radius-md)' };
+const AVATAR_STAFF = { ...AVATAR_BASE, background: 'var(--panel-2)', color: 'var(--ink-2)', border: '1px solid var(--line-2)' };
+
+// Initials are derived from the name this page already loaded — a reading aid, never stored.
+const initialsOf = (name: string, email: string) => {
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length > 0) {
+    const last = parts.length > 1 ? parts[parts.length - 1][0] : '';
+    return (parts[0][0] + last).toUpperCase();
+  }
+  return (email || '?').charAt(0).toUpperCase();
+};
+
+// 'salesman' in the database, "Salesperson" on screen — one shared label list rather than a
+// second copy that can drift. An unrecognised role is shown exactly as stored, not relabelled.
+const roleLabel = (role: string) => (isRole(role) ? ROLE_LABELS[role] : role);
+const sentenceCase = (value: string) => (value ? value.charAt(0).toUpperCase() + value.slice(1) : '');
 
 export default function SettingsClient() {
   const [activeTab, setActiveTab] = useState<SettingsTab>('users');
@@ -23,8 +70,9 @@ export default function SettingsClient() {
   const [editingRole, setEditingRole] = useState('salesman');
   const [roleError, setRoleError] = useState('');
   const [roleSubmitting, setRoleSubmitting] = useState(false);
+  const [userFilter, setUserFilter] = useState<UserFilter>('all');
 
-  const { companies, addCompany, updateCompany, switchCompany, setStorefrontCompany, removeCompany } = useCompany();
+  const { companies, loading: companiesLoading, addCompany, updateCompany, switchCompany, setStorefrontCompany, removeCompany } = useCompany();
   const [companyModalOpen, setCompanyModalOpen] = useState(false);
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
   const [companyForm, setCompanyForm] = useState(emptyCompanyForm);
@@ -135,49 +183,230 @@ export default function SettingsClient() {
     setDeleteCompanyCandidate(null);
   };
 
+  // Every count below is taken from the rows this page already loaded. There is no "last active"
+  // or "invited on" column here because the user record carries no such field — a gap is correct,
+  // an invented timestamp would not be.
+  const activeUsers = users.filter((user) => user.status === 'active');
+  const invitedUsers = users.filter((user) => user.status === 'invited');
+  const hasOwnerAccount = users.some((user) => user.role === 'owner');
+
+  const userTabs: Array<{ key: UserFilter; label: string; title: string; rows: UserAccount[] }> = [
+    { key: 'all', label: 'All', title: 'People with access', rows: users },
+    { key: 'active', label: 'Active', title: 'People who can sign in now', rows: activeUsers },
+    { key: 'invited', label: 'Invited', title: 'Invitations still waiting', rows: invitedUsers },
+  ];
+  const activeUserTab = userTabs.find((tab) => tab.key === userFilter) ?? userTabs[0];
+  const visibleUsers = activeUserTab.rows;
+
+  const peopleSentence = [
+    `${activeUsers.length} ${activeUsers.length === 1 ? 'person' : 'people'} can sign in`,
+    invitedUsers.length > 0 ? `${invitedUsers.length} ${invitedUsers.length === 1 ? 'invitation is' : 'invitations are'} waiting` : '',
+    hasOwnerAccount ? 'the owner account cannot be edited or removed' : '',
+  ].filter(Boolean).join(' · ');
+
+  const activeCompanyRow = companies.find((c) => c.is_active);
+  const storefrontCompanyRow = companies.find((c) => c.is_storefront);
+  const companySentence = [
+    `${companies.length} ${companies.length === 1 ? 'company' : 'companies'}`,
+    activeCompanyRow ? `${activeCompanyRow.name} is active` : '',
+    storefrontCompanyRow
+      ? `${storefrontCompanyRow.name} is on the public Website Catalog`
+      : 'no company is on the public Website Catalog',
+  ].filter(Boolean).join(' · ');
+
+  const companySummary = companies.length > 0
+    ? ` · ${companies.length} ${companies.length === 1 ? 'company' : 'companies'}`
+    : '';
+
   return <div>
-    <div className="page-header"><div><h1 className="page-title">System Settings & Administration</h1><p className="page-subtitle">Configure company details, role permissions, invoice formats and audit logs</p></div></div>
+    <div className="page-header">
+      <div>
+        <div className="eyebrow">Administration</div>
+        <h1 className="page-title">System Settings &amp; Administration</h1>
+        <p className="page-subtitle">Configure company details, role permissions, invoice formats and audit logs{companySummary}</p>
+      </div>
+    </div>
+
     {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
     {companyListError && <div className="alert alert-danger mb-4" role="alert">{companyListError}</div>}
-    <div className="tabs mb-6"><button className={`tab ${activeTab === 'users' ? 'active' : ''}`} onClick={() => setActiveTab('users')}>User Roles & Access ({users.length})</button><button className={`tab ${activeTab === 'company' ? 'active' : ''}`} onClick={() => setActiveTab('company')}>Companies ({companies.length})</button><button className={`tab ${activeTab === 'audit' ? 'active' : ''}`} onClick={() => setActiveTab('audit')}>Audit Logs</button><button className={`tab ${activeTab === 'backups' ? 'active' : ''}`} onClick={() => setActiveTab('backups')}>Data Backups</button></div>
 
-    {activeTab === 'users' && <div className="card"><div className="card-header"><h3 className="card-title">User Accounts & Roles</h3><button className="btn btn-primary btn-sm" onClick={() => setInviteOpen(true)}>+ Invite User</button></div><div className="table-wrap"><table className="erp-table"><thead><tr><th>User Name</th><th>Email</th><th>Role</th><th>Status</th><th className="text-center">Permissions</th></tr></thead><tbody>{users.map((user) => <tr key={user.email}><td className="font-semibold">{user.name}</td><td className="text-muted">{user.email}</td><td><span className={`badge ${user.role === 'owner' ? 'badge-warning' : user.role === 'manager' ? 'badge-info' : 'badge-muted'}`}>{user.role.toUpperCase()}</span></td><td><span className={`badge ${user.status === 'active' ? 'badge-success' : 'badge-warning'}`}>{user.status.toUpperCase()}</span></td><td className="text-center"><button className="btn btn-ghost btn-sm" disabled={user.role === 'owner'} onClick={() => { setEditingEmail(user.email); setEditingRole(user.role); setRoleError(''); }}>Edit Role</button></td></tr>)}
-      {users.length === 0 && (
-        <tr><td colSpan={5}><div className="empty-state"><p className="empty-state-title">{usersLoading ? 'Loading users…' : 'No users yet'}</p><p className="empty-state-desc">{usersLoading ? 'Fetching accounts for the active company.' : 'Invite your first user to get started.'}</p></div></td></tr>
-      )}
-      </tbody></table></div></div>}
+    <div className="flex items-center justify-between gap-4 mb-6" style={{ flexWrap: 'wrap' }}>
+      <div className="tabs" role="group" aria-label="Settings section">
+        <button type="button" aria-pressed={activeTab === 'users'} className={`tab ${activeTab === 'users' ? 'active' : ''}`} onClick={() => setActiveTab('users')}>
+          Users &amp; Access<span className="tab-count">{users.length}</span>
+        </button>
+        <button type="button" aria-pressed={activeTab === 'company'} className={`tab ${activeTab === 'company' ? 'active' : ''}`} onClick={() => setActiveTab('company')}>
+          Companies<span className="tab-count">{companies.length}</span>
+        </button>
+        <button type="button" aria-pressed={activeTab === 'backups'} className={`tab ${activeTab === 'backups' ? 'active' : ''}`} onClick={() => setActiveTab('backups')}>
+          Data Backups
+        </button>
+        <button type="button" aria-pressed={activeTab === 'audit'} className={`tab ${activeTab === 'audit' ? 'active' : ''}`} onClick={() => setActiveTab('audit')}>
+          Audit Logs
+        </button>
+      </div>
+      {/* True of this whole route, not decoration: /settings is gated by requireOwner(). */}
+      <span className="text-muted flex items-center gap-2" style={{ fontSize: '12px' }}>
+        <Lock size={14} /> Only the owner can open these settings
+      </span>
+    </div>
+
+    {activeTab === 'users' && (
+      <div className="table-wrap">
+        <div className="tbl-toolbar">
+          <div className="tbl-toolbar-title">
+            <strong>{activeUserTab.title}</strong>
+            <small>Only the owner can invite someone or change a role</small>
+          </div>
+
+          <div className="tabs" role="group" aria-label="Filter people by status">
+            {userTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                aria-pressed={userFilter === tab.key}
+                className={`tab${userFilter === tab.key ? ' active' : ''}`}
+                onClick={() => setUserFilter(tab.key)}
+              >
+                {tab.label}<span className="tab-count">{tab.rows.length}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="tbl-tools">
+            <button className="btn btn-primary btn-sm" onClick={() => setInviteOpen(true)}>
+              <UserPlus size={14} /> Invite User
+            </button>
+          </div>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
+          <table className="erp-table">
+            <thead>
+              <tr>
+                <th>User Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th className="text-right">Access</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleUsers.map((user) => {
+                const isOwnerAccount = user.role === 'owner';
+                return (
+                  <tr key={user.email}>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <span
+                          className="profile-avatar"
+                          aria-hidden="true"
+                          style={isOwnerAccount ? AVATAR_BASE : AVATAR_STAFF}
+                        >
+                          {initialsOf(user.name, user.email)}
+                        </span>
+                        <span className="font-semibold">{user.name}</span>
+                      </div>
+                    </td>
+                    <td className="text-muted">{user.email}</td>
+                    <td>
+                      <span
+                        className="brand-chip"
+                        style={{ '--brand-chip-color': ROLE_DOT[user.role] ?? 'var(--ink-3)' } as React.CSSProperties}
+                      >
+                        {roleLabel(user.role)}
+                      </span>
+                    </td>
+                    <td>
+                      {user.status === 'active' ? (
+                        <span className="badge badge-success"><CheckCircle2 size={12} /> Active</span>
+                      ) : user.status === 'invited' ? (
+                        <span className="badge badge-warning"><Clock size={12} /> Invited</span>
+                      ) : (
+                        <span className="badge badge-muted">{sentenceCase(user.status) || '—'}</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          disabled={isOwnerAccount}
+                          title={isOwnerAccount ? 'The owner account cannot be edited or removed' : undefined}
+                          onClick={() => { setEditingEmail(user.email); setEditingRole(user.role); setRoleError(''); }}
+                        >
+                          {isOwnerAccount ? <Lock size={14} /> : <Edit size={14} />} Edit Role
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {visibleUsers.length === 0 && (
+                /* Three genuinely different situations, told apart rather than flattened into one
+                   message: still loading, nobody at all, or nobody under this particular filter. */
+                <tr><td colSpan={5}><div className="empty-state">
+                  <p className="empty-state-title">{usersLoading ? 'Loading users…' : users.length === 0 ? 'No users yet' : 'Nobody in this list'}</p>
+                  <p className="empty-state-desc">{usersLoading ? 'Fetching accounts for the active company.' : users.length === 0 ? 'Invite your first user to get started.' : 'Everyone with access is on another tab — try All.'}</p>
+                </div></td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {users.length > 0 && (
+          <div className="pager">
+            <div className="pager-info">{peopleSentence}</div>
+          </div>
+        )}
+      </div>
+    )}
 
     {activeTab === 'company' && (
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3 className="card-title">Companies</h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Manage the businesses run through this ERP. Only one company can be active at a time — switch anytime. Only one company&apos;s published listings can show on the public Website Catalog at a time, too — that&apos;s independent of which one is &quot;active,&quot; so switching companies to work on something else never changes what the public site shows.</p>
+      <div className="table-wrap">
+        <div className="tbl-toolbar">
+          <div className="tbl-toolbar-title">
+            <strong>Companies</strong>
+            <small>Separate books, stock and invoice numbering</small>
           </div>
-          <button className="btn btn-primary btn-sm" onClick={openAddCompany}>+ Add Company</button>
+          <div className="tbl-tools">
+            <button className="btn btn-primary btn-sm" onClick={openAddCompany}>
+              <Plus size={14} /> Add Company
+            </button>
+          </div>
         </div>
-        <div className="table-wrap">
+
+        <p className="text-muted" style={{ fontSize: '12px', lineHeight: 1.55, padding: '12px 16px', borderBottom: '1px solid var(--line)' }}>
+          Manage the businesses run through this ERP. Only one company can be active at a time — switch anytime. Only one company&apos;s published listings can show on the public Website Catalog at a time, too — that&apos;s independent of which one is &quot;active,&quot; so switching companies to work on something else never changes what the public site shows.
+        </p>
+
+        <div style={{ overflowX: 'auto' }}>
           <table className="erp-table">
-            <thead><tr><th>Company</th><th>GSTIN</th><th>Invoice Prefix</th><th>PO Prefix</th><th>Status</th><th>Public Website Catalog</th><th className="text-center">Actions</th></tr></thead>
+            <thead><tr><th>Company</th><th>GSTIN</th><th>Invoice Prefix</th><th>PO Prefix</th><th>Status</th><th>Public Website Catalog</th><th className="text-right">Actions</th></tr></thead>
             <tbody>
               {companies.map((c) => (
                 <tr key={c.id}>
-                  <td style={{ fontWeight: 600 }}>{c.name}</td>
-                  <td style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.gstin || 'Not provided'}</td>
-                  <td>{c.invoice_prefix}</td>
-                  <td>{c.po_prefix}</td>
-                  <td>{c.is_active ? <span className="badge badge-success">ACTIVE</span> : <span className="badge badge-muted">INACTIVE</span>}</td>
+                  <td>
+                    <div style={{ minWidth: 0 }}>
+                      <div className="font-semibold">{c.name}</div>
+                      {/* Only shown when the company actually has an address on file. */}
+                      {c.address && <div className="text-muted truncate" style={{ fontSize: '11.5px', maxWidth: '260px' }}>{c.address}</div>}
+                    </div>
+                  </td>
+                  <td>{c.gstin ? <span className="pn-chip">{c.gstin}</span> : <span className="text-muted">Not provided</span>}</td>
+                  <td>{c.invoice_prefix ? <span className="pn-chip">{c.invoice_prefix}</span> : <span className="text-muted">—</span>}</td>
+                  <td>{c.po_prefix ? <span className="pn-chip">{c.po_prefix}</span> : <span className="text-muted">—</span>}</td>
+                  <td>{c.is_active ? <span className="badge badge-success"><CheckCircle2 size={12} /> Active</span> : <span className="badge badge-muted">Inactive</span>}</td>
                   <td>
                     {c.is_storefront ? (
-                      <span className="badge badge-success">LIVE ON /catalog</span>
+                      <span className="badge badge-success"><Globe size={12} /> Live on /catalog</span>
                     ) : (
-                      <button className="btn btn-ghost btn-sm" onClick={() => handleSetStorefrontCompany(c.id)}>Make Public</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => handleSetStorefrontCompany(c.id)}><Globe size={14} /> Make Public</button>
                     )}
                   </td>
-                  <td className="text-center">
-                    <div className="flex justify-between gap-1 items-center">
+                  <td>
+                    <div className="flex items-center justify-end gap-2">
                       {!c.is_active && <button className="btn btn-secondary btn-sm" onClick={() => handleSetActiveCompany(c.id)}>Set Active</button>}
-                      <button className="btn btn-ghost btn-sm" onClick={() => openEditCompany(c)}>Edit</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => openEditCompany(c)}><Edit size={14} /> Edit</button>
                       <button
                         className="btn btn-ghost btn-sm"
                         style={{ color: 'var(--color-danger)' }}
@@ -185,19 +414,28 @@ export default function SettingsClient() {
                         title={c.is_active ? 'Set another company active before deleting this one' : companies.length <= 1 ? 'At least one company must remain' : undefined}
                         onClick={() => { setDeleteCompanyError(''); setDeleteCompanyCandidate(c); }}
                       >
-                        Delete
+                        <Trash2 size={14} /> Delete
                       </button>
                     </div>
                   </td>
                 </tr>
               ))}
+              {companies.length === 0 && (
+                <tr><td colSpan={7}><div className="empty-state"><p className="empty-state-title">{companiesLoading ? 'Loading companies…' : 'No companies yet'}</p><p className="empty-state-desc">{companiesLoading ? 'Fetching the businesses set up on this ERP.' : 'Add a company to start keeping its books.'}</p></div></td></tr>
+              )}
             </tbody>
           </table>
         </div>
+
+        {companies.length > 0 && (
+          <div className="pager">
+            <div className="pager-info">{companySentence}</div>
+          </div>
+        )}
       </div>
     )}
 
-    {activeTab === 'audit' && <div className="card empty-state"><p className="empty-state-title">Audit logging isn&apos;t wired up yet</p><p className="empty-state-desc">User actions aren&apos;t being recorded to a log at this time, so there&apos;s nothing real to show here.</p></div>}
+    {activeTab === 'audit' && <div className="card empty-state"><ScrollText size={24} color="var(--ink-4)" /><p className="empty-state-title">Audit logging isn&apos;t wired up yet</p><p className="empty-state-desc">User actions aren&apos;t being recorded to a log at this time, so there&apos;s nothing real to show here.</p></div>}
 
     {activeTab === 'backups' && <BackupsPanel />}
 
