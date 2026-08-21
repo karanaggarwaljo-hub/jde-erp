@@ -88,17 +88,38 @@ The app expects these tables in your Supabase project's `public` schema, all pre
 
 ### AI provider fallback
 
-Google's free Gemini tier regularly answers "this model is currently experiencing high demand" under
-load, which used to surface as a failed AI feature. Every AI call now goes through `lib/ai/generate.ts`,
-which tries each configured provider in order (default `gemini,groq`) and only reports an error once
-they have all failed.
+Google's free Gemini tier regularly runs out of quota or answers "this model is currently experiencing
+high demand" under load, which used to surface as a failed AI feature. Every AI call now goes through
+`lib/ai/generate.ts`, which races the configured providers and only reports an error once they have
+all failed.
 
-- A rate-limit, overload, timeout or unparseable answer moves to the next provider; a genuinely
-  transient failure is retried once on the same provider first.
+**Providers are started staggered, not one after the other.** The leading provider gets `AI_HEDGE_MS`
+(4s by default) to work alone; if it hasn't answered by then the next one starts *alongside* it and
+the first valid answer wins, with the loser cancelled. A provider that is merely slow therefore costs
+seconds, not its full timeout. Racing from the very start would double the API calls on the majority
+of requests that answer promptly, which these free tiers cannot spare — hence the delay.
+
+**Requests declare what they care about** via `priority`. Short interactive asks — expense category,
+part-detail suggestions, reminder drafts — pass `'speed'` and lead with the fastest provider
+(`AI_FAST_ORDER`, default `groq,gemini`), which answers in well under a second. Analysis and document
+work leave it at the default `'quality'` and lead with the better model (`AI_PROVIDER_ORDER`). Either
+way both providers remain available, so the choice affects latency, never capability.
+
+Beyond that:
+
+- A rate-limit, overload, timeout or unparseable answer promotes the next provider immediately,
+  without waiting out the hedge delay.
 - A provider that just failed is skipped for a short cooldown (10 min after a quota error) rather
   than being re-tried on every request — unless it is the only one left.
 - A malformed request stops the chain immediately, since it would fail identically everywhere.
 - Providers with no key configured are skipped silently, so Gemini-only setups behave as before.
+- A call abandoned because another provider won is not counted as a failure and never puts a
+  healthy provider into cooldown.
+
+Worth knowing about the Gemini side specifically: `gemini-flash-latest` is an alias that follows
+Google's newest flash model, and the newest model carries the *smallest* free-tier allowance — as
+little as 20 requests a day. Pinning `GEMINI_MODEL` to the previous generation gives far more free
+headroom; see `.env.example`.
 
 Not everything can fail over. Gemini remains the only provider here that reads PDFs, does Google
 Search grounding (Website Catalog → Reference Search) or generates images, so those three keep their

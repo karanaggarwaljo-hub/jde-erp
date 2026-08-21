@@ -2,6 +2,26 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-22 — AI answers no longer wait on whichever service is being slow
+
+The backup service already covered Google *failing*. This covers Google being *slow*, which was
+costing real time: a request could sit for the full 14 seconds waiting on Google before the backup
+was even asked.
+
+Now, if the leading service hasn't answered within a few seconds, the app starts the second one
+alongside it and takes whichever answers first. The slow one is cancelled. A sluggish service now
+costs a few seconds instead of the full wait.
+
+The quick, fiddly things — categorising an expense, suggesting part details, drafting a payment
+reminder — now ask the fastest service first and come back in well under a second. Business Insights,
+the Forecast, Reports summaries, invoice scanning and catalog descriptions still lead with the
+better-quality model, because there the answer matters more than the second saved. Both services stay
+available to every feature either way; this only changes who gets asked first.
+
+Also fixed the real reason the AI kept failing: the app was pointed at `gemini-flash-latest`, which
+automatically follows Google's newest model — and the newest model has the *smallest* free daily
+allowance, as low as 20 requests. Pinning a slightly older model gives far more free usage per day.
+
 ## 2026-08-20 — AI features now have a backup, instead of failing when Google is busy
 
 Google's free AI service refuses requests when it's under heavy load — the "high demand" error you've
