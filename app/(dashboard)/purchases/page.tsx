@@ -1,9 +1,10 @@
 'use client';
 
 import { ChangeEvent, FormEvent, useState } from 'react';
-import { Plus, FileCheck, Upload } from 'lucide-react';
+import { Plus, FileCheck, Upload, Undo2 } from 'lucide-react';
 import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
 import { savePurchase, receivePurchaseStock } from '@/lib/client-purchases';
+import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-purchase-returns';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
@@ -128,6 +129,13 @@ export default function PurchasesPage() {
   const [importError, setImportError] = useState('');
   const [importPreview, setImportPreview] = useState<{ fileName: string; lines: ImportedLine[]; supplier: string; supplierGstin: string; fileHash: string | null } | null>(null);
   const [confirmingImport, setConfirmingImport] = useState(false);
+  const [returningOrder, setReturningOrder] = useState<PurchaseOrder | null>(null);
+  const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const [returnNote, setReturnNote] = useState('');
+  const [returnError, setReturnError] = useState('');
+  const [savingReturn, setSavingReturn] = useState(false);
+  const [returnableQtyByPoItemId, setReturnableQtyByPoItemId] = useState<Record<string, number> | null>(null);
+  const [loadingReturnAvailability, setLoadingReturnAvailability] = useState(false);
 
   const total = lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
   const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
@@ -136,6 +144,12 @@ export default function PurchasesPage() {
   const importNewPartCount = importReviews.filter((review) => !review.matchedProduct).length;
   const importPriceChangeCount = importReviews.filter((review) => review.costDifferencePercent !== null && Math.abs(review.costDifferencePercent) >= 5).length;
   const importHasInvalidLine = importPreview?.lines.some((line) => !line.description.trim() || !Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.unit_price) || line.unit_price <= 0) ?? false;
+  const returnableItems = returningOrder ? poItems.filter((item) => item.po_id === returningOrder.id) : [];
+  const selectedReturnLines = returnableItems
+    .map((item) => ({ item, qty: Number(returnQuantities[item.id] ?? 0) }))
+    .filter(({ qty }) => Number.isFinite(qty) && qty > 0);
+  const returnTotal = selectedReturnLines.reduce((sum, { item, qty }) => sum + qty * Number(item.unit_cost), 0);
+  const hasInvalidReturnQuantity = selectedReturnLines.some(({ item, qty }) => qty > Number(returnableQtyByPoItemId?.[item.id] ?? 0));
 
   const openPurchaseModal = () => {
     setSupplierName('');
@@ -146,6 +160,68 @@ export default function PurchasesPage() {
     setImportError('');
     setPurchaseError('');
     setShowPurchaseModal(true);
+  };
+
+  const openReturnModal = async (order: PurchaseOrder) => {
+    const originalLines = poItems.filter((item) => item.po_id === order.id);
+    setReturningOrder(order);
+    setReturnQuantities(Object.fromEntries(originalLines.map((item) => [item.id, 0])));
+    setReturnNote('');
+    setReturnError(originalLines.length === 0 ? 'No item lines are available for this purchase, so it cannot be returned safely.' : '');
+    setReturnableQtyByPoItemId(null);
+    if (!activeCompany || originalLines.length === 0) return;
+    setLoadingReturnAvailability(true);
+    try {
+      const availability = await getReturnablePurchaseItems(activeCompany.id, order.id);
+      setReturnableQtyByPoItemId(Object.fromEntries(availability.map((line) => [line.po_item_id, Number(line.returnable_qty)])));
+    } catch (error) {
+      setReturnError(error instanceof Error ? error.message : 'Could not check return availability. Nothing can be returned until this is resolved.');
+    } finally {
+      setLoadingReturnAvailability(false);
+    }
+  };
+
+  const updateReturnQuantity = (poItemId: string, value: string) => {
+    const qty = value === '' ? 0 : Number(value);
+    setReturnQuantities((current) => ({ ...current, [poItemId]: qty }));
+  };
+
+  const submitPurchaseReturn = async () => {
+    if (!returningOrder || !activeCompany) return;
+    if (selectedReturnLines.length === 0) {
+      setReturnError('Choose a quantity to return for at least one item.');
+      return;
+    }
+    if (hasInvalidReturnQuantity) {
+      setReturnError('A return quantity cannot exceed the quantity still available from this purchase.');
+      return;
+    }
+    const supplier = suppliers.find((row) => row.name.trim().toLowerCase() === returningOrder.supplier.trim().toLowerCase());
+    if (!supplier) {
+      setReturnError(`Cannot find ${returningOrder.supplier} in the supplier directory. Add or correct the supplier before returning stock.`);
+      return;
+    }
+    if (!window.confirm(`Record this supplier return for ₹${returnTotal.toLocaleString()}? Inventory will decrease and the supplier payable will decrease in the same transaction.`)) return;
+
+    setReturnError('');
+    setSavingReturn(true);
+    try {
+      const result = await recordPurchaseReturn({
+        companyId: activeCompany.id,
+        poId: returningOrder.id,
+        supplierId: supplier.id,
+        lines: selectedReturnLines.map(({ item, qty }) => ({ poItemId: item.id, qty })),
+        note: returnNote,
+      });
+      await Promise.all([reloadPurchaseOrders(), reloadPoItems(), reloadGrns(), reloadSuppliers(), reloadProducts()]);
+      const returnNumber = typeof result.return_number === 'string' ? ` (${result.return_number})` : '';
+      setFeedback(`${returningOrder.id}: supplier return of ₹${returnTotal.toLocaleString()} recorded${returnNumber}. Stock and supplier balance were updated together.`);
+      setReturningOrder(null);
+    } catch (error) {
+      setReturnError(error instanceof Error ? error.message : 'Could not record this supplier return. Nothing was changed.');
+    } finally {
+      setSavingReturn(false);
+    }
   };
 
   const updateLine = (index: number, patch: Partial<POLine>) => {
@@ -447,7 +523,11 @@ export default function PurchasesPage() {
             <td className="text-right font-semibold">₹{Number(po.total).toLocaleString()}</td><td className="text-right text-success">₹{Number(po.paid).toLocaleString()}</td><td className="text-right text-danger">₹{balance.toLocaleString()}</td>
             <td><span className={`badge ${paymentBadge}`}>{paymentLabel}</span></td>
             <td><span className={`badge ${po.status === 'received' ? 'badge-success' : 'badge-warning'}`}>{po.status.toUpperCase()}</span></td>
-            <td className="text-center">{po.status !== 'received' && <button className="btn btn-secondary btn-sm" onClick={() => markReceived(po.id)}>Mark Received</button>}</td>
+            <td className="text-center">
+              {po.status !== 'received'
+                ? <button className="btn btn-secondary btn-sm" onClick={() => markReceived(po.id)}>Mark Received</button>
+                : <button className="btn btn-secondary btn-sm" onClick={() => openReturnModal(po)} title="Return some or all received items to this supplier"><Undo2 size={14} /> Return Items</button>}
+            </td>
           </tr>;
         })}
         {purchaseOrders.length === 0 && (
@@ -457,6 +537,42 @@ export default function PurchasesPage() {
       </table></div>}
 
       {activeTab === 'invoices' && <div className="card empty-state"><FileCheck size={32} /><p className="empty-state-title">Supplier invoice matching isn&apos;t available yet</p><p className="empty-state-desc">This will let you upload supplier invoices and match them against purchases — not built yet.</p></div>}
+
+      {returningOrder && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '820px' }} role="dialog" aria-modal="true" aria-labelledby="purchase-return-title">
+        <div className="modal-header"><h3 id="purchase-return-title" className="modal-title">Return items to {returningOrder.supplier}</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingReturn} onClick={() => setReturningOrder(null)}>✕</button></div>
+        <div className="modal-body flex flex-col gap-4">
+          {returnError && <div className="alert alert-danger" role="alert">{returnError}</div>}
+          <div className="card card-sm bg-surface" style={{ padding: '12px' }}>
+            <p style={{ fontSize: '13px', margin: 0 }}><strong>{returningOrder.id}</strong> · received {returningOrder.date} · original total ₹{Number(returningOrder.total).toLocaleString()}</p>
+            <p className="text-muted" style={{ fontSize: '12px', margin: '6px 0 0' }}>{loadingReturnAvailability ? 'Checking what is still available from this purchase…' : 'Only enter items actually sent back. Saving reduces stock and the supplier payable together. If this purchase was already paid, the lower payable becomes supplier credit.'}</p>
+          </div>
+          <div className="table-wrap">
+            <table className="erp-table">
+              <thead><tr><th>Item</th><th>Part #</th><th className="text-right">Purchased</th><th className="text-right">Available</th><th className="text-right">Unit cost</th><th style={{ minWidth: '150px' }} className="text-right">Return now</th></tr></thead>
+              <tbody>{returnableItems.map((item) => {
+                const selected = Number(returnQuantities[item.id] ?? 0);
+                const availableQty = Number(returnableQtyByPoItemId?.[item.id] ?? 0);
+                const invalid = selected > availableQty || selected < 0 || !Number.isFinite(selected);
+                return <tr key={item.id} style={invalid ? { background: 'var(--color-danger-bg)' } : undefined}>
+                  <td style={{ fontWeight: 600 }}>{item.name}</td><td className="text-muted">{item.part_number || '—'}</td><td className="text-right">{Number(item.qty)}</td><td className="text-right">{returnableQtyByPoItemId === null ? '—' : availableQty}</td><td className="text-right">₹{Number(item.unit_cost).toLocaleString()}</td>
+                  <td><input type="number" min="0" max={availableQty} step="0.01" className="form-input text-right" aria-label={`Return quantity for ${item.name}`} value={returnQuantities[item.id] ?? 0} disabled={savingReturn || returnableQtyByPoItemId === null} onChange={(event) => updateReturnQuantity(item.id, event.target.value)} /></td>
+                </tr>;
+              })}
+              {returnableItems.length === 0 && <tr><td colSpan={6}><div className="empty-state"><p className="empty-state-title">No returnable item lines found</p><p className="empty-state-desc">This older purchase has no linked PO lines, so it cannot be safely returned.</p></div></td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Reason / supplier reference <span className="text-muted">(optional)</span></label>
+            <textarea className="form-input" rows={3} maxLength={1000} placeholder="Example: damaged seal kit, supplier RMA 123" value={returnNote} disabled={savingReturn} onChange={(event) => setReturnNote(event.target.value)} />
+          </div>
+          <div className="flex justify-between items-center invoice-summary">
+            <span className="text-muted">{selectedReturnLines.length} selected line{selectedReturnLines.length === 1 ? '' : 's'}</span>
+            <div><strong>Supplier return total: </strong><span className="invoice-total">₹{returnTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
+          </div>
+        </div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingReturn} onClick={() => setReturningOrder(null)}>Cancel</button><button type="button" className="btn btn-primary" disabled={savingReturn || loadingReturnAvailability || returnableQtyByPoItemId === null || selectedReturnLines.length === 0 || hasInvalidReturnQuantity || returnableItems.length === 0} onClick={submitPurchaseReturn}>{savingReturn ? 'Recording…' : loadingReturnAvailability ? 'Checking stock…' : 'Review & Record Return'}</button></div>
+      </div></div>}
 
       {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
         <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Record Purchase from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={confirmingImport} onClick={() => setImportPreview(null)}>✕</button></div>
