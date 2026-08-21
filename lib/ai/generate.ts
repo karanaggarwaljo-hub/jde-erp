@@ -9,7 +9,17 @@ const REGISTRY: Record<string, AiProvider> = {
   groq: groqProvider,
 };
 
+/** Adds a provider under an extra name. Exists for scripts/ai-fallback-check.ts, which needs a
+ *  deliberately stalling service to prove the hedge fires — the app itself only ever uses the
+ *  built-in registry above. */
+export function registerProvider(name: string, provider: AiProvider): void {
+  REGISTRY[name.toLowerCase()] = provider;
+}
+
+// Analysis and document reading lead with the better model; short interactive asks lead with
+// the fastest one. Both fall back to the other, so neither order costs a feature.
 const DEFAULT_ORDER = 'gemini,groq';
+const DEFAULT_FAST_ORDER = 'groq,gemini';
 
 /** Keep the primary provider on a short leash so a slow provider does not make the user wait
  * before the already-configured fallback gets a chance. Attachments genuinely take longer to
@@ -20,8 +30,29 @@ const timeoutMs = (request: AiJsonRequest): number => {
   return request.attachments?.length ? 30_000 : 14_000;
 };
 
-function orderedProviders(): AiProvider[] {
-  return (process.env.AI_PROVIDER_ORDER || DEFAULT_ORDER)
+/** How long to let the leading provider work alone before starting the next one *alongside* it
+ *  rather than after it. Whoever finishes first wins and the loser is cancelled.
+ *
+ *  This is the difference between a provider being slow and a request being slow: without it, a
+ *  Gemini call that stalls costs its full timeout before Groq is even asked. The delay is not
+ *  zero because racing every request from the start would double the API calls — and the free
+ *  tiers here are small — for no gain on the majority that answer promptly.
+ *
+ *  Set AI_HEDGE_MS / AI_FAST_HEDGE_MS to 0 to disable and fall back to plain sequential retry. */
+const hedgeMs = (request: AiJsonRequest): number => {
+  const fast = request.priority === 'speed';
+  const configured = Number(process.env[fast ? 'AI_FAST_HEDGE_MS' : 'AI_HEDGE_MS']);
+  const base = Number.isFinite(configured) && configured >= 0 ? configured : fast ? 2_000 : 4_000;
+  return request.attachments?.length ? base * 2 : base;
+};
+
+function orderedProviders(request: AiJsonRequest): AiProvider[] {
+  const configured =
+    request.priority === 'speed'
+      ? process.env.AI_FAST_ORDER || DEFAULT_FAST_ORDER
+      : process.env.AI_PROVIDER_ORDER || DEFAULT_ORDER;
+
+  return configured
     .split(',')
     .map((name) => name.trim().toLowerCase())
     .filter(Boolean)
@@ -39,13 +70,131 @@ function friendlyMessage(kinds: AiFailureKind[]): string {
   return 'The AI service could not be reached right now — please try again in a few minutes.';
 }
 
-/** Ask for one schema-shaped JSON answer, trying each configured provider in turn.
+type Winner<T> = { data: T; provider: string; model: string };
+type Attempt = { provider: string; kind: AiFailureKind; message: string };
+
+/** One in-flight call, with the means to abandon it the moment someone else wins. */
+function launchAttempt<T>(provider: AiProvider, request: AiJsonRequest) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error(`${provider.name} timed out`)), timeoutMs(request));
+  let cancelled = false;
+
+  const promise = (async (): Promise<Winner<T>> => {
+    const result = await provider.generateJson(request, controller.signal);
+
+    let data: unknown;
+    try {
+      data = JSON.parse(result.text);
+    } catch {
+      throw new AiProviderError('Response was not valid JSON.', 'empty', provider.name);
+    }
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      throw new AiProviderError('Response was not a JSON object.', 'empty', provider.name);
+    }
+
+    return { data: data as T, provider: provider.name, model: result.model };
+  })().finally(() => clearTimeout(timer));
+
+  return {
+    promise,
+    cancel(): void {
+      cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
+    },
+    get cancelled(): boolean {
+      return cancelled;
+    },
+  };
+}
+
+/** Starts providers in order, staggered by the hedge delay, and resolves with the first valid
+ *  answer. A provider that fails immediately promotes the next one rather than making it wait
+ *  out the stagger, so a fast failure still costs nothing. */
+function raceProviders<T>(
+  providers: AiProvider[],
+  request: AiJsonRequest,
+  hedge: number,
+  attempts: Attempt[]
+): Promise<Winner<T>> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let failures = 0;
+    const launched = new Array<boolean>(providers.length).fill(false);
+    const handles: ReturnType<typeof launchAttempt<T>>[] = [];
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    const finish = (action: () => void): void => {
+      settled = true;
+      timers.forEach(clearTimeout);
+      handles.forEach((handle) => handle.cancel());
+      action();
+    };
+
+    const launch = (index: number): void => {
+      if (settled || index >= providers.length || launched[index]) return;
+      launched[index] = true;
+
+      const provider = providers[index];
+      const handle = launchAttempt<T>(provider, request);
+      handles.push(handle);
+
+      if (hedge > 0 && index + 1 < providers.length) {
+        timers.push(
+          setTimeout(() => {
+            if (settled) return;
+            console.warn(`[ai] ${provider.name} still working after ${hedge}ms — starting ${providers[index + 1].name} alongside it`);
+            launch(index + 1);
+          }, hedge)
+        );
+      }
+
+      handle.promise.then(
+        (winner) => {
+          if (settled) return;
+          markHealthy(winner.provider);
+          finish(() => resolve(winner));
+        },
+        (error: unknown) => {
+          // A call we abandoned because someone else already won is not a failure worth
+          // recording, and must not put a healthy provider into cooldown.
+          if (handle.cancelled) return;
+
+          const kind = classifyError(error);
+          attempts.push({ provider: provider.name, kind, message: error instanceof Error ? error.message : String(error) });
+          markUnavailable(provider.name, cooldownMs(kind));
+          console.error(`[ai] ${provider.name} failed (${kind}): ${error instanceof Error ? error.message : String(error)}`);
+
+          if (settled) return;
+
+          // A request we built wrong fails identically everywhere — surface it as-is instead of
+          // spending the other providers proving the same thing.
+          if (!shouldTryNextProvider(kind)) {
+            finish(() => reject(error));
+            return;
+          }
+
+          failures += 1;
+          launch(index + 1);
+          if (failures === providers.length) {
+            finish(() => reject(new AiUnavailableError(friendlyMessage(attempts.map((a) => a.kind)), attempts)));
+          }
+        }
+      );
+    };
+
+    launch(0);
+  });
+}
+
+/** Ask for one schema-shaped JSON answer, racing the configured providers so that no single
+ *  slow or failing service can hold up the request.
  *
  *  Routes call only this. Which provider answered, what failed on the way, and how a quota
  *  error differs from a bad request all stay in here — a route just gets its data or one
  *  plain-language error. */
 export async function generateJson<T>(request: AiJsonRequest): Promise<{ data: T; provider: string; model: string }> {
-  const eligible = orderedProviders().filter((provider) => provider.configured() && provider.supports(request));
+  const eligible = orderedProviders(request).filter((provider) => provider.configured() && provider.supports(request));
 
   if (eligible.length === 0) {
     throw new AiUnavailableError(
@@ -59,40 +208,19 @@ export async function generateJson<T>(request: AiJsonRequest): Promise<{ data: T
   const healthy = eligible.filter((provider) => isAvailable(provider.name));
   const candidates = healthy.length ? healthy : eligible;
 
-  const attempts: { provider: string; kind: AiFailureKind; message: string }[] = [];
+  const attempts: Attempt[] = [];
 
-  for (const provider of candidates) {
-    try {
-      const result = await provider.generateJson(request, AbortSignal.timeout(timeoutMs(request)));
-
-      let data: unknown;
-      try {
-        data = JSON.parse(result.text);
-      } catch {
-        throw new AiProviderError('Response was not valid JSON.', 'empty', provider.name);
-      }
-      if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-        throw new AiProviderError('Response was not a JSON object.', 'empty', provider.name);
-      }
-
-      markHealthy(provider.name);
-      if (attempts.length) {
-        console.warn(`[ai] ${provider.name} answered after ${attempts.map((a) => `${a.provider}:${a.kind}`).join(', ')}`);
-      }
-      return { data: data as T, provider: provider.name, model: result.model };
-    } catch (error) {
-      const kind = classifyError(error);
-      const message = error instanceof Error ? error.message : String(error);
-      attempts.push({ provider: provider.name, kind, message });
-      console.error(`[ai] ${provider.name} failed (${kind}): ${message}`);
-      markUnavailable(provider.name, cooldownMs(kind));
+  try {
+    const winner = await raceProviders<T>(candidates, request, hedgeMs(request), attempts);
+    if (attempts.length) {
+      console.warn(`[ai] ${winner.provider} answered after ${attempts.map((a) => `${a.provider}:${a.kind}`).join(', ')}`);
     }
-
-    // A request we built wrong fails identically everywhere — surface it instead of masking it.
-    if (attempts.length && !shouldTryNextProvider(attempts[attempts.length - 1].kind)) break;
+    return winner;
+  } catch (error) {
+    if (error instanceof AiUnavailableError) throw error;
+    if (error instanceof AiProviderError && !shouldTryNextProvider(error.kind)) throw error;
+    throw new AiUnavailableError(friendlyMessage(attempts.map((a) => a.kind)), attempts);
   }
-
-  throw new AiUnavailableError(friendlyMessage(attempts.map((a) => a.kind)), attempts);
 }
 
 /** Turns any failure from generateJson into the JSON error shape every AI route already returns,

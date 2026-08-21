@@ -3,17 +3,32 @@
  *
  *   npx tsx scripts/ai-fallback-check.ts
  *
- * Three checks, in order:
+ * Checks, in order:
  *   1. each configured provider answers correctly on its own
- *   2. a deliberately broken primary key falls through to the next provider
- *   3. every provider broken produces one plain-language error, not a crash
+ *   2. the quality and speed paths each answer, and report which provider won
+ *   3. a primary that hangs is overtaken by the hedge rather than holding the request
+ *   4. a deliberately broken primary key falls through to the next provider
+ *   5. every provider broken produces one plain-language error, not a crash
  *
  * It spends a few real API calls (a couple of sentences each), so it is a manual check to run
  * after touching lib/ai — not something wired into a build.
  */
 import { readFileSync } from 'node:fs';
-import { generateJson } from '../lib/ai/generate';
+import { generateJson, registerProvider } from '../lib/ai/generate';
 import { AiUnavailableError } from '../lib/ai/errors';
+import type { AiJsonRequest } from '../lib/ai/types';
+
+/** A provider that accepts the request and then never answers, so the hedge has something
+ *  unambiguous to beat. Only ever registered here, never in the app. */
+registerProvider('stall', {
+  name: 'stall',
+  configured: () => true,
+  supports: () => true,
+  generateJson: (_request, signal) =>
+    new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => reject(new Error('stall provider aborted')));
+    }),
+});
 
 // Loaded by hand: this runs as a plain Node script, outside Next's env handling.
 function loadEnvLocal(): void {
@@ -42,7 +57,7 @@ const SCHEMA = {
   required: ['category', 'reason', 'tags'],
 };
 
-const REQUEST = {
+const REQUEST: AiJsonRequest = {
   system: 'You categorize expenses for an auto parts business.',
   prompt: 'Expense description: "paid courier charges for sending parts to Ludhiana"',
   schema: SCHEMA,
@@ -51,12 +66,17 @@ const REQUEST = {
 
 type Answer = { category: string; reason: string; tags: string[] };
 
-async function check(label: string, env: Record<string, string>, expect: 'ok' | 'fail'): Promise<boolean> {
+async function check(
+  label: string,
+  env: Record<string, string>,
+  expect: 'ok' | 'fail',
+  overrides: Partial<typeof REQUEST> = {}
+): Promise<boolean> {
   const saved = { ...process.env };
   Object.assign(process.env, env);
   const started = Date.now();
   try {
-    const { data, provider, model } = await generateJson<Answer>(REQUEST);
+    const { data, provider, model } = await generateJson<Answer>({ ...REQUEST, ...overrides });
     const ms = Date.now() - started;
     if (expect === 'fail') {
       console.log(`FAIL  ${label} — expected an error, got an answer from ${provider}`);
@@ -94,12 +114,21 @@ async function main(): Promise<void> {
   if (hasGroq) results.push(await check('groq alone', { AI_PROVIDER_ORDER: 'groq' }, 'ok'));
 
   if (hasGemini && hasGroq) {
+    // Run before the broken-key check below: that one leaves gemini marked unavailable for an
+    // hour, which would make these lines report groq for a reason the real app never hits.
+    // Which provider answers depends on whether Google is healthy — either is a pass.
+    results.push(await check('quality priority, real keys', {}, 'ok'));
+    results.push(await check('speed priority, real keys', {}, 'ok', { priority: 'speed' }));
+
+    // A primary that hangs must not hold the request for its full timeout: the hedge should
+    // start the second provider alongside it and return that answer instead.
+    results.push(
+      await check('hedge (primary stalls)', { AI_PROVIDER_ORDER: 'stall,groq', AI_HEDGE_MS: '500' }, 'ok')
+    );
+
     results.push(
       await check('failover (gemini key broken)', { AI_PROVIDER_ORDER: 'gemini,groq', GEMINI_API_KEY: 'broken-on-purpose' }, 'ok')
     );
-    // The path the app actually takes, with both real keys. Which provider answers depends on
-    // whether Google is healthy at this moment — either result is a pass.
-    results.push(await check('default order, real keys', { AI_PROVIDER_ORDER: 'gemini,groq' }, 'ok'));
   }
 
   results.push(

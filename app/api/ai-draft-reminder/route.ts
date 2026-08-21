@@ -39,6 +39,8 @@ export async function POST(request: Request) {
       prompt: `${situation}${context ? `\nAdditional context: ${context}` : ''}`,
       schema: REMINDER_JSON_SCHEMA,
       schemaName: 'payment_reminder',
+      // Someone is waiting on a field to fill in — lead with the fastest provider.
+      priority: 'speed',
     });
 
     return Response.json(data);

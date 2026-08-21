@@ -30,6 +30,8 @@ export async function POST(request: Request) {
       prompt: `Expense description: "${description}"`,
       schema: CATEGORY_JSON_SCHEMA,
       schemaName: 'expense_category',
+      // Someone is waiting on a field to fill in — lead with the fastest provider.
+      priority: 'speed',
     });
     return Response.json(data);
   } catch (error) {
