@@ -7,9 +7,13 @@ import {
   ShoppingCart,
   ShoppingBag,
   PackageCheck,
+  PackageX,
   AlertTriangle,
   Users,
   Clock,
+  Wallet,
+  Plus,
+  IndianRupee,
   ArrowUpRight,
   ArrowDownRight,
   ArrowRight,
@@ -50,7 +54,7 @@ function pctChange(current: number, previous: number): { label: string; positive
 }
 
 export default function DashboardPage() {
-  const { configError } = useCompany();
+  const { configError, activeCompany } = useCompany();
   const { rows: products } = useCompanyTable<Product>('products');
   const { rows: customers } = useCompanyTable<Customer>('customers');
   const { rows: suppliers } = useCompanyTable<Supplier>('suppliers');
@@ -63,6 +67,12 @@ export default function DashboardPage() {
 
   const today = isoDate(new Date());
   const yesterday = isoDate(daysAgoDate(1));
+
+  // Header subline: the calendar date plus whichever company is active. The mockup names a
+  // physical location — the closest real field is the company's own address, so that is what
+  // is shown; nothing is printed when the company hasn't loaded yet.
+  const headerDate = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const headerSubline = [headerDate, activeCompany?.name, activeCompany?.address].filter(Boolean).join(' · ');
 
   const todaySales = sumInRange(invoices, today, today);
   const yesterdaySales = sumInRange(invoices, yesterday, yesterday);
@@ -96,6 +106,82 @@ export default function DashboardPage() {
     { title: 'Total Payables', value: `₹${totalPayables.toLocaleString()}`, change: `${payableSupplierCount} outstanding`, context: 'to suppliers', positive: payableSupplierCount === 0, icon: Clock, color: 'var(--chart-teal)', colorBg: 'rgba(14,116,144,0.1)' },
     { title: 'Low Stock Items', value: `${lowStockProducts.length} parts`, change: lowStockProducts.length > 0 ? 'Action required' : 'All stocked', context: `${lowStockProducts.length} at or below minimum`, positive: lowStockProducts.length === 0, icon: AlertTriangle, color: 'var(--chart-red)', colorBg: 'var(--rose-tint)' },
   ];
+
+  // ── "Needs attention" ────────────────────────────────────────────────────────────────────
+  // Every item below is counted off rows this page has already loaded. Nothing here is
+  // estimated: there is no payment-terms or due-date column anywhere in this system, so an
+  // unpaid bill is described by how long it has been unpaid rather than as "past due", and the
+  // mockup's GST filing reminder is left out entirely because no filing dates are stored.
+  const unpaidAgeCutoff = isoDate(daysAgoDate(30));
+  const agedUnpaidInvoices = invoices
+    .filter((inv) => Number(inv.total || 0) - Number(inv.paid || 0) > 0 && inv.date < unpaidAgeCutoff)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const agedUnpaidAmount = agedUnpaidInvoices.reduce((t, inv) => t + (Number(inv.total || 0) - Number(inv.paid || 0)), 0);
+  const agedUnpaidCustomers = Array.from(new Set(agedUnpaidInvoices.map((inv) => inv.customer).filter(Boolean)));
+  const outOfStockProducts = products.filter((p) => Number(p.current_stock || 0) <= 0);
+  // Parts that still have stock but have fallen to or under their own reorder level. Split out
+  // from the empty ones so a single part is never counted in two attention cards at once.
+  const reorderProducts = lowStockProducts.filter((p) => Number(p.current_stock || 0) > 0);
+  const largestPayable = suppliers
+    .filter((s) => Number(s.balance || 0) > 0)
+    .sort((a, b) => Number(b.balance || 0) - Number(a.balance || 0))[0];
+
+  const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
+  const nameList = (names: string[], shown = 2) =>
+    names.length <= shown ? names.join(', ') : `${names.slice(0, shown).join(', ')} and ${names.length - shown} more`;
+
+  const attentionItems = [
+    agedUnpaidInvoices.length > 0
+      ? {
+          key: 'unpaid-invoices',
+          tone: 'danger',
+          severity: 'Urgent',
+          icon: Clock,
+          title: `${plural(agedUnpaidInvoices.length, 'invoice')} unpaid for more than 30 days`,
+          detail: `₹${agedUnpaidAmount.toLocaleString()} still to collect from ${nameList(agedUnpaidCustomers)} · oldest is #${agedUnpaidInvoices[0].id} dated ${agedUnpaidInvoices[0].date}`,
+          href: '/customers',
+          action: 'Follow up',
+        }
+      : null,
+    outOfStockProducts.length > 0
+      ? {
+          key: 'out-of-stock',
+          tone: 'danger',
+          severity: 'Urgent',
+          icon: PackageX,
+          title: `${plural(outOfStockProducts.length, 'part')} out of stock`,
+          detail: `Nothing on the shelf for ${nameList(outOfStockProducts.map((p) => `${p.name} (${p.part_number})`))}`,
+          href: '/purchases',
+          action: 'Reorder',
+        }
+      : null,
+    reorderProducts.length > 0
+      ? {
+          key: 'below-reorder',
+          tone: 'warning',
+          severity: 'Warning',
+          icon: AlertTriangle,
+          title: `${plural(reorderProducts.length, 'part')} at or below reorder level`,
+          detail: nameList(reorderProducts.map((p) => `${p.name} — ${p.current_stock} left of min ${p.min_stock}`)),
+          href: '/inventory',
+          action: 'Review',
+        }
+      : null,
+    totalPayables > 0 && payableSupplierCount > 0
+      ? {
+          key: 'payables',
+          tone: 'info',
+          severity: 'Outstanding',
+          icon: Wallet,
+          title: `₹${totalPayables.toLocaleString()} owed to ${plural(payableSupplierCount, 'supplier')}`,
+          detail: largestPayable
+            ? `Largest balance is ${largestPayable.name} at ₹${Number(largestPayable.balance || 0).toLocaleString()}`
+            : 'Supplier balances carried forward on the purchases ledger',
+          href: '/suppliers',
+          action: 'Ledger',
+        }
+      : null,
+  ].filter((item): item is NonNullable<typeof item> => item !== null);
 
   const recentActivities = useMemo(() => {
     const events: Array<{ date: string; title: string; desc: string; type: string }> = [];
@@ -139,8 +225,13 @@ export default function DashboardPage() {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Executive Dashboard</h1>
-          <p className="page-subtitle">Real-time performance metrics for the active company</p>
+          <span className="eyebrow">Today at a glance</span>
+          <h1 className="page-title">Dashboard</h1>
+          <p className="page-subtitle">{headerSubline}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link href="/customers" className="btn btn-secondary"><IndianRupee size={16} /> Record Payment</Link>
+          <Link href="/sales" className="btn btn-primary"><Plus size={16} /> New Invoice</Link>
         </div>
       </div>
 
@@ -171,6 +262,46 @@ export default function DashboardPage() {
           );
         })}
       </div>
+
+      {attentionItems.length > 0 ? (
+        <section className="attention-section" aria-label="Needs attention">
+          <div className="attention-heading">
+            <div>
+              <span className="eyebrow">Needs attention</span>
+              <h2>{plural(attentionItems.length, 'open item')} to clear</h2>
+            </div>
+            <Link href="/reports" className="btn btn-secondary btn-sm">Open reports <ArrowRight size={14} /></Link>
+          </div>
+          <div className="attention-grid">
+            {attentionItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <div key={item.key} className={`attention-item ${item.tone}`}>
+                  <div>
+                    <div className={`badge badge-${item.tone}`}><Icon size={12} />{item.severity}</div>
+                    <p className="mt-1">{item.title}</p>
+                    <span>{item.detail}</span>
+                  </div>
+                  <Link href={item.href} className="btn btn-secondary btn-sm">{item.action} <ArrowRight size={14} /></Link>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : (
+        <div className="card mb-6">
+          <div className="card-header">
+            <div>
+              <h3 className="card-title">Needs attention</h3>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Unpaid bills, empty shelves, reorder levels and supplier balances</p>
+            </div>
+          </div>
+          <div className="empty-state">
+            <p className="empty-state-title">Nothing needs attention right now</p>
+            <p className="empty-state-desc">No invoice has gone unpaid for more than 30 days, every part has stock on the shelf, and no supplier balance is outstanding.</p>
+          </div>
+        </div>
+      )}
 
       <div className="dashboard-split mb-6">
         <div className="card">

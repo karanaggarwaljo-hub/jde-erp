@@ -1,7 +1,25 @@
 'use client';
 
+import Link from 'next/link';
 import { ChangeEvent, useState } from 'react';
-import { Plus, Search, Filter, Edit, Trash2, AlertTriangle, Upload, Sparkles } from 'lucide-react';
+import {
+  Plus,
+  Search,
+  Filter,
+  Edit,
+  Trash2,
+  AlertTriangle,
+  Upload,
+  Sparkles,
+  Boxes,
+  LayoutGrid,
+  Percent,
+  CheckCircle2,
+  XCircle,
+  ChevronLeft,
+  ChevronRight,
+  ArrowRight,
+} from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { useCompany } from '@/components/CompanyProvider';
 import { parseInventoryFile } from '@/lib/client-import';
@@ -30,6 +48,64 @@ type StockLayer = { id: string; product_id: string; unit_cost: number; qty_remai
 
 const DEFAULT_CATEGORIES = ['Engine', 'Brakes', 'Filters', 'Clutch', 'Suspension', 'Electrical'];
 
+type StockFilter = 'all' | 'in' | 'low' | 'out';
+
+// How many rows are painted at once. Every part is already in memory — this changes nothing
+// about what is loaded, only how much of it is rendered, so paging costs no extra request.
+const PAGE_SIZE = 25;
+
+// Categorical brand hues. Green / amber / rose are deliberately absent: on this screen those
+// three mean in stock / low / out, and a brand dot must never borrow that meaning.
+const BRAND_CHIP_COLORS = [
+  'var(--chart-blue)',
+  'var(--chart-teal)',
+  'var(--chart-violet)',
+  'var(--chart-orange)',
+  'var(--chart-pink)',
+];
+
+// Same brand always gets the same dot, without storing anything — it is a reading aid, not data.
+const brandChipColor = (brand: string) => {
+  let hash = 0;
+  for (let i = 0; i < brand.length; i += 1) hash = (hash * 31 + brand.charCodeAt(i)) % 100003;
+  return BRAND_CHIP_COLORS[hash % BRAND_CHIP_COLORS.length];
+};
+
+const money = (value: number) => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const wholeMoney = (value: number) => Math.round(Number(value || 0)).toLocaleString('en-IN');
+
+// One definition of "low" and "out" for the whole screen, so the KPI cards, the reorder alert,
+// the filter tabs and the row badges can never disagree with each other.
+const isOutOfStock = (p: Product) => Number(p.current_stock) <= 0;
+const isLowStock = (p: Product) => Number(p.min_stock) > 0 && Number(p.current_stock) <= Number(p.min_stock);
+const isHealthyStock = (p: Product) => !isOutOfStock(p) && !isLowStock(p);
+
+// The stock bar is scaled against this part's OWN reorder level — half full is exactly at the
+// reorder line — because 42 of a fast mover and 3 of a slow one are not comparable on a shared
+// scale. A part with no reorder level set has no meaningful scale, so it gets no bar at all.
+const meterPercent = (p: Product) => {
+  const reorder = Number(p.min_stock);
+  if (!(reorder > 0)) return null;
+  return Math.max(0, Math.min(100, Math.round((Number(p.current_stock) / (reorder * 2)) * 100)));
+};
+
+// Which page buttons to show: short lists show every page, long ones collapse to 1 … n-1 n n+1 … last.
+function pageWindow(current: number, total: number): Array<number | 'gap'> {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const wanted = [1, total, current - 1, current, current + 1]
+    .filter((n) => n >= 1 && n <= total)
+    .sort((a, b) => a - b);
+  const shown: Array<number | 'gap'> = [];
+  let previous = 0;
+  for (const n of wanted) {
+    if (n === previous) continue;
+    if (previous && n - previous > 1) shown.push('gap');
+    shown.push(n);
+    previous = n;
+  }
+  return shown;
+}
+
 export default function InventoryPage() {
   const { configError } = useCompany();
   const { rows: products, loading, create, update, remove, reload, activeCompany } = useCompanyTable<Product>('products');
@@ -49,6 +125,8 @@ export default function InventoryPage() {
   const fifoCostFor = (product: Product) => Number(oldestOpenLayerByProduct.get(product.id)?.unit_cost ?? product.cost_price);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [stockFilter, setStockFilter] = useState<StockFilter>('all');
+  const [page, setPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Product | null>(null);
@@ -93,6 +171,36 @@ export default function InventoryPage() {
     const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
     return matchesSearch && matchesCategory;
   });
+
+  // Tab counts are taken from the search/category result rather than the whole catalogue, so the
+  // number on a tab is always exactly how many rows clicking it will show.
+  const stockTabs: Array<{ key: StockFilter; label: string; title: string; rows: Product[] }> = [
+    { key: 'all', label: 'All', title: 'All parts', rows: filteredProducts },
+    { key: 'in', label: 'In Stock', title: 'Parts in stock', rows: filteredProducts.filter(isHealthyStock) },
+    { key: 'low', label: 'Low', title: 'Parts at or below reorder level', rows: filteredProducts.filter(isLowStock) },
+    { key: 'out', label: 'Out of Stock', title: 'Parts out of stock', rows: filteredProducts.filter(isOutOfStock) },
+  ];
+  const activeStockTab = stockTabs.find((tab) => tab.key === stockFilter) ?? stockTabs[0];
+  const visibleProducts = activeStockTab.rows;
+
+  // Paging is clamped rather than reset by an effect: deleting the last part on page 4 simply
+  // lands the view on the new last page instead of showing an empty table.
+  const totalPages = Math.max(1, Math.ceil(visibleProducts.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pagedProducts = visibleProducts.slice(pageStart, pageStart + PAGE_SIZE);
+
+  // Headline figures, every one of them summed from the parts this page has already loaded.
+  const lowStockCount = products.filter(isLowStock).length;
+  const outOfStockCount = products.filter(isOutOfStock).length;
+  const stockValue = products.reduce((total, p) => total + Number(p.current_stock || 0) * fifoCostFor(p), 0);
+  const brandCount = new Set(products.map((p) => p.brand).filter(Boolean)).size;
+  // Only parts that carry both a cost and a sale price can have a margin — averaging in the ones
+  // priced at zero cost would report a 100% margin that nobody actually earns.
+  const marginParts = products.filter((p) => Number(p.sale_price) > 0 && fifoCostFor(p) > 0);
+  const averageMargin = marginParts.length > 0
+    ? marginParts.reduce((total, p) => total + ((Number(p.sale_price) - fifoCostFor(p)) / Number(p.sale_price)) * 100, 0) / marginParts.length
+    : null;
 
   const suggestPartDetails = async () => {
     if (!formData.name.trim()) return;
@@ -263,13 +371,29 @@ export default function InventoryPage() {
     }
   };
 
+  // Both halves of this sentence count real rows, and the alert itself is skipped when both are
+  // zero — nothing on this screen ever announces a shortage that isn't there.
+  const reorderSentence = `${[
+    lowStockCount > 0 ? `${lowStockCount} ${lowStockCount === 1 ? 'part is' : 'parts are'} at or below reorder level` : '',
+    outOfStockCount > 0
+      ? (lowStockCount > 0
+        ? `${outOfStockCount} ${outOfStockCount === 1 ? 'is' : 'are'} fully out of stock`
+        : `${outOfStockCount} ${outOfStockCount === 1 ? 'part is' : 'parts are'} fully out of stock`)
+      : '',
+  ].filter(Boolean).join(', and ')}.`;
+
+  const catalogueSummary = products.length > 0
+    ? ` · ${products.length} ${products.length === 1 ? 'part' : 'parts'}${brandCount > 0 ? ` across ${brandCount} ${brandCount === 1 ? 'brand' : 'brands'}` : ''}`
+    : '';
+
   return (
     <div>
       {/* Header */}
       <div className="page-header">
         <div>
+          <div className="eyebrow">Stock control</div>
           <h1 className="page-title">Spare Parts Inventory</h1>
-          <p className="page-subtitle">Track stock levels, OEM cross-references, locations & pricing</p>
+          <p className="page-subtitle">Track stock levels, OEM cross-references, locations & pricing{catalogueSummary}</p>
         </div>
         <div className="flex gap-2">
           <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
@@ -293,36 +417,114 @@ export default function InventoryPage() {
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
       {importError && <div className="alert alert-danger mb-4" role="alert">{importError}</div>}
 
-      {/* Filter & Search Bar */}
-      <div className="card mb-6 p-4">
-        <div className="flex gap-4 items-center flex-wrap">
-          <div className="search-bar" style={{ flex: 1, minWidth: '240px' }}>
-            <Search className="search-bar-icon" size={16} />
-            <input
-              type="text"
-              placeholder="Search by Part #, OEM #, Description, Brand..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+      {/* Headline figures. Each one is summed from the parts this page already loaded — there is
+          no month-on-month delta or trend line here because the page holds no historical series
+          to compare against, and an invented one would be worse than none. */}
+      <div className="kpi-grid">
+        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
+          <div className="flex justify-between items-center">
+            <span className="kpi-label">Stock Value</span>
+            <div className="kpi-icon-wrap"><Boxes size={18} /></div>
           </div>
+          <div className="kpi-value">₹{wholeMoney(stockValue)}</div>
+          <span className="kpi-context">Stock on hand, valued at each part&apos;s oldest open purchase batch</span>
+        </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Filter size={16} color="var(--text-muted)" />
-            <select
-              className="form-input form-select"
-              style={{ width: '160px' }}
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-            >
-              <option value="all">All Categories</option>
-              {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
-            </select>
+        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-blue)', '--kpi-color-bg': 'var(--color-info-bg)' } as React.CSSProperties}>
+          <div className="flex justify-between items-center">
+            <span className="kpi-label">Total Parts</span>
+            <div className="kpi-icon-wrap"><LayoutGrid size={18} /></div>
           </div>
+          <div className="kpi-value">{products.length}</div>
+          <span className="kpi-context">{brandCount > 0 ? `Across ${brandCount} ${brandCount === 1 ? 'brand' : 'brands'}` : 'No brand recorded yet'}</span>
+        </div>
+
+        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
+          <div className="flex justify-between items-center">
+            <span className="kpi-label">Low Stock</span>
+            <div className="kpi-icon-wrap"><AlertTriangle size={18} /></div>
+          </div>
+          <div className="kpi-value">{lowStockCount}</div>
+          <div className={`kpi-change ${lowStockCount > 0 ? 'negative' : 'positive'}`}>
+            {lowStockCount > 0 ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+            <span>{lowStockCount > 0 ? 'Needs action' : 'All stocked'}</span>
+          </div>
+          <span className="kpi-context">At or below their own reorder level{outOfStockCount > 0 ? ` · ${outOfStockCount} fully out` : ''}</span>
+        </div>
+
+        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-green)', '--kpi-color-bg': 'var(--em-tint)' } as React.CSSProperties}>
+          <div className="flex justify-between items-center">
+            <span className="kpi-label">Avg. Margin</span>
+            <div className="kpi-icon-wrap"><Percent size={18} /></div>
+          </div>
+          <div className="kpi-value">{averageMargin === null ? '—' : `${averageMargin.toFixed(1)}%`}</div>
+          <span className="kpi-context">
+            {averageMargin === null
+              ? 'Needs a cost and a sale price on at least one part'
+              : `Across ${marginParts.length} ${marginParts.length === 1 ? 'part' : 'parts'} that have both a cost and a sale price`}
+          </span>
         </div>
       </div>
 
+      {(lowStockCount > 0 || outOfStockCount > 0) && (
+        <div className="alert alert-warning mb-4" role="status">
+          <AlertTriangle size={16} style={{ flex: 'none' }} />
+          <span>{reorderSentence}</span>
+          {/* Goes to the Purchases screen, which is where restocking is actually recorded — it is
+              real navigation, not a button that quietly does nothing. */}
+          <Link className="alert-action" href="/purchases">Record a purchase <ArrowRight size={14} /></Link>
+        </div>
+      )}
+
       {/* Product Table */}
       <div className="table-wrap">
+        <div className="tbl-toolbar">
+          <div className="tbl-toolbar-title">
+            <strong>{activeStockTab.title}</strong>
+            <small>Cost is the oldest purchase batch still in stock</small>
+          </div>
+
+          <div className="tabs" role="group" aria-label="Filter by stock level">
+            {stockTabs.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                aria-pressed={stockFilter === tab.key}
+                className={`tab${stockFilter === tab.key ? ' active' : ''}`}
+                onClick={() => { setStockFilter(tab.key); setPage(1); }}
+              >
+                {tab.label}<span className="tab-count">{tab.rows.length}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="tbl-tools">
+            <div className="search-bar" style={{ minWidth: '220px' }}>
+              <Search className="search-bar-icon" size={16} />
+              <input
+                type="text"
+                placeholder="Search by Part #, OEM #, Description, Brand..."
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Filter size={16} color="var(--text-muted)" />
+              <select
+                className="form-input form-select"
+                style={{ width: '160px' }}
+                value={categoryFilter}
+                onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
+              >
+                <option value="all">All Categories</option>
+                {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ overflowX: 'auto' }}>
         <table className="erp-table">
           <thead>
             <tr>
@@ -332,46 +534,58 @@ export default function InventoryPage() {
               <th>Item Name</th>
               <th>Brand</th>
               <th>Category</th>
-              <th className="text-right">Price</th>
+              <th className="text-right">Stock (Pcs)</th>
+              <th className="text-right">Cost</th>
+              <th className="text-right">Sale Price</th>
               <th className="text-right">Margin</th>
-              <th className="text-center">Stock Level</th>
-              <th className="text-center">Status</th>
+              <th>Status</th>
               <th className="text-center">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filteredProducts.map((p) => {
-              const isLow = p.min_stock > 0 && p.current_stock <= p.min_stock;
-              const isOut = p.current_stock <= 0;
+            {pagedProducts.map((p) => {
+              const isLow = isLowStock(p);
+              const isOut = isOutOfStock(p);
               const fifoCost = fifoCostFor(p);
               const margin = p.sale_price > 0 ? ((p.sale_price - fifoCost) / p.sale_price) * 100 : 0;
               const status = isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
               const statusBadge = isOut ? 'badge-danger' : isLow ? 'badge-warning' : 'badge-success';
+              const meter = meterPercent(p);
               return (
                 <tr key={p.id}>
-                  <td>
-                    <span style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>{p.part_number}</span>
-                  </td>
+                  <td><span className="pn-chip">{p.part_number}</span></td>
                   <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{p.oem_number || '-'}</td>
                   <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{p.hsn_code || '-'}</td>
                   <td style={{ fontWeight: 600, maxWidth: '150px' }} className="truncate">{p.name}</td>
-                  <td style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{p.brand}</td>
-                  <td><span className="badge badge-info">{p.category}</span></td>
-                  <td className="text-right">
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>₹{fifoCost}</span>
-                    <span className="font-semibold">₹{p.sale_price}</span>
+                  <td>
+                    {p.brand
+                      ? <span className="brand-chip" style={{ '--brand-chip-color': brandChipColor(p.brand) } as React.CSSProperties}>{p.brand}</span>
+                      : <span className="text-muted">-</span>}
                   </td>
+                  <td><span className="badge badge-info">{p.category}</span></td>
+                  <td>
+                    {/* The bar is scaled to this part's own reorder level, so half full always
+                        means "sitting exactly on the reorder line" no matter how fast it moves.
+                        Parts with no reorder level set show the number alone. */}
+                    <div className={`qty-cell${isOut ? ' is-out' : ''}`}>
+                      <strong>{p.current_stock}</strong>
+                      {meter !== null && (
+                        <div className={`meter${isOut ? ' meter--out' : isLow ? ' meter--low' : ''}`} aria-hidden="true">
+                          <i style={{ width: `${meter}%` }} />
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  <td className="text-right">₹{money(fifoCost)}</td>
+                  <td className="text-right font-semibold">₹{money(p.sale_price)}</td>
                   <td className="text-right">
                     <span className={margin >= 0 ? 'text-success font-semibold' : 'text-danger font-semibold'}>{margin.toFixed(1)}%</span>
                   </td>
-                  <td className="text-center">
-                    <span className={`badge ${isLow ? 'badge-danger' : 'badge-success'}`}>
-                      {isLow && <AlertTriangle size={12} />}
-                      {p.current_stock} Pcs
+                  <td>
+                    <span className={`badge ${statusBadge}`}>
+                      {isOut ? <XCircle size={12} /> : isLow ? <AlertTriangle size={12} /> : <CheckCircle2 size={12} />}
+                      {status}
                     </span>
-                  </td>
-                  <td className="text-center">
-                    <span className={`badge ${statusBadge}`}>{status}</span>
                   </td>
                   <td className="text-center">
                     <div className="flex justify-between gap-1 items-center">
@@ -386,11 +600,46 @@ export default function InventoryPage() {
                 </tr>
               );
             })}
-            {filteredProducts.length === 0 && (
-              <tr><td colSpan={11}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term or category, or this company simply has no parts yet.'}</p></div></td></tr>
+            {pagedProducts.length === 0 && (
+              <tr><td colSpan={12}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term, category or stock filter, or this company simply has no parts yet.'}</p></div></td></tr>
             )}
           </tbody>
         </table>
+        </div>
+
+        {visibleProducts.length > 0 && (
+          <div className="pager">
+            <div className="pager-info">
+              Showing <strong>{pageStart + 1}–{pageStart + pagedProducts.length}</strong> of <strong>{visibleProducts.length}</strong> parts
+            </div>
+            {totalPages > 1 && (
+              <div className="pager-controls">
+                <button type="button" className="pager-btn" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>
+                  <ChevronLeft size={14} />
+                </button>
+                {pageWindow(currentPage, totalPages).map((entry, index) => (
+                  entry === 'gap'
+                    ? <span key={`gap-${index}`} className="pager-info">…</span>
+                    : (
+                      <button
+                        key={entry}
+                        type="button"
+                        className={`pager-btn${entry === currentPage ? ' active' : ''}`}
+                        aria-current={entry === currentPage ? 'page' : undefined}
+                        aria-label={`Page ${entry}`}
+                        onClick={() => setPage(entry)}
+                      >
+                        {entry}
+                      </button>
+                    )
+                ))}
+                <button type="button" className="pager-btn" aria-label="Next page" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}>
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       </>
       )}

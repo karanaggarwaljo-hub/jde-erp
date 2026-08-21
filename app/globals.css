@@ -1431,3 +1431,158 @@ Modal
   margin-top: 2px;
   font-variant-numeric: tabular-nums;
 }
+
+/* ===================================================
+   Data-Table Furniture
+   Shared vocabulary for list screens (Inventory, Customers, Sales, Purchases).
+   Defined once here rather than per-page so every table reads the same way.
+   =================================================== */
+
+/* The strip above a table: filter tabs on the left, actions on the right. */
+.tbl-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tbl-toolbar-title { display: flex; flex-direction: column; gap: 2px; }
+.tbl-toolbar-title strong { font-size: 14px; font-weight: 600; color: var(--ink); }
+.tbl-toolbar-title small { font-size: 12px; color: var(--ink-3); }
+.tbl-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* Count pill inside a filter tab — the number is the point, so it gets tabular figures. */
+.tab-count {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 100px;
+  background: var(--panel-2);
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.tab.active .tab-count { background: var(--amber-tint); color: var(--amber-2); }
+
+/* Part numbers are identifiers, not prose — fixed width so they scan as a column. */
+.pn-chip {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* Brand marker. The dot carries the brand, the text names it — readable in greyscale. */
+.brand-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.brand-chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--brand-chip-color, var(--ink-3));
+  flex: none;
+}
+
+/* Stock level bar. Sits under a quantity and is scaled against that part's OWN reorder
+   level, never a flat number — 42 of a fast-moving part and 3 of a slow one are not
+   comparable on a shared scale. State is carried by colour AND by fill, so a dead line
+   reads as dead without relying on colour alone. */
+.meter {
+  height: 4px;
+  width: 100%;
+  min-width: 46px;
+  border-radius: 100px;
+  background: var(--panel-2);
+  overflow: hidden;
+  margin-top: 5px;
+}
+
+.meter > i {
+  display: block;
+  height: 100%;
+  border-radius: 100px;
+  background: var(--em);
+  transition: width var(--transition-base);
+}
+
+.meter--low > i { background: var(--amber-2); }
+.meter--out > i { background: var(--rose); }
+
+/* Quantity cell: the number, then its meter beneath. */
+.qty-cell { display: flex; flex-direction: column; align-items: flex-end; min-width: 62px; }
+.qty-cell > strong { font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.qty-cell.is-out > strong { color: var(--rose); }
+
+/* Pagination / result count under a table. */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 11px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.pager-info { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.pager-info strong { color: var(--ink-2); font-weight: 600; }
+.pager-controls { display: flex; align-items: center; gap: 4px; }
+
+.pager-btn {
+  min-width: 30px;
+  height: 30px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.pager-btn:hover:not(:disabled) { background: var(--panel-2); }
+.pager-btn:disabled { opacity: .45; cursor: not-allowed; }
+.pager-btn.active { background: var(--amber-2); border-color: var(--amber-2); color: #fff; }
+
+/* An alert that carries an action — turns a number into a next step. */
+.alert-action {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.alert-action:hover { background: var(--panel-2); }
