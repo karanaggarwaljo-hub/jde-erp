@@ -18,19 +18,43 @@ import {
 } from 'lucide-react';
 import { logout } from '@/lib/client-auth';
 
-const navItems = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-  { name: 'Inventory', href: '/inventory', icon: Package },
-  { name: 'Sales', href: '/sales', icon: ShoppingCart },
-  { name: 'Purchases', href: '/purchases', icon: ShoppingBag },
-  { name: 'Customers', href: '/customers', icon: Users },
-  { name: 'Suppliers', href: '/suppliers', icon: Building2 },
-  { name: 'Expenses', href: '/expenses', icon: Receipt },
-  { name: 'Reports', href: '/reports', icon: FileText },
-  { name: 'Analytics', href: '/analytics', icon: BarChart3 },
-  { name: 'Website Catalog', href: '/catalog-admin', icon: Globe },
-  { name: 'Settings', href: '/settings', icon: Settings },
+// Grouped by what the person is actually doing, not by how the app is built: the day-to-day
+// counter work first, then the two address books, then the money side, then the public site.
+// Settings sits apart in the footer — it is administration, not part of anyone's daily loop.
+const navGroups = [
+  {
+    label: 'Operations',
+    items: [
+      { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+      { name: 'Inventory', href: '/inventory', icon: Package },
+      { name: 'Sales', href: '/sales', icon: ShoppingCart },
+      { name: 'Purchases', href: '/purchases', icon: ShoppingBag },
+    ],
+  },
+  {
+    label: 'Contacts',
+    items: [
+      { name: 'Customers', href: '/customers', icon: Users },
+      { name: 'Suppliers', href: '/suppliers', icon: Building2 },
+    ],
+  },
+  {
+    label: 'Finance',
+    items: [
+      { name: 'Expenses', href: '/expenses', icon: Receipt },
+      { name: 'Reports', href: '/reports', icon: FileText },
+      { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+    ],
+  },
+  {
+    label: 'Online',
+    items: [
+      { name: 'Website Catalog', href: '/catalog-admin', icon: Globe },
+    ],
+  },
 ];
+
+const settingsItem = { name: 'Settings', href: '/settings', icon: Settings };
 
 type SidebarProps = {
   /** Whether the mobile slide-out drawer is open — irrelevant/inert above the 768px breakpoint,
@@ -51,6 +75,24 @@ export default function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps
     router.push('/login');
   };
 
+  const isActive = (href: string) => pathname === href || pathname?.startsWith(href + '/');
+
+  const navLink = ({ name, href, icon: Icon }: { name: string; href: string; icon: typeof Settings }) => (
+    <Link
+      key={name}
+      href={href}
+      // Every dashboard destination is dynamic and authenticated. Next's default
+      // viewport prefetch turns this persistent sidebar into a burst of server renders
+      // (and proxy/auth checks) before the user has asked to visit any of them.
+      prefetch={false}
+      className={`sidebar-item ${isActive(href) ? 'active' : ''}`}
+      onClick={onNavigate}
+    >
+      <Icon className="sidebar-item-icon" />
+      <span>{name}</span>
+    </Link>
+  );
+
   return (
     <aside className={`erp-sidebar ${mobileOpen ? 'open' : ''}`}>
       <div className="sidebar-logo">
@@ -62,30 +104,16 @@ export default function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps
       </div>
 
       <nav className="sidebar-nav">
-        <div className="sidebar-section-label">Main Menu</div>
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = pathname === item.href || pathname?.startsWith(item.href + '/');
-
-          return (
-            <Link
-              key={item.name}
-              href={item.href}
-              // Every dashboard destination is dynamic and authenticated. Next's default
-              // viewport prefetch turns this persistent sidebar into a burst of server renders
-              // (and proxy/auth checks) before the user has asked to visit any of them.
-              prefetch={false}
-              className={`sidebar-item ${isActive ? 'active' : ''}`}
-              onClick={onNavigate}
-            >
-              <Icon className="sidebar-item-icon" />
-              <span>{item.name}</span>
-            </Link>
-          );
-        })}
+        {navGroups.map((group) => (
+          <div key={group.label}>
+            <div className="sidebar-section-label">{group.label}</div>
+            {group.items.map(navLink)}
+          </div>
+        ))}
       </nav>
 
       <div className="sidebar-footer">
+        {navLink(settingsItem)}
         <button type="button" onClick={handleSignOut} className="sidebar-item" style={{ color: 'var(--color-danger)', width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer' }}>
           <LogOut className="sidebar-item-icon" />
           <span>Sign Out</span>
