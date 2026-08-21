@@ -1,7 +1,29 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { Plus, Printer, Search, Eye, Pencil, Trash2, ArrowRight, ArrowLeft, Undo2 } from 'lucide-react';
+import {
+  Plus,
+  Minus,
+  X,
+  Printer,
+  Search,
+  Eye,
+  Pencil,
+  Trash2,
+  ArrowRight,
+  ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  IndianRupee,
+  Receipt,
+  TrendingUp,
+  Package,
+  AlertTriangle,
+  CheckCircle2,
+  XCircle,
+  MapPin,
+  Undo2,
+} from 'lucide-react';
 import { printCurrentPage } from '@/lib/client-export';
 import { saveSalesInvoice, deleteSalesInvoice } from '@/lib/client-sales';
 import { createSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem } from '@/lib/client-sales-returns';
@@ -11,9 +33,10 @@ import AddCustomerModal from '@/components/AddCustomerModal';
 
 type SalesTab = 'invoices' | 'quotations';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
+type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid';
 type InvoiceLine = { part: string; qty: number; price: number };
 
-type Product = { id: string; company_id: string; part_number: string; name: string; category: string; sale_price: number; current_stock: number };
+type Product = { id: string; company_id: string; part_number: string; name: string; brand: string; hsn_code: string; category: string; sale_price: number; current_stock: number };
 type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
 type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string; discount_percent: number; discount_amount: number };
 type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
@@ -21,6 +44,78 @@ type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; 
 
 function todayIso() {
   return new Date().toISOString().split('T')[0];
+}
+
+// How many invoice rows are painted at once. Every invoice is already in memory — this changes
+// nothing about what is loaded, only how much of it is rendered, so paging costs no extra request.
+const PAGE_SIZE = 25;
+
+// Reference data, not business data: the statutory GST state codes, which are the first two
+// digits of every GSTIN. Used only to name the place of supply on a tax invoice — nothing here
+// is a figure, a price or a company-specific value.
+const GST_STATE_NAMES: Record<string, string> = {
+  '01': 'Jammu and Kashmir',
+  '02': 'Himachal Pradesh',
+  '03': 'Punjab',
+  '04': 'Chandigarh',
+  '05': 'Uttarakhand',
+  '06': 'Haryana',
+  '07': 'Delhi',
+  '08': 'Rajasthan',
+  '09': 'Uttar Pradesh',
+  '10': 'Bihar',
+  '11': 'Sikkim',
+  '12': 'Arunachal Pradesh',
+  '13': 'Nagaland',
+  '14': 'Manipur',
+  '15': 'Mizoram',
+  '16': 'Tripura',
+  '17': 'Meghalaya',
+  '18': 'Assam',
+  '19': 'West Bengal',
+  '20': 'Jharkhand',
+  '21': 'Odisha',
+  '22': 'Chhattisgarh',
+  '23': 'Madhya Pradesh',
+  '24': 'Gujarat',
+  '25': 'Daman and Diu',
+  '26': 'Dadra and Nagar Haveli and Daman and Diu',
+  '27': 'Maharashtra',
+  '28': 'Andhra Pradesh',
+  '29': 'Karnataka',
+  '30': 'Goa',
+  '31': 'Lakshadweep',
+  '32': 'Kerala',
+  '33': 'Tamil Nadu',
+  '34': 'Puducherry',
+  '35': 'Andaman and Nicobar Islands',
+  '36': 'Telangana',
+  '37': 'Andhra Pradesh',
+  '38': 'Ladakh',
+  '97': 'Other Territory',
+  '99': 'Centre Jurisdiction',
+};
+
+// Indian digit grouping, matching Inventory and Customers. Display only — nothing rounded here
+// is ever written back.
+const money = (value: number) => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const paise = (value: number) => Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Which page buttons to show: short lists show every page, long ones collapse to 1 … n-1 n n+1 … last.
+function pageWindow(current: number, total: number): Array<number | 'gap'> {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const wanted = [1, total, current - 1, current, current + 1]
+    .filter((n) => n >= 1 && n <= total)
+    .sort((a, b) => a - b);
+  const shown: Array<number | 'gap'> = [];
+  let previous = 0;
+  for (const n of wanted) {
+    if (n === previous) continue;
+    if (previous && n - previous > 1) shown.push('gap');
+    shown.push(n);
+    previous = n;
+  }
+  return shown;
 }
 
 // Leaving the customer field blank means a walk-in sale — no account to bill, so it's stored
@@ -36,10 +131,17 @@ export default function SalesPage() {
   const { rows: quotations, loading: quotationsLoading, reload: reloadQuotations } = useCompanyTable<Quotation>('quotations');
   const { rows: invoiceItems, reload: reloadInvoiceItems } = useCompanyTable<InvoiceItem>('invoice_items');
 
+  // `value`, `price` and `category` are untouched — the save path matches lines on `value` and
+  // fills the rate from `price`. The rest are extra fields off the same already-loaded product
+  // row, used only to describe the line in the dialog.
   const partOptions = products.map((product) => ({
     value: `${product.part_number} - ${product.name}`,
     price: product.sale_price,
     category: product.category,
+    partNumber: product.part_number,
+    brand: product.brand,
+    stock: product.current_stock,
+    hsn: product.hsn_code,
   }));
 
   const [activeTab, setActiveTab] = useState<SalesTab>('invoices');
@@ -68,6 +170,10 @@ export default function SalesPage() {
   const [gstPercent, setGstPercent] = useState(18);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('unpaid');
   const [amountPaid, setAmountPaid] = useState(0);
+  // Presentation-only view state: which payment slice of the list is on screen, and which page
+  // of it. Neither touches what is loaded or what is saved.
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
+  const [page, setPage] = useState(1);
   const [showQuotationModal, setShowQuotationModal] = useState(false);
   const [editingQuotation, setEditingQuotation] = useState<QuotationDetail | null>(null);
   const [viewingQuotation, setViewingQuotation] = useState<QuotationDetail | null>(null);
@@ -99,6 +205,20 @@ export default function SalesPage() {
   const editingOldOutstanding = editingInvoice ? Number(editingInvoice.total) - Number(editingInvoice.paid) : 0;
   const newOutstanding = total - paidAmount;
 
+  // Place of supply comes from the company's own GSTIN — the first two digits are the statutory
+  // state code. No GSTIN on the company means no place of supply to state, so the whole clause
+  // is dropped rather than guessed.
+  const companyStateCode = (activeCompany?.gstin ?? '').trim().slice(0, 2);
+  const customerStateCode = (selectedCustomer?.gstin ?? '').trim().slice(0, 2);
+  const placeOfSupply = GST_STATE_NAMES[companyStateCode] ? `${GST_STATE_NAMES[companyStateCode]} (${companyStateCode})` : '';
+  // Intra- vs inter-state decides whether GST is displayed as CGST + SGST or as a single IGST
+  // line. This is a labelling decision only — the stored total is the same either way. With a
+  // GSTIN missing on either side there is nothing to compare, so nothing is claimed.
+  const supplyKind: 'intra' | 'inter' | 'unknown' = companyStateCode && customerStateCode
+    ? (companyStateCode === customerStateCode ? 'intra' : 'inter')
+    : 'unknown';
+  const halfGstPercent = Number((gstPercent / 2).toFixed(3));
+
   const filteredInvoices = invoices.filter((invoice) => {
     const query = search.trim().toLowerCase();
     if (!query) return true;
@@ -114,6 +234,42 @@ export default function SalesPage() {
     productRevenue.set(item.name, (productRevenue.get(item.name) ?? 0) + Number(item.line_total || 0));
   }
   const topProduct = Array.from(productRevenue.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const topProductRevenue = topProduct ? (productRevenue.get(topProduct) ?? 0) : 0;
+
+  // One definition of paid / partly paid / unpaid for the whole screen, so the KPI contexts, the
+  // filter tabs and the row badges can never disagree with each other.
+  const balanceOf = (invoice: Invoice) => Number(invoice.total) - Number(invoice.paid);
+  const isSettled = (invoice: Invoice) => balanceOf(invoice) <= 0;
+  const isPartlyPaid = (invoice: Invoice) => Number(invoice.paid) > 0 && balanceOf(invoice) > 0;
+  const isUnpaid = (invoice: Invoice) => Number(invoice.paid) <= 0 && balanceOf(invoice) > 0;
+
+  const settledCount = invoices.filter(isSettled).length;
+  const partialCount = invoices.filter(isPartlyPaid).length;
+  const unpaidCount = invoices.filter(isUnpaid).length;
+  const dueCount = partialCount + unpaidCount;
+
+  // Tab counts are taken from the search result rather than the whole ledger, so the number on a
+  // tab is always exactly how many rows clicking it will show.
+  const paymentTabs: Array<{ key: PaymentFilter; label: string; title: string; rows: Invoice[] }> = [
+    { key: 'all', label: 'All', title: 'All invoices', rows: filteredInvoices },
+    { key: 'paid', label: 'Paid', title: 'Fully settled invoices', rows: filteredInvoices.filter(isSettled) },
+    { key: 'partial', label: 'Partial', title: 'Part-paid invoices', rows: filteredInvoices.filter(isPartlyPaid) },
+    { key: 'unpaid', label: 'Unpaid', title: 'Invoices with nothing received', rows: filteredInvoices.filter(isUnpaid) },
+  ];
+  const activePaymentTab = paymentTabs.find((tab) => tab.key === paymentFilter) ?? paymentTabs[0];
+  const visibleInvoices = activePaymentTab.rows;
+
+  // Paging is clamped rather than reset by an effect: deleting the last invoice on page 4 simply
+  // lands the view on the new last page instead of showing an empty table.
+  const totalPages = Math.max(1, Math.ceil(visibleInvoices.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * PAGE_SIZE;
+  const pagedInvoices = visibleInvoices.slice(pageStart, pageStart + PAGE_SIZE);
+  const pageTotal = pagedInvoices.reduce((sum, inv) => sum + Number(inv.total || 0), 0);
+  const pageReceived = pagedInvoices.reduce((sum, inv) => sum + Number(inv.paid || 0), 0);
+  const pageDue = pagedInvoices.reduce((sum, inv) => sum + Math.max(0, balanceOf(inv)), 0);
+
+  // Only whole units that are still returnable count towards a credit note.
   const selectedReturnItems = returnableItems
     .map((item) => ({ invoice_item_id: item.invoice_item_id, qty: Math.min(item.returnable_qty, Math.max(0, Number(returnQuantities[item.invoice_item_id] ?? 0))) }))
     .filter((item) => Number.isInteger(item.qty) && item.qty > 0);
@@ -404,6 +560,10 @@ export default function SalesPage() {
     }
   };
 
+  const ledgerSummary = invoices.length > 0
+    ? ` · ${invoices.length} ${invoices.length === 1 ? 'invoice' : 'invoices'} on file${dueCount > 0 ? `, ${dueCount} still carrying a balance` : ''}`
+    : '';
+
   const openSalesReturn = async (invoice: Invoice) => {
     if (!activeCompany) return;
     setReturnError('');
@@ -465,7 +625,11 @@ export default function SalesPage() {
   return (
     <div>
       <div className="page-header">
-        <div><h1 className="page-title">Sales Management</h1><p className="page-subtitle">Invoices, billing and quotations</p></div>
+        <div>
+          <div className="eyebrow">Accounts receivable</div>
+          <h1 className="page-title">Sales Management</h1>
+          <p className="page-subtitle">Invoices, billing and quotations{ledgerSummary}</p>
+        </div>
         <div className="flex gap-2">
           <button className="btn btn-secondary" onClick={openQuotation}><Plus size={16} /> Create Quotation</button>
           <button className="btn btn-primary" onClick={() => openInvoice()}><Plus size={16} /> Create Sales Invoice</button>
@@ -476,101 +640,328 @@ export default function SalesPage() {
       {returnError && !returnCandidate && <div className="alert alert-danger mb-4" role="alert">{returnError}</div>}
       {quotationError && !showQuotationModal && <div className="alert alert-danger mb-4" role="alert">{quotationError}</div>}
 
+      {/* The two document types this screen holds. Same `activeTab` state the ghost buttons used
+          to drive — only the control has changed. */}
+      <div className="flex mb-4">
+        <div className="tabs" role="tablist" aria-label="Sales documents">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'invoices'}
+            className={`tab ${activeTab === 'invoices' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('invoices'); setPage(1); }}
+          >
+            Invoices <span className="tab-count">{invoices.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'quotations'}
+            className={`tab ${activeTab === 'quotations' ? 'active' : ''}`}
+            onClick={() => setActiveTab('quotations')}
+          >
+            Quotations <span className="tab-count">{quotations.length}</span>
+          </button>
+        </div>
+      </div>
+
       {activeTab === 'invoices' && (
         <>
-          <div className="flex justify-between items-center mb-4">
-            <div className="ms">
-              <div className="msc"><div className="msv text-brand">₹{totalRevenue.toLocaleString()}</div><div className="msl">Total Revenue</div></div>
-              <div className="msc"><div className="msv text-info">{invoices.length}</div><div className="msl">Transactions</div></div>
-              <div className="msc"><div className="msv text-success">₹{avgOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div><div className="msl">Avg Order Value</div></div>
-              <div className="msc"><div className="msv text-brand truncate" style={{ maxWidth: '160px' }}>{topProduct ?? '—'}</div><div className="msl">Top Product</div></div>
-              <div className="msc"><div className="msv text-danger">₹{outstandingDue.toLocaleString()}</div><div className="msl">Outstanding Due</div></div>
+          {/* Headline figures, every one of them summed from the invoices and line items this page
+              has already loaded — there is no month-on-month delta or trend line here because the
+              page holds no historical series to compare against. */}
+          {invoices.length > 0 && (
+            <div className="kpi-grid">
+              <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
+                <div className="flex justify-between items-center">
+                  <span className="kpi-label">Total Revenue</span>
+                  <div className="kpi-icon-wrap"><IndianRupee size={18} /></div>
+                </div>
+                <div className="kpi-value">₹{money(totalRevenue)}</div>
+                <span className="kpi-context">Billed across every invoice recorded for this company</span>
+              </div>
+
+              <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-blue)', '--kpi-color-bg': 'var(--color-info-bg)' } as React.CSSProperties}>
+                <div className="flex justify-between items-center">
+                  <span className="kpi-label">Transactions</span>
+                  <div className="kpi-icon-wrap"><Receipt size={18} /></div>
+                </div>
+                <div className="kpi-value">{invoices.length}</div>
+                <span className="kpi-context">{settledCount} paid · {partialCount} partial · {unpaidCount} unpaid</span>
+              </div>
+
+              <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-green)', '--kpi-color-bg': 'var(--em-tint)' } as React.CSSProperties}>
+                <div className="flex justify-between items-center">
+                  <span className="kpi-label">Avg. Order Value</span>
+                  <div className="kpi-icon-wrap"><TrendingUp size={18} /></div>
+                </div>
+                <div className="kpi-value">₹{Number(avgOrderValue).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
+                <span className="kpi-context">Total revenue divided by {invoices.length} {invoices.length === 1 ? 'invoice' : 'invoices'}</span>
+              </div>
+
+              <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-red)', '--kpi-color-bg': 'var(--rose-tint)' } as React.CSSProperties}>
+                <div className="flex justify-between items-center">
+                  <span className="kpi-label">Outstanding Due</span>
+                  <div className="kpi-icon-wrap"><AlertTriangle size={18} /></div>
+                </div>
+                <div className="kpi-value">₹{money(outstandingDue)}</div>
+                <div className={`kpi-change ${dueCount > 0 ? 'negative' : 'positive'}`}>
+                  {dueCount > 0 ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+                  <span>{dueCount > 0 ? `${dueCount} open` : 'All settled'}</span>
+                </div>
+                <span className="kpi-context">Billed but not yet received</span>
+              </div>
+
+              <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-violet)', '--kpi-color-bg': 'var(--panel-2)' } as React.CSSProperties}>
+                <div className="flex justify-between items-center">
+                  <span className="kpi-label">Top Product</span>
+                  <div className="kpi-icon-wrap"><Package size={18} /></div>
+                </div>
+                <div className="kpi-value truncate" style={{ fontSize: '16px' }}>{topProduct ?? '—'}</div>
+                <span className="kpi-context">
+                  {topProduct
+                    ? `₹${money(topProductRevenue)} across recorded invoice lines`
+                    : 'No invoice line items recorded yet'}
+                </span>
+              </div>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => setActiveTab('quotations')}>Quotations ({quotations.length}) <ArrowRight size={14} /></button>
-          </div>
-          <div className="card mb-4 p-4">
-            <div className="search-bar">
-              <Search className="search-bar-icon" size={16} />
-              <input type="text" placeholder="Search invoice, customer, product..." value={search} onChange={(e) => setSearch(e.target.value)} />
+          )}
+
+          {outstandingDue > 0 && (
+            <div className="alert alert-warning mb-4" role="status">
+              <AlertTriangle size={16} style={{ flex: 'none', marginTop: '1px' }} />
+              <span>
+                ₹{money(outstandingDue)} is outstanding across {dueCount} {dueCount === 1 ? 'invoice' : 'invoices'}
+                {unpaidCount > 0 && partialCount > 0 ? ` — ${unpaidCount} with nothing received and ${partialCount} part paid` : ''}.
+              </span>
+              <button
+                type="button"
+                className="alert-action"
+                onClick={() => { setPaymentFilter(unpaidCount > 0 ? 'unpaid' : 'partial'); setPage(1); }}
+              >
+                {unpaidCount > 0 ? 'Show unpaid' : 'Show part paid'} <ArrowRight size={14} />
+              </button>
             </div>
-          </div>
-          <div className="table-wrap"><table className="erp-table">
-            <thead><tr><th>Invoice #</th><th>Date</th><th>Customer</th><th>Products</th><th>Units</th><th className="text-right">Discount</th><th className="text-right">Grand Total</th><th>Payment</th><th className="text-center">Actions</th></tr></thead>
-            <tbody>{filteredInvoices.map((invoice) => {
-              const balance = Number(invoice.total) - Number(invoice.paid);
-              const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
-              const productLabel = items[0]?.name ?? (invoice.items > 0 ? 'Legacy sale' : '—');
-              return <tr key={invoice.id}>
-                <td style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>{invoice.id}</td>
-                <td className="text-muted">{invoice.date}</td>
-                <td style={{ fontWeight: 600 }}>{invoice.customer}</td>
-                <td>
-                  <span style={{ fontWeight: 600 }}>{productLabel}</span>
-                  {items.length > 0 && <span className="badge badge-muted" style={{ marginLeft: '6px' }}>{items.length} item{items.length > 1 ? 's' : ''}</span>}
-                </td>
-                <td>{invoice.items} units</td>
-                <td className="text-right">
-                  {Number(invoice.discount_amount) > 0
-                    ? <span className="text-danger">-₹{Number(invoice.discount_amount).toLocaleString(undefined, { maximumFractionDigits: 0 })} ({Number(invoice.discount_percent).toFixed(0)}%)</span>
-                    : <span className="text-muted">—</span>}
-                </td>
-                <td className="text-right font-semibold text-success">₹{Number(invoice.total).toLocaleString()}</td>
-                <td>{balance > 0 ? <span className="badge badge-warning">Due ₹{balance.toLocaleString()}</span> : <span className="badge badge-success">Paid</span>}</td>
-                <td className="text-center"><div className="flex justify-between gap-1 items-center">
-                  <button className="btn btn-ghost btn-sm" aria-label={`View ${invoice.id}`} title="View invoice" onClick={() => setViewingInvoice(invoice)}><Eye size={14} /></button>
+          )}
+
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="tbl-toolbar">
+              <div className="tbl-toolbar-title">
+                <strong>{activePaymentTab.title}</strong>
+                <small>Paid column compares what was received against what was billed</small>
+              </div>
+
+              <div className="tabs" role="tablist" aria-label="Filter by payment status">
+                {paymentTabs.map((tab) => (
                   <button
-                    className="btn btn-ghost btn-sm"
-                    aria-label={`Edit ${invoice.id}`}
-                    title={items.length > 0 ? 'Edit invoice' : "Edit unavailable — this invoice predates line-item tracking"}
-                    disabled={items.length === 0}
-                    style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
-                    onClick={() => items.length > 0 && openEditInvoice(invoice)}
-                  ><Pencil size={14} /></button>
-                  <button
-                    className="btn btn-ghost btn-sm"
-                    aria-label={`Return items from ${invoice.id}`}
-                    title={items.length > 0 ? 'Create partial return / credit note' : 'Return unavailable — this invoice predates line-item tracking'}
-                    disabled={items.length === 0 || loadingReturn}
-                    style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
-                    onClick={() => items.length > 0 && openSalesReturn(invoice)}
-                  ><Undo2 size={14} /></button>
-                  <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={printCurrentPage}><Printer size={14} /></button>
-                  <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`} title="Delete invoice" style={{ color: 'var(--color-danger)' }} onClick={() => setDeleteCandidate(invoice)}><Trash2 size={14} /></button>
-                </div></td>
-              </tr>;
-            })}
-            {filteredInvoices.length === 0 && (
-              <tr><td colSpan={9}><div className="empty-state"><p className="empty-state-title">{invoicesLoading ? 'Loading invoices…' : search ? 'No invoices match your search' : 'No invoices yet'}</p><p className="empty-state-desc">{invoicesLoading ? 'Fetching records for the active company.' : search ? 'Try a different search term.' : 'Create your first sales invoice to get started.'}</p></div></td></tr>
+                    key={tab.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={paymentFilter === tab.key}
+                    className={`tab ${paymentFilter === tab.key ? 'active' : ''}`}
+                    onClick={() => { setPaymentFilter(tab.key); setPage(1); }}
+                  >
+                    {tab.label}<span className="tab-count">{tab.rows.length}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="tbl-tools">
+                <div className="search-bar" style={{ minWidth: '240px' }}>
+                  <Search className="search-bar-icon" size={16} />
+                  <input
+                    type="text"
+                    placeholder="Search invoice, customer, product..."
+                    value={search}
+                    onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table className="erp-table" style={{ minWidth: '1180px' }}>
+                <thead>
+                  <tr>
+                    <th>Invoice No.</th>
+                    <th>Customer</th>
+                    <th>Date</th>
+                    <th>Products</th>
+                    <th className="text-right">Units</th>
+                    <th className="text-right">Discount</th>
+                    <th className="text-right">Total</th>
+                    <th className="text-right">Paid</th>
+                    <th>Status</th>
+                    <th className="text-center">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>{pagedInvoices.map((invoice) => {
+                  const balance = Number(invoice.total) - Number(invoice.paid);
+                  const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
+                  const productLabel = items[0]?.name ?? (invoice.items > 0 ? 'Legacy sale' : '—');
+                  const customerRow = customers.find((c) => c.name === invoice.customer);
+                  const invoiceTotal = Number(invoice.total);
+                  // How much of this invoice has actually been received, as a share of what was
+                  // billed. A zero-value invoice has no ratio to show, so its bar reads empty.
+                  const receivedPercent = invoiceTotal > 0
+                    ? Math.max(0, Math.min(100, Math.round((Number(invoice.paid) / invoiceTotal) * 100)))
+                    : 0;
+                  return <tr key={invoice.id}>
+                    <td><span className="pn-chip">{invoice.id}</span></td>
+                    <td>
+                      <div className="font-semibold">{invoice.customer}</div>
+                      {customerRow?.address
+                        ? <div className="text-muted text-sm flex items-center gap-2" style={{ maxWidth: '240px', marginTop: '2px' }}>
+                            <MapPin size={12} style={{ flex: 'none' }} />
+                            <span className="truncate">{customerRow.address}</span>
+                          </div>
+                        : invoice.customer === WALK_IN_CUSTOMER
+                          ? <div className="text-muted text-sm" style={{ marginTop: '2px' }}>Counter sale</div>
+                          : null}
+                    </td>
+                    <td className="text-muted">{invoice.date}</td>
+                    <td>
+                      <span style={{ fontWeight: 600 }}>{productLabel}</span>
+                      {items.length > 0 && <span className="badge badge-muted" style={{ marginLeft: '6px' }}>{items.length} item{items.length > 1 ? 's' : ''}</span>}
+                    </td>
+                    <td className="text-right">{invoice.items}</td>
+                    <td className="text-right">
+                      {Number(invoice.discount_amount) > 0
+                        ? <span className="text-danger">-₹{money(Number(invoice.discount_amount))} ({Number(invoice.discount_percent).toFixed(0)}%)</span>
+                        : <span className="text-muted">—</span>}
+                    </td>
+                    <td className="text-right font-semibold">₹{money(invoiceTotal)}</td>
+                    <td>
+                      {/* The bar is this invoice's own received-against-billed share, so a full bar
+                          always means settled no matter how large the invoice is. */}
+                      <div className={`qty-cell${Number(invoice.paid) <= 0 ? ' is-out' : ''}`}>
+                        <strong>₹{money(Number(invoice.paid))}</strong>
+                        <div className={`meter${balance <= 0 ? '' : Number(invoice.paid) <= 0 ? ' meter--out' : ' meter--low'}`} aria-hidden="true">
+                          <i style={{ width: `${receivedPercent}%` }} />
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      {balance <= 0
+                        ? <span className="badge badge-success"><CheckCircle2 size={12} />Paid</span>
+                        : Number(invoice.paid) > 0
+                          ? <span className="badge badge-warning"><AlertTriangle size={12} />Due ₹{money(balance)}</span>
+                          : <span className="badge badge-danger"><XCircle size={12} />Unpaid</span>}
+                    </td>
+                    <td className="text-center"><div className="flex justify-between gap-1 items-center">
+                      <button className="btn btn-ghost btn-sm" aria-label={`View ${invoice.id}`} title="View invoice" onClick={() => setViewingInvoice(invoice)}><Eye size={14} /></button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        aria-label={`Edit ${invoice.id}`}
+                        title={items.length > 0 ? 'Edit invoice' : "Edit unavailable — this invoice predates line-item tracking"}
+                        disabled={items.length === 0}
+                        style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+                        onClick={() => items.length > 0 && openEditInvoice(invoice)}
+                      ><Pencil size={14} /></button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        aria-label={`Return items from ${invoice.id}`}
+                        title={items.length > 0 ? 'Create partial return / credit note' : 'Return unavailable — this invoice predates line-item tracking'}
+                        disabled={items.length === 0 || loadingReturn}
+                        style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+                        onClick={() => items.length > 0 && openSalesReturn(invoice)}
+                      ><Undo2 size={14} /></button>
+                      <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={printCurrentPage}><Printer size={14} /></button>
+                      <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`} title="Delete invoice" style={{ color: 'var(--color-danger)' }} onClick={() => setDeleteCandidate(invoice)}><Trash2 size={14} /></button>
+                    </div></td>
+                  </tr>;
+                })}
+                {pagedInvoices.length === 0 && (
+                  <tr><td colSpan={10}><div className="empty-state">
+                    <div className="empty-state-icon"><Receipt size={22} /></div>
+                    <p className="empty-state-title">
+                      {invoicesLoading ? 'Loading invoices…' : search ? 'No invoices match your search' : paymentFilter !== 'all' ? 'Nothing in this view' : 'No invoices yet'}
+                    </p>
+                    <p className="empty-state-desc">
+                      {invoicesLoading
+                        ? 'Fetching records for the active company.'
+                        : search
+                          ? 'Try a different search term.'
+                          : paymentFilter !== 'all'
+                            ? 'No invoice on file falls into this payment status.'
+                            : 'Create your first sales invoice to get started.'}
+                    </p>
+                  </div></td></tr>
+                )}
+                </tbody>
+              </table>
+            </div>
+
+            {visibleInvoices.length > 0 && (
+              <div className="pager">
+                <div className="pager-info">
+                  Showing <strong>{pageStart + 1}–{pageStart + pagedInvoices.length}</strong> of <strong>{visibleInvoices.length}</strong> invoices
+                  {' · '}page total <strong>₹{money(pageTotal)}</strong> · received <strong>₹{money(pageReceived)}</strong> · balance due <strong>₹{money(pageDue)}</strong>
+                </div>
+                {totalPages > 1 && (
+                  <div className="pager-controls">
+                    <button type="button" className="pager-btn" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>
+                      <ChevronLeft size={14} />
+                    </button>
+                    {pageWindow(currentPage, totalPages).map((entry, index) => (
+                      entry === 'gap'
+                        ? <span key={`gap-${index}`} className="pager-info">…</span>
+                        : (
+                          <button
+                            key={entry}
+                            type="button"
+                            className={`pager-btn${entry === currentPage ? ' active' : ''}`}
+                            aria-current={entry === currentPage ? 'page' : undefined}
+                            aria-label={`Page ${entry}`}
+                            onClick={() => setPage(entry)}
+                          >
+                            {entry}
+                          </button>
+                        )
+                    ))}
+                    <button type="button" className="pager-btn" aria-label="Next page" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}>
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
-            </tbody>
-          </table></div>
+          </div>
         </>
       )}
 
       {activeTab === 'quotations' && (
-        <>
-        <div className="flex justify-between items-center mb-4">
-          <button className="btn btn-ghost btn-sm" onClick={() => setActiveTab('invoices')}><ArrowLeft size={14} /> Back to Invoices</button>
-          <button className="btn btn-primary btn-sm" onClick={openQuotation}><Plus size={14} /> Create Quotation</button>
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="tbl-toolbar">
+            <div className="tbl-toolbar-title">
+              <strong>Quotations</strong>
+              <small>Convert an accepted quote into a sales invoice — stock moves only on conversion</small>
+            </div>
+            <div className="tbl-tools">
+              <button className="btn btn-ghost btn-sm" onClick={() => setActiveTab('invoices')}><ArrowLeft size={14} /> Back to Invoices</button>
+              <button className="btn btn-primary btn-sm" onClick={openQuotation}><Plus size={14} /> Create Quotation</button>
+            </div>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="erp-table" style={{ minWidth: '900px' }}>
+              <thead><tr><th>Quote #</th><th>Customer Name</th><th>Quote Date</th><th>Valid Until</th><th className="text-right">Total Amount</th><th>Status</th><th className="text-center">Actions</th></tr></thead>
+              <tbody>{quotations.map((quote) => <tr key={quote.id}>
+                <td><span className="pn-chip">{quote.id}</span></td><td style={{ fontWeight: 600 }}>{quote.customer}</td><td className="text-muted">{quote.date}</td><td>{quote.validity}</td><td className="text-right font-semibold">₹{money(Number(quote.total))}</td>
+                <td><span className={`badge ${quote.status === 'converted' || quote.status === 'accepted' ? 'badge-success' : quote.validity < todayIso() ? 'badge-warning' : 'badge-info'}`}>{quote.status === 'draft' && quote.validity < todayIso() ? 'EXPIRED' : quote.status.toUpperCase()}</span></td>
+                <td className="text-center"><div className="flex justify-between gap-1 items-center">
+                  <button className="btn btn-ghost btn-sm" title="View quotation" aria-label={`View ${quote.id}`} disabled={loadingQuotation} onClick={() => void loadQuotationFor(quote, 'view')}><Eye size={14} /></button>
+                  <button className="btn btn-ghost btn-sm" title="Edit quotation" aria-label={`Edit ${quote.id}`} disabled={loadingQuotation || quote.status === 'converted'} onClick={() => void loadQuotationFor(quote, 'edit')}><Pencil size={14} /></button>
+                  <button className="btn btn-ghost btn-sm" title="Print quotation" aria-label={`Print ${quote.id}`} disabled={loadingQuotation} onClick={() => void loadQuotationFor(quote, 'print')}><Printer size={14} /></button>
+                  <button className="btn btn-secondary btn-sm" disabled={convertingQuotationId === quote.id || quote.status === 'converted'} onClick={() => void convertQuote(quote)}>{convertingQuotationId === quote.id ? 'Converting…' : quote.status === 'converted' ? 'Converted' : 'Convert'}</button>
+                </div></td>
+              </tr>)}
+              {quotations.length === 0 && (
+                <tr><td colSpan={7}><div className="empty-state"><p className="empty-state-title">{quotationsLoading ? 'Loading quotations…' : 'No quotations yet'}</p><p className="empty-state-desc">{quotationsLoading ? 'Fetching records for the active company.' : 'This company has no quotations on file.'}</p></div></td></tr>
+              )}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div className="table-wrap"><table className="erp-table">
-          <thead><tr><th>Quote #</th><th>Customer Name</th><th>Quote Date</th><th>Valid Until</th><th className="text-right">Total Amount</th><th>Status</th><th className="text-center">Actions</th></tr></thead>
-          <tbody>{quotations.map((quote) => <tr key={quote.id}>
-            <td style={{ fontWeight: 700, color: 'var(--brand-primary)' }}>{quote.id}</td><td style={{ fontWeight: 600 }}>{quote.customer}</td><td className="text-muted">{quote.date}</td><td>{quote.validity}</td><td className="text-right font-semibold">₹{quote.total.toLocaleString()}</td>
-            <td><span className={`badge ${quote.status === 'converted' || quote.status === 'accepted' ? 'badge-success' : quote.validity < todayIso() ? 'badge-warning' : 'badge-info'}`}>{quote.status === 'draft' && quote.validity < todayIso() ? 'EXPIRED' : quote.status.toUpperCase()}</span></td>
-            <td className="text-center"><div className="flex justify-between gap-1 items-center">
-              <button className="btn btn-ghost btn-sm" title="View quotation" aria-label={`View ${quote.id}`} disabled={loadingQuotation} onClick={() => void loadQuotationFor(quote, 'view')}><Eye size={14} /></button>
-              <button className="btn btn-ghost btn-sm" title="Edit quotation" aria-label={`Edit ${quote.id}`} disabled={loadingQuotation || quote.status === 'converted'} onClick={() => void loadQuotationFor(quote, 'edit')}><Pencil size={14} /></button>
-              <button className="btn btn-ghost btn-sm" title="Print quotation" aria-label={`Print ${quote.id}`} disabled={loadingQuotation} onClick={() => void loadQuotationFor(quote, 'print')}><Printer size={14} /></button>
-              <button className="btn btn-secondary btn-sm" disabled={convertingQuotationId === quote.id || quote.status === 'converted'} onClick={() => void convertQuote(quote)}>{convertingQuotationId === quote.id ? 'Converting…' : quote.status === 'converted' ? 'Converted' : 'Convert'}</button>
-            </div></td>
-          </tr>)}
-          {quotations.length === 0 && (
-            <tr><td colSpan={7}><div className="empty-state"><p className="empty-state-title">{quotationsLoading ? 'Loading quotations…' : 'No quotations yet'}</p><p className="empty-state-desc">{quotationsLoading ? 'Fetching records for the active company.' : 'This company has no quotations on file.'}</p></div></td></tr>
-          )}
-          </tbody>
-        </table></div>
-        </>
       )}
 
       {viewingQuotation && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '720px' }} role="dialog" aria-modal="true" aria-labelledby="view-quotation-title">
@@ -603,7 +994,7 @@ export default function SalesPage() {
             <thead><tr><th>Product</th><th className="text-right">Qty</th><th className="text-right">Unit Price</th><th className="text-right">Line Total</th></tr></thead>
             <tbody>
               {invoiceItems.filter((item) => item.invoice_id === viewingInvoice.id).map((item) => (
-                <tr key={item.id}><td>{item.name}</td><td className="text-right">{item.qty}</td><td className="text-right">₹{Number(item.unit_price).toLocaleString()}</td><td className="text-right">₹{Number(item.line_total).toLocaleString()}</td></tr>
+                <tr key={item.id}><td>{item.name}</td><td className="text-right">{item.qty}</td><td className="text-right">₹{money(Number(item.unit_price))}</td><td className="text-right">₹{money(Number(item.line_total))}</td></tr>
               ))}
               {invoiceItems.filter((item) => item.invoice_id === viewingInvoice.id).length === 0 && (
                 <tr><td colSpan={4}><p className="text-muted text-sm" style={{ padding: '12px 0' }}>Line items weren&apos;t recorded for this older invoice — only the total is available.</p></td></tr>
@@ -611,10 +1002,10 @@ export default function SalesPage() {
             </tbody>
           </table></div>
           <div className="report-summary">
-            {Number(viewingInvoice.discount_amount) > 0 && <div className="report-line"><span>Discount ({Number(viewingInvoice.discount_percent).toFixed(0)}%)</span><span className="text-danger">-₹{Number(viewingInvoice.discount_amount).toLocaleString()}</span></div>}
-            <div className="report-line report-strong"><span>Total</span><strong>₹{Number(viewingInvoice.total).toLocaleString()}</strong></div>
-            <div className="report-line"><span>Paid</span><strong className="text-success">₹{Number(viewingInvoice.paid).toLocaleString()}</strong></div>
-            <div className="report-line"><span>Balance</span><strong className="text-danger">₹{(Number(viewingInvoice.total) - Number(viewingInvoice.paid)).toLocaleString()}</strong></div>
+            {Number(viewingInvoice.discount_amount) > 0 && <div className="report-line"><span>Discount ({Number(viewingInvoice.discount_percent).toFixed(0)}%)</span><span className="text-danger">-₹{money(Number(viewingInvoice.discount_amount))}</span></div>}
+            <div className="report-line report-strong"><span>Total</span><strong>₹{money(Number(viewingInvoice.total))}</strong></div>
+            <div className="report-line"><span>Paid</span><strong className="text-success">₹{money(Number(viewingInvoice.paid))}</strong></div>
+            <div className="report-line"><span>Balance</span><strong className="text-danger">₹{money(Number(viewingInvoice.total) - Number(viewingInvoice.paid))}</strong></div>
           </div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setViewingInvoice(null)}>Close</button></div>
@@ -654,11 +1045,25 @@ export default function SalesPage() {
       </div></div>}
 
       {showInvoiceModal && (
-        <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="invoice-modal-title">
+        <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '900px' }} role="dialog" aria-modal="true" aria-labelledby="invoice-modal-title">
           <form onSubmit={saveInvoice}>
-            <div className="modal-header"><h3 id="invoice-modal-title" className="modal-title">{editingInvoice ? `Edit ${editingInvoice.id}` : 'Create Sales Invoice'}</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>✕</button></div>
+            <div className="modal-header">
+              <div>
+                <h3 id="invoice-modal-title" className="modal-title">{editingInvoice ? `Edit ${editingInvoice.id}` : 'Create Sales Invoice'}</h3>
+                {/* No invoice number is shown for a new sale: it is generated inside
+                    jde_save_sales_invoice on the server and simply is not known until the save
+                    comes back. An edit shows the real one, which is already in the title. */}
+                <div className="text-muted text-sm flex items-center gap-2" style={{ marginTop: '3px', flexWrap: 'wrap' }}>
+                  <span>Tax invoice under GST</span>
+                  {placeOfSupply && <><span aria-hidden="true">·</span><span>Place of supply · {placeOfSupply}</span></>}
+                  {!editingInvoice && <><span aria-hidden="true">·</span><span>Number assigned on save</span></>}
+                </div>
+              </div>
+              <button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>✕</button>
+            </div>
             <div className="modal-body flex flex-col gap-4">
               {invoiceError && <div className="alert alert-danger" role="alert">{invoiceError}</div>}
+
               <div className="form-grid-2">
                 <div className="form-group">
                   <label className="form-label">Customer</label>
@@ -666,57 +1071,237 @@ export default function SalesPage() {
                     <select className="form-input form-select" value={customer} onChange={(event) => setCustomer(event.target.value)}><option value="">Walk-in Sale (no customer)</option>{customers.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}</select>
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAddCustomer(true)}>+ New</button>
                   </div>
-                </div>
-                <div className="form-group"><label className="form-label">Invoice Date</label><input type="date" className="form-input" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} /></div>
-              </div>
-              <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Invoice Line Items</h4>
-                {partOptions.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Add parts in Inventory before creating an invoice.</p>}
-                <datalist id="sales-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>
-                {lines.map((line, index) => {
-                  const matched = partOptions.find((part) => part.value === line.part);
-                  return <div key={index} className="form-grid-4 mb-2">
-                    <div className="form-group">
-                      <label className="form-label">Select Part</label>
-                      <input list="sales-part-options" className="form-input" placeholder="Type to search a part…" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }} />
-                      {line.part.trim() && !matched && <small className="text-danger">No matching part in Inventory</small>}
+                  {/* Both of these are fields on the customer record itself — nothing is inferred. */}
+                  {selectedCustomer ? (
+                    <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+                      {selectedCustomer.gstin
+                        ? <span className="pn-chip">GSTIN {selectedCustomer.gstin}</span>
+                        : <span className="text-muted text-sm">No GSTIN on file</span>}
+                      {selectedCustomer.address && (
+                        <span className="text-muted text-sm truncate" style={{ maxWidth: '260px' }}>{selectedCustomer.address}</span>
+                      )}
                     </div>
-                    <div className="form-group"><label className="form-label">Category</label><input type="text" className="form-input" value={matched?.category ?? '-'} disabled /></div>
-                    <div className="form-group"><label className="form-label">Qty</label><input type="number" min="1" className="form-input" value={line.qty} onChange={(event) => updateLine(index, { qty: Number(event.target.value) })} /></div>
-                    <div className="form-group"><label className="form-label">Unit Price (₹)</label><input type="number" min="0" className="form-input" value={line.price} onChange={(event) => updateLine(index, { price: Number(event.target.value) })} /></div>
-                  </div>;
-                })}
-                {partOptions.length > 0 && <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setLines((current) => [...current, { part: '', qty: 1, price: 0 }])}>+ Add Item Row</button>}
-              </div>
-              <div className="form-grid-2">
-                <div className="form-group"><label className="form-label">Discount (%)</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={discountPercent} onChange={(event) => setDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} /></div>
-                <div className="form-group"><label className="form-label">Discount Amount (₹)</label><input type="text" className="form-input" value={discountAmount.toFixed(2)} disabled /></div>
-              </div>
-              <div className="form-grid-2">
-                <div className="form-group"><label className="form-label">GST Rate (%)</label><input type="number" min="0" max="28" step="0.1" className="form-input" value={gstPercent} onChange={(event) => setGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} /></div>
-                <div className="form-group"><label className="form-label">GST Amount (₹, included in total)</label><input type="text" className="form-input" value={gstAmount.toFixed(2)} disabled /></div>
-              </div>
-              <div className="form-grid-2">
-                <div className="form-group">
-                  <label className="form-label">Payment Received</label>
-                  <select className="form-input form-select" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)}>
-                    <option value="paid">Paid in Full</option>
-                    <option value="partial">Partially Paid</option>
-                    <option value="unpaid">Unpaid (Credit)</option>
-                  </select>
+                  ) : (
+                    <span className="text-muted text-sm">Walk-in sale — billed to the counter, no customer account.</span>
+                  )}
                 </div>
-                {paymentStatus === 'partial' && (
-                  <div className="form-group"><label className="form-label">Amount Received (₹)</label><input type="number" min="0" max={total} className="form-input" value={amountPaid} onChange={(event) => setAmountPaid(Number(event.target.value))} /></div>
-                )}
+                <div className="form-group">
+                  <label className="form-label">Invoice Date</label>
+                  <input type="date" className="form-input" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} />
+                  <span className="text-muted text-sm">Date the goods leave the counter</span>
+                </div>
               </div>
-              <div className="flex justify-between items-center invoice-summary">
-                <div><span className="text-muted">Subtotal: </span><strong>₹{subtotal.toLocaleString()}</strong></div>
-                {discountAmount > 0 && <div><span className="text-muted">Discount: </span><strong className="text-danger">-₹{discountAmount.toFixed(2)}</strong></div>}
-                <div><span className="text-muted">GST ({gstPercent}% included): </span><strong>₹{gstAmount.toFixed(2)}</strong></div>
-                <div><span className="text-muted">Received: </span><strong className="text-success">₹{paidAmount.toLocaleString()}</strong></div>
-                <div><strong>Total Payable: </strong><span className="invoice-total">₹{total.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
+
+              <div className="table-wrap">
+                <div className="tbl-toolbar">
+                  <div className="tbl-toolbar-title">
+                    <strong>Line items</strong>
+                    <small>Pick a part from Inventory — its rate fills in from the catalogue sale price</small>
+                  </div>
+                </div>
+
+                <datalist id="sales-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table className="erp-table" style={{ minWidth: '780px' }}>
+                    <thead>
+                      <tr>
+                        <th>Part &amp; Description</th>
+                        <th style={{ width: '96px' }}>HSN</th>
+                        <th className="text-right" style={{ width: '168px' }}>Qty</th>
+                        <th className="text-right" style={{ width: '132px' }}>Rate</th>
+                        <th className="text-right" style={{ width: '130px' }}>Amount</th>
+                        <th style={{ width: '54px' }} aria-label="Remove line"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lines.map((line, index) => {
+                        const matched = partOptions.find((part) => part.value === line.part);
+                        return (
+                          <tr key={index}>
+                            <td>
+                              <input
+                                list="sales-part-options"
+                                className="form-input"
+                                placeholder="Type or scan a part number…"
+                                value={line.part}
+                                onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }}
+                              />
+                              {/* Brand and stock are read straight off the matched product row. */}
+                              {matched && (
+                                <div className="flex items-center gap-2 mt-1" style={{ flexWrap: 'wrap' }}>
+                                  <span className="pn-chip">{matched.partNumber}</span>
+                                  {matched.brand && <span className="text-muted text-sm">{matched.brand} ·</span>}
+                                  <span className="text-muted text-sm">{matched.stock} in stock</span>
+                                </div>
+                              )}
+                              {line.part.trim() && !matched && <small className="text-danger">No matching part in Inventory</small>}
+                            </td>
+                            <td>
+                              {matched?.hsn
+                                ? <span className="pn-chip">{matched.hsn}</span>
+                                : <span className="text-muted">—</span>}
+                            </td>
+                            <td>
+                              {/* A stepper wrapped around the same number input as before: every
+                                  path here writes through updateLine(index, { qty }), and neither
+                                  button can take the quantity below one. */}
+                              <div className="flex items-center gap-2" style={{ justifyContent: 'flex-end' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  aria-label={`Decrease quantity on line ${index + 1}`}
+                                  disabled={Number(line.qty) <= 1}
+                                  onClick={() => updateLine(index, { qty: Math.max(1, Number(line.qty) - 1) })}
+                                ><Minus size={12} /></button>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  className="form-input"
+                                  style={{ width: '62px', textAlign: 'center', padding: '7px 6px' }}
+                                  aria-label={`Quantity on line ${index + 1}`}
+                                  value={line.qty}
+                                  onChange={(event) => updateLine(index, { qty: Number(event.target.value) })}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  aria-label={`Increase quantity on line ${index + 1}`}
+                                  onClick={() => updateLine(index, { qty: Math.max(1, Number(line.qty) + 1) })}
+                                ><Plus size={12} /></button>
+                              </div>
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                className="form-input"
+                                style={{ textAlign: 'right' }}
+                                aria-label={`Rate on line ${index + 1}`}
+                                value={line.price}
+                                onChange={(event) => updateLine(index, { price: Number(event.target.value) })}
+                              />
+                            </td>
+                            <td className="text-right font-semibold">₹{paise(line.qty * line.price)}</td>
+                            <td className="text-center">
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                aria-label={`Remove line ${index + 1}`}
+                                title="Remove this line"
+                                style={{ color: 'var(--color-danger)' }}
+                                onClick={() => setLines((current) => current.filter((_, lineIndex) => lineIndex !== index))}
+                              ><X size={14} /></button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {lines.length === 0 && (
+                        <tr><td colSpan={6}><div className="empty-state" style={{ padding: '28px 20px' }}>
+                          <p className="empty-state-title">{partOptions.length === 0 ? 'No parts to sell yet' : 'No lines on this invoice'}</p>
+                          <p className="empty-state-desc">{partOptions.length === 0 ? 'Add parts in Inventory before creating an invoice.' : 'Add a line below to start billing.'}</p>
+                        </div></td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="pager">
+                  {partOptions.length > 0
+                    ? <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLines((current) => [...current, { part: '', qty: 1, price: 0 }])}><Plus size={14} /> Add line — type or scan a part number</button>
+                    : <span className="pager-info">Add parts in Inventory before creating an invoice.</span>}
+                  <div className="pager-info"><strong>{lines.length}</strong> {lines.length === 1 ? 'line' : 'lines'}</div>
+                </div>
+              </div>
+
+              <div className="form-grid-2">
+                <div className="flex flex-col gap-4">
+                  <div className="form-grid-2">
+                    <div className="form-group">
+                      <label className="form-label">Discount (%)</label>
+                      <input type="number" min="0" max="100" step="0.1" className="form-input" value={discountPercent} onChange={(event) => setDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} />
+                      <span className="text-muted text-sm">Applied on the subtotal</span>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">GST Rate (%)</label>
+                      <input type="number" min="0" max="28" step="0.1" className="form-input" value={gstPercent} onChange={(event) => setGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} />
+                      {/* Only claims intra/inter-state when both GSTINs are on file to compare. */}
+                      <span className="text-muted text-sm">
+                        {supplyKind === 'intra'
+                          ? 'Intra-state · CGST + SGST'
+                          : supplyKind === 'inter'
+                            ? 'Inter-state · IGST'
+                            : 'Charged on the taxable value'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="form-grid-2">
+                    <div className="form-group">
+                      <label className="form-label">Payment Received</label>
+                      <select className="form-input form-select" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)}>
+                        <option value="paid">Paid in Full</option>
+                        <option value="partial">Partially Paid</option>
+                        <option value="unpaid">Unpaid (Credit)</option>
+                      </select>
+                    </div>
+                    {paymentStatus === 'partial' && (
+                      <div className="form-group"><label className="form-label">Amount Received (₹)</label><input type="number" min="0" max={total} className="form-input" value={amountPaid} onChange={(event) => setAmountPaid(Number(event.target.value))} /></div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Every figure below is read straight from the totals computed above — nothing
+                    here is recalculated, and the CGST/SGST or IGST breakdown is a presentation
+                    of the same gstAmount, never a second sum. */}
+                <div className="card" style={{ background: 'var(--surface-2)' }}>
+                  <div className="report-summary" style={{ maxWidth: 'none', margin: 0, padding: 0, gap: '0' }}>
+                    <div className="report-line"><span className="text-muted">Subtotal</span><strong>₹{paise(subtotal)}</strong></div>
+                    <div className="report-line">
+                      <span className="text-muted">Discount ({discountPercent}%)</span>
+                      {discountAmount > 0
+                        ? <strong className="text-danger">-₹{paise(discountAmount)}</strong>
+                        : <strong>₹{paise(0)}</strong>}
+                    </div>
+                    <div className="report-line report-strong"><span>Taxable value</span><strong>₹{paise(taxableAmount)}</strong></div>
+                    <div className="report-line"><span className="text-muted">GST ({gstPercent}%)</span><strong>₹{paise(gstAmount)}</strong></div>
+                  </div>
+
+                  <div className="flex gap-2 mt-2" style={{ flexWrap: 'wrap' }}>
+                    {supplyKind === 'inter'
+                      ? <span className="badge badge-muted">IGST {gstPercent}% · ₹{paise(gstAmount)}</span>
+                      : <>
+                          <span className="badge badge-muted">CGST {halfGstPercent}% · ₹{paise(gstAmount / 2)}</span>
+                          <span className="badge badge-muted">SGST {halfGstPercent}% · ₹{paise(gstAmount / 2)}</span>
+                        </>}
+                  </div>
+
+                  <div className="report-line mt-2" style={{ borderBottom: 'none', paddingBottom: 0 }}>
+                    <span className="text-muted">Received</span>
+                    <strong className="text-success">₹{paise(paidAmount)}</strong>
+                  </div>
+
+                  <div className="report-total mt-2" style={{ background: 'var(--amber-tint)', borderLeftColor: 'var(--amber)' }}>
+                    <div>
+                      <strong style={{ fontSize: '12.5px', color: 'var(--amber-3)' }}>Total Payable</strong>
+                      <small>Inclusive of GST ₹{paise(gstAmount)}</small>
+                    </div>
+                    <strong style={{ color: 'var(--amber-3)' }}>₹{paise(total)}</strong>
+                  </div>
+                </div>
               </div>
             </div>
-            <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || savingInvoice}>{savingInvoice ? 'Saving…' : editingInvoice ? 'Save Changes' : 'Generate & Save Invoice'}</button></div>
+            <div className="modal-footer">
+              <div className="text-muted text-sm" style={{ marginRight: 'auto', maxWidth: '340px' }}>
+                {total <= 0
+                  ? 'Add at least one line to bill this sale.'
+                  : newOutstanding > 0
+                    ? <>₹{paise(paidAmount)} received now · <strong>₹{paise(newOutstanding)}</strong> stays outstanding{selectedCustomer ? ` on ${selectedCustomer.name}'s account` : ' on this invoice'}.</>
+                    : 'Settled in full — nothing will be added to any outstanding balance.'}
+              </div>
+              <button type="button" className="btn btn-secondary" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>Cancel</button>
+              <button type="submit" className="btn btn-primary" disabled={!total || savingInvoice}>{savingInvoice ? 'Saving…' : editingInvoice ? `Save Changes · ₹${paise(total)}` : `Create Invoice · ₹${paise(total)}`}</button>
+            </div>
           </form>
         </div></div>
       )}
