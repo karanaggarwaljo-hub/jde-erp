@@ -11,13 +11,13 @@ const REGISTRY: Record<string, AiProvider> = {
 
 const DEFAULT_ORDER = 'gemini,groq';
 
-/** A single AI call shouldn't hold a request open indefinitely — Vercel would kill the whole
- *  function first and the user would never reach the fallback. Documents take longer to read
- *  than a paragraph of text, so they get a longer leash. */
+/** Keep the primary provider on a short leash so a slow provider does not make the user wait
+ * before the already-configured fallback gets a chance. Attachments genuinely take longer to
+ * read, so they receive a larger (but still bounded) budget. */
 const timeoutMs = (request: AiJsonRequest): number => {
   const configured = Number(process.env.AI_TIMEOUT_MS);
   if (Number.isFinite(configured) && configured > 0) return configured;
-  return request.attachments?.length ? 45_000 : 25_000;
+  return request.attachments?.length ? 30_000 : 14_000;
 };
 
 function orderedProviders(): AiProvider[] {
@@ -62,42 +62,30 @@ export async function generateJson<T>(request: AiJsonRequest): Promise<{ data: T
   const attempts: { provider: string; kind: AiFailureKind; message: string }[] = [];
 
   for (const provider of candidates) {
-    // "Transient" means exactly what it says — a brief spike or a dropped connection — so each
-    // provider gets one second chance before we give up on it. Any other kind of failure will
-    // repeat identically, and retrying it only makes the user wait longer.
-    for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const result = await provider.generateJson(request, AbortSignal.timeout(timeoutMs(request)));
+
+      let data: unknown;
       try {
-        const result = await provider.generateJson(request, AbortSignal.timeout(timeoutMs(request)));
-
-        let data: unknown;
-        try {
-          data = JSON.parse(result.text);
-        } catch {
-          throw new AiProviderError('Response was not valid JSON.', 'empty', provider.name);
-        }
-        if (typeof data !== 'object' || data === null || Array.isArray(data)) {
-          throw new AiProviderError('Response was not a JSON object.', 'empty', provider.name);
-        }
-
-        markHealthy(provider.name);
-        if (attempts.length) {
-          console.warn(`[ai] ${provider.name} answered after ${attempts.map((a) => `${a.provider}:${a.kind}`).join(', ')}`);
-        }
-        return { data: data as T, provider: provider.name, model: result.model };
-      } catch (error) {
-        const kind = classifyError(error);
-        const message = error instanceof Error ? error.message : String(error);
-        attempts.push({ provider: provider.name, kind, message });
-        console.error(`[ai] ${provider.name} failed (${kind}): ${message}`);
-
-        if (kind === 'transient' && attempt === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
-          continue;
-        }
-
-        markUnavailable(provider.name, cooldownMs(kind));
-        break;
+        data = JSON.parse(result.text);
+      } catch {
+        throw new AiProviderError('Response was not valid JSON.', 'empty', provider.name);
       }
+      if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+        throw new AiProviderError('Response was not a JSON object.', 'empty', provider.name);
+      }
+
+      markHealthy(provider.name);
+      if (attempts.length) {
+        console.warn(`[ai] ${provider.name} answered after ${attempts.map((a) => `${a.provider}:${a.kind}`).join(', ')}`);
+      }
+      return { data: data as T, provider: provider.name, model: result.model };
+    } catch (error) {
+      const kind = classifyError(error);
+      const message = error instanceof Error ? error.message : String(error);
+      attempts.push({ provider: provider.name, kind, message });
+      console.error(`[ai] ${provider.name} failed (${kind}): ${message}`);
+      markUnavailable(provider.name, cooldownMs(kind));
     }
 
     // A request we built wrong fails identically everywhere — surface it instead of masking it.
