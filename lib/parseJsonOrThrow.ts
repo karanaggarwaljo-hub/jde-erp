@@ -16,6 +16,14 @@ export async function parseJsonOrThrow(res: Response, fallback: string): Promise
     }
   }
   if (!res.ok) {
+    if (res.status === 429) {
+      const retryAfter = Number(res.headers.get('Retry-After'));
+      const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? ` Please try again in about ${Math.ceil(retryAfter)} second${retryAfter > 1 ? 's' : ''}.` : ' Please wait a moment and try again.';
+      throw new Error(`The ERP is busy and did not save this action.${wait}`);
+    }
+    if (res.status >= 500) {
+      throw new Error('The ERP is temporarily unavailable. Your action was not saved — please try again in a moment.');
+    }
     const message = body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string'
       ? (body as { error: string }).error
       : `${fallback} (${res.status})`;

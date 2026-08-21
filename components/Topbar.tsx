@@ -39,15 +39,12 @@ function initialsFor(name: string | null, email: string): string {
   return initials || '?';
 }
 
-export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
-  const router = useRouter();
-  const topbarRef = useRef<HTMLElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState('');
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
-
+/**
+ * Notifications are useful, but they are not needed to render the top bar. Keeping their data
+ * reads inside the popover means opening any ERP page no longer also loads products, customers,
+ * suppliers, and catalog leads just to decide whether to show a badge the user may never open.
+ */
+function NotificationPopover({ onNavigate }: { onNavigate: () => void }) {
   const { rows: products } = useCompanyTable<Product>('products');
   const { rows: customers } = useCompanyTable<Customer>('customers');
   const { rows: suppliers } = useCompanyTable<Supplier>('suppliers');
@@ -56,7 +53,7 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
   const lowStockCount = products.filter((p) => Number(p.min_stock) > 0 && Number(p.current_stock) <= Number(p.min_stock)).length;
   const overdueCustomerCount = customers.filter((c) => Number(c.balance) > 0).length;
   const payableSupplierCount = suppliers.filter((s) => Number(s.balance) > 0).length;
-  const newLeadsCount = catalogLeads.filter((l) => l.status === 'new').length;
+  const newLeadsCount = catalogLeads.filter((lead) => lead.status === 'new').length;
 
   const notifications = [
     ...(lowStockCount > 0 ? [{ href: '/inventory', text: `${lowStockCount} part(s) need reordering`, tag: 'Inventory' }] : []),
@@ -64,6 +61,28 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
     ...(payableSupplierCount > 0 ? [{ href: '/purchases', text: `${payableSupplierCount} supplier payment(s) outstanding`, tag: 'Payables' }] : []),
     ...(newLeadsCount > 0 ? [{ href: '/catalog-admin/leads', text: `${newLeadsCount} new catalog quote request(s)`, tag: 'Website Catalog' }] : []),
   ];
+
+  return (
+    <div className="topbar-popover notification-popover">
+      <strong>Notifications</strong>
+      {notifications.length === 0 && <p className="popover-empty">Nothing needs attention right now.</p>}
+      {notifications.map((notification) => (
+        <Link key={notification.href} href={notification.href} prefetch={false} onClick={onNavigate}>
+          {notification.text} <small>{notification.tag}</small>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
+  const router = useRouter();
+  const topbarRef = useRef<HTMLElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -163,16 +182,9 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
         <div className="topbar-menu-wrap">
           <button className="btn btn-ghost btn-icon" aria-label="Notifications" aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((open) => !open); setProfileOpen(false); }}>
             <Bell size={18} />
-            {notifications.length > 0 && <span className="sidebar-badge notification-count">{notifications.length}</span>}
           </button>
           {notificationsOpen && (
-            <div className="topbar-popover notification-popover">
-              <strong>Notifications</strong>
-              {notifications.length === 0 && <p className="popover-empty">Nothing needs attention right now.</p>}
-              {notifications.map((n) => (
-                <Link key={n.href} href={n.href} onClick={() => setNotificationsOpen(false)}>{n.text} <small>{n.tag}</small></Link>
-              ))}
-            </div>
+            <NotificationPopover onNavigate={() => setNotificationsOpen(false)} />
           )}
         </div>
 
@@ -186,7 +198,7 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
           </button>
           {profileOpen && (
             <div className="topbar-popover profile-popover">
-              <Link href="/settings" onClick={() => setProfileOpen(false)}><Settings size={15} /> Account settings</Link>
+              <Link href="/settings" prefetch={false} onClick={() => setProfileOpen(false)}><Settings size={15} /> Account settings</Link>
               <button type="button" onClick={handleSignOut}><LogOut size={15} /> Sign out</button>
             </div>
           )}

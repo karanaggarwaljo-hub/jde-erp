@@ -17,6 +17,12 @@ type PurchaseOrder = { id: string; company_id: string; supplier: string; date: s
 type Grn = { id: string; company_id: string; po_number: string; supplier: string; received_at: string; status: string };
 type PoItem = { id: string; po_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_cost: number };
 
+type ImportLineReview = {
+  matchedProduct: Product | null;
+  warnings: string[];
+  costDifferencePercent: number | null;
+};
+
 function todayIso() {
   return new Date().toISOString().split('T')[0];
 }
@@ -31,6 +37,65 @@ function isScannableFile(file: File) {
 
 function cleanedGuess(text: string): string {
   return text.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
+}
+
+function normalizeImportText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Only use exact, explainable matches for imports. A fuzzy match that silently attaches a
+ * supplier's "Seal kit" to the wrong inventory part is much more costly than showing the owner
+ * one extra review warning. The selected datalist format ("PART-1 - Part name") is supported too.
+ */
+function matchImportedProduct(description: string, products: Product[]): Product | null {
+  const trimmed = description.trim();
+  const normalized = normalizeImportText(trimmed);
+  if (!normalized) return null;
+
+  return products.find((product) => {
+    const partNumber = product.part_number.trim();
+    const partNumberPrefix = partNumber
+      ? new RegExp(`^${partNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s*[-:|]\\s*|\\s*$)`, 'i')
+      : null;
+    return normalized === normalizeImportText(product.name)
+      || normalized === normalizeImportText(`${partNumber} - ${product.name}`)
+      || normalized === normalizeImportText(partNumber)
+      || Boolean(partNumberPrefix?.test(trimmed));
+  }) ?? null;
+}
+
+function reviewImportedLines(lines: ImportedLine[], products: Product[]): ImportLineReview[] {
+  const descriptionCounts = new Map<string, number>();
+  for (const line of lines) {
+    const key = normalizeImportText(line.description);
+    if (key) descriptionCounts.set(key, (descriptionCounts.get(key) ?? 0) + 1);
+  }
+
+  return lines.map((line) => {
+    const matchedProduct = matchImportedProduct(line.description, products);
+    const warnings: string[] = [];
+    const descriptionKey = normalizeImportText(line.description);
+    let costDifferencePercent: number | null = null;
+
+    if (!line.description.trim()) warnings.push('Missing item description');
+    if (!Number.isFinite(line.quantity) || line.quantity <= 0) warnings.push('Quantity must be greater than zero');
+    if (!Number.isFinite(line.unit_price) || line.unit_price <= 0) warnings.push('Unit cost must be greater than zero');
+    if (descriptionKey && (descriptionCounts.get(descriptionKey) ?? 0) > 1) warnings.push('This item appears more than once in this import');
+
+    if (!matchedProduct) {
+      if (line.description.trim()) warnings.push('No exact inventory match — a new part will be created');
+    } else if (matchedProduct.cost_price > 0 && line.unit_price > 0) {
+      costDifferencePercent = ((line.unit_price - matchedProduct.cost_price) / matchedProduct.cost_price) * 100;
+      if (Math.abs(costDifferencePercent) >= 5) {
+        warnings.push(`Cost is ${Math.abs(costDifferencePercent).toFixed(0)}% ${costDifferencePercent > 0 ? 'higher' : 'lower'} than previous cost (₹${Number(matchedProduct.cost_price).toLocaleString()})`);
+      }
+    } else if (matchedProduct.cost_price <= 0 && line.unit_price > 0) {
+      warnings.push('Matched part has no previous cost to compare');
+    }
+
+    return { matchedProduct, warnings, costDifferencePercent };
+  });
 }
 
 export default function PurchasesPage() {
@@ -66,6 +131,11 @@ export default function PurchasesPage() {
 
   const total = lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
   const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
+  const importReviews = importPreview ? reviewImportedLines(importPreview.lines, products) : [];
+  const importWarningCount = importReviews.reduce((count, review) => count + review.warnings.length, 0);
+  const importNewPartCount = importReviews.filter((review) => !review.matchedProduct).length;
+  const importPriceChangeCount = importReviews.filter((review) => review.costDifferencePercent !== null && Math.abs(review.costDifferencePercent) >= 5).length;
+  const importHasInvalidLine = importPreview?.lines.some((line) => !line.description.trim() || !Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.unit_price) || line.unit_price <= 0) ?? false;
 
   const openPurchaseModal = () => {
     setSupplierName('');
@@ -80,6 +150,12 @@ export default function PurchasesPage() {
 
   const updateLine = (index: number, patch: Partial<POLine>) => {
     setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+  };
+
+  const updateImportedLine = (index: number, patch: Partial<ImportedLine>) => {
+    setImportPreview((current) => current
+      ? { ...current, lines: current.lines.map((line, i) => (i === index ? { ...line, ...patch } : line)) }
+      : null);
   };
 
   async function resolveSupplier(name: string, gstin?: string): Promise<Supplier> {
@@ -289,6 +365,10 @@ export default function PurchasesPage() {
   const confirmImportedPO = async () => {
     if (!importPreview || !importPreview.supplier.trim() || !activeCompany) return;
     setImportError('');
+    if (importHasInvalidLine) {
+      setImportError('Fix every highlighted row before recording: each item needs a description, quantity, and unit cost greater than zero.');
+      return;
+    }
     setConfirmingImport(true);
     try {
       const supplierRow = await resolveSupplier(importPreview.supplier, importPreview.supplierGstin);
@@ -378,25 +458,67 @@ export default function PurchasesPage() {
 
       {activeTab === 'invoices' && <div className="card empty-state"><FileCheck size={32} /><p className="empty-state-title">Supplier invoice matching isn&apos;t available yet</p><p className="empty-state-desc">This will let you upload supplier invoices and match them against purchases — not built yet.</p></div>}
 
-      {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '480px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
+      {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
         <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Record Purchase from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={confirmingImport} onClick={() => setImportPreview(null)}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
           {importError && <div className="alert alert-danger" role="alert">{importError}</div>}
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-            Read <strong>{importPreview.lines.length} item(s)</strong> from <strong>{importPreview.fileName}</strong>, total ₹{importPreview.lines.reduce((s, l) => s + l.quantity * l.unit_price, 0).toLocaleString()}.
-          </p>
+          <div className="card card-sm bg-surface" style={{ padding: '12px' }}>
+            <div className="flex justify-between items-center" style={{ gap: '12px', flexWrap: 'wrap' }}>
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
+                Read <strong>{importPreview.lines.length} item(s)</strong> from <strong>{importPreview.fileName}</strong>, total <strong>₹{importPreview.lines.reduce((s, l) => s + l.quantity * l.unit_price, 0).toLocaleString()}</strong>.
+              </p>
+              <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+                <span className="badge badge-success">{importPreview.lines.length - importNewPartCount} matched</span>
+                {importNewPartCount > 0 && <span className="badge badge-warning">{importNewPartCount} new part{importNewPartCount === 1 ? '' : 's'}</span>}
+                {importPriceChangeCount > 0 && <span className="badge badge-warning">{importPriceChangeCount} price check{importPriceChangeCount === 1 ? '' : 's'}</span>}
+                {importWarningCount > 0 && <span className="badge badge-danger">{importWarningCount} review warning{importWarningCount === 1 ? '' : 's'}</span>}
+              </div>
+            </div>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '8px 0 0' }}>
+              Exact matches are attached to existing inventory. Unmatched rows create a new part when saved; review those carefully before continuing.
+            </p>
+          </div>
           <div className="form-group">
             <label className="form-label">Supplier</label>
             <input list="purchase-supplier-options" className="form-input" placeholder="Type or select a supplier" value={importPreview.supplier} onChange={(event) => setImportPreview({ ...importPreview, supplier: event.target.value })} />
             <datalist id="purchase-supplier-options">{supplierOptions.map((s) => <option key={s} value={s} />)}</datalist>
+            {importPreview.supplier.trim() && !suppliers.some((supplier) => supplier.name.toLowerCase() === importPreview.supplier.trim().toLowerCase()) && (
+              <small className="text-warning">New supplier — this name will be created when you record the purchase.</small>
+            )}
             {importPreview.supplierGstin.trim() && (
               <small style={{ color: 'var(--text-muted)' }}>
                 GSTIN read from document: {importPreview.supplierGstin.trim()} — saved against this supplier if it&apos;s a new one.
               </small>
             )}
           </div>
+          <div>
+            <div className="flex justify-between items-center" style={{ marginBottom: '8px', gap: '12px' }}>
+              <h4 style={{ fontSize: '13px', fontWeight: 600, margin: 0 }}>Review imported items</h4>
+              <span className="text-muted" style={{ fontSize: '12px' }}>Edit a row to correct it before saving</span>
+            </div>
+            <datalist id="import-part-options">{partOptions.map((option) => <option key={option.value} value={option.value} />)}</datalist>
+            <div className="table-wrap" style={{ maxHeight: '330px', overflowY: 'auto' }}>
+              <table className="erp-table">
+                <thead><tr><th>Item</th><th className="text-right">Qty</th><th className="text-right">Unit cost</th><th>Inventory match / review</th></tr></thead>
+                <tbody>{importPreview.lines.map((line, index) => {
+                  const review = importReviews[index];
+                  const isInvalid = !line.description.trim() || line.quantity <= 0 || line.unit_price <= 0;
+                  return <tr key={index} style={isInvalid ? { background: 'var(--color-danger-bg)' } : undefined}>
+                    <td style={{ minWidth: '220px' }}><input list="import-part-options" className="form-input" aria-label={`Item ${index + 1}`} value={line.description} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { description: event.target.value })} /></td>
+                    <td style={{ minWidth: '82px' }}><input type="number" min="1" className="form-input text-right" aria-label={`Quantity for item ${index + 1}`} value={line.quantity} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { quantity: Number(event.target.value) })} /></td>
+                    <td style={{ minWidth: '118px' }}><input type="number" min="0.01" step="0.01" className="form-input text-right" aria-label={`Unit cost for item ${index + 1}`} value={line.unit_price} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { unit_price: Number(event.target.value) })} /></td>
+                    <td style={{ minWidth: '260px' }}>
+                      {review?.matchedProduct ? <div><span className="badge badge-success">Matched</span> <strong style={{ fontSize: '12px' }}>{review.matchedProduct.part_number}</strong><div className="text-muted" style={{ fontSize: '12px', marginTop: '3px' }}>{review.matchedProduct.name}</div></div> : <span className="badge badge-warning">New part</span>}
+                      {review?.warnings.map((warning) => <div key={warning} className={warning.includes('must be') ? 'text-danger' : 'text-warning'} style={{ fontSize: '12px', marginTop: '4px' }}>{warning}</div>)}
+                    </td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </div>
+          </div>
+          {importHasInvalidLine && <div className="alert alert-danger" role="alert">Fix the red rows before recording this purchase.</div>}
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={confirmingImport} onClick={() => setImportPreview(null)}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier.trim() || confirmingImport}>{confirmingImport ? 'Saving…' : 'Record Purchase'}</button></div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={confirmingImport} onClick={() => setImportPreview(null)}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier.trim() || importHasInvalidLine || confirmingImport}>{confirmingImport ? 'Saving…' : `Record Purchase${importWarningCount > 0 ? ' After Review' : ''}`}</button></div>
       </div></div>}
 
       {showPurchaseModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="purchase-modal-title"><form onSubmit={recordPurchase}>
