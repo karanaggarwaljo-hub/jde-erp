@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { Plus, Printer, Search, Eye, Pencil, Trash2, ArrowRight, ArrowLeft, RotateCcw } from 'lucide-react';
+import { Plus, Printer, Search, Eye, Pencil, Trash2, ArrowRight, ArrowLeft, Undo2 } from 'lucide-react';
 import { printCurrentPage } from '@/lib/client-export';
 import { saveSalesInvoice, deleteSalesInvoice } from '@/lib/client-sales';
 import { createSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem } from '@/lib/client-sales-returns';
@@ -533,7 +533,7 @@ export default function SalesPage() {
                     disabled={items.length === 0 || loadingReturn}
                     style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                     onClick={() => items.length > 0 && openSalesReturn(invoice)}
-                  ><RotateCcw size={14} /></button>
+                  ><Undo2 size={14} /></button>
                   <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={printCurrentPage}><Printer size={14} /></button>
                   <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`} title="Delete invoice" style={{ color: 'var(--color-danger)' }} onClick={() => setDeleteCandidate(invoice)}><Trash2 size={14} /></button>
                 </div></td>
