@@ -13,6 +13,7 @@ export default function AIReportSummary({ reportType, data }: Props) {
   const [summary, setSummary] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const abortController = useRef<AbortController | null>(null);
   // Guards against out-of-order responses: while data is still loading (invoices/purchaseOrders
   // resolve async), this can fire once with an empty digest and again with the real one — without
   // this, a slower first response can land after and overwrite the correct later one.
@@ -21,6 +22,9 @@ export default function AIReportSummary({ reportType, data }: Props) {
   const dataKey = JSON.stringify(data);
 
   const fetchSummary = async () => {
+    abortController.current?.abort();
+    const controller = new AbortController();
+    abortController.current = controller;
     const thisRequest = ++requestId.current;
     setLoading(true);
     setError(null);
@@ -29,12 +33,14 @@ export default function AIReportSummary({ reportType, data }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reportType, data }),
+        signal: controller.signal,
       });
       const body = (await parseJsonOrThrow(res, 'Failed to summarize this report.')) as { summary: string };
       if (thisRequest !== requestId.current) return;
       setSummary(body.summary);
     } catch (err) {
       if (thisRequest !== requestId.current) return;
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       setError(err instanceof Error ? err.message : 'Failed to summarize this report.');
     } finally {
       if (thisRequest === requestId.current) setLoading(false);
@@ -42,8 +48,13 @@ export default function AIReportSummary({ reportType, data }: Props) {
   };
 
   useEffect(() => {
-    const timer = setTimeout(fetchSummary, 0);
-    return () => clearTimeout(timer);
+    // Report inputs settle over a few renders; waiting briefly avoids paying for a summary of
+    // the initial empty data and then immediately generating the real one as well.
+    const timer = setTimeout(fetchSummary, 450);
+    return () => {
+      clearTimeout(timer);
+      abortController.current?.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportType, dataKey]);
 

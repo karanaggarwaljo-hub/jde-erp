@@ -108,6 +108,26 @@ export async function insertRow(table: TableName, row: Record<string, unknown>):
   return data as Record<string, unknown>;
 }
 
+/**
+ * Bulk import uses one PostgREST insert instead of one browser/API/auth/database round trip per
+ * row. This is intentionally server-side only; callers still go through a protected API route.
+ */
+export async function insertRows(table: TableName, rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
+  if (rows.length === 0) return [];
+  const def = TABLES[table];
+  const fallbackCompanyId = def.companyScoped && rows.some((row) => !row.company_id)
+    ? await getActiveCompanyId()
+    : undefined;
+  const fullRows = rows.map((row) => ({
+    ...row,
+    [def.primaryKey]: row[def.primaryKey] ?? randomUUID(),
+    ...(def.companyScoped && !row.company_id ? { company_id: fallbackCompanyId ?? null } : {}),
+  }));
+  const { data, error } = await getClient().from(supaTable(table)).insert(fullRows).select();
+  if (error) throw error;
+  return (data as Record<string, unknown>[]) ?? [];
+}
+
 export async function updateRow(table: TableName, id: string, patch: Record<string, unknown>): Promise<Record<string, unknown> | undefined> {
   const def = TABLES[table];
   const safePatch = { ...patch };

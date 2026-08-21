@@ -226,7 +226,7 @@ export default function DashboardPage() {
       <div className="page-header">
         <div>
           <span className="eyebrow">Today at a glance</span>
-          <h1 className="page-title">Dashboard</h1>
+          <h1 className="page-title">Owner Dashboard</h1>
           <p className="page-subtitle">{headerSubline}</p>
         </div>
         <div className="flex items-center gap-2">

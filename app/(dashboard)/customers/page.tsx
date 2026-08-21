@@ -31,9 +31,16 @@ const TYPE_DOT: Record<string, string | undefined> = {
   retail: 'var(--ink-3)',
 };
 
+type CollectionQueueItem = {
+  customer: Customer;
+  oldestInvoice?: Invoice;
+  unpaidInvoiceCount: number;
+  daysOutstanding: number;
+};
+
 export default function CustomersPage() {
   const { rows: customers, loading, create, adjust } = useCompanyTable<Customer>('customers');
-  const { rows: invoices, update: updateInvoice } = useCompanyTable<Invoice>('invoices');
+  const { rows: invoices, loading: invoicesLoading, update: updateInvoice } = useCompanyTable<Invoice>('invoices');
   const [showModal, setShowModal] = useState(false);
   const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
@@ -41,6 +48,37 @@ export default function CustomersPage() {
   const [feedback, setFeedback] = useState('');
   const [filter, setFilter] = useState<LedgerFilter>('all');
   const [page, setPage] = useState(1);
+
+  // This is intentionally a review queue, not an automatic reminder sender. As a solo owner,
+  // it puts the oldest/largest receivables in one place while keeping the final message and
+  // payment decision under your control.
+  const collectionQueue = useMemo<CollectionQueueItem[]>(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    return customers
+      .filter((customer) => Number(customer.balance) > 0)
+      .map((customer) => {
+        const unpaidInvoices = invoices
+          .filter((invoice) => invoice.customer === customer.name && Number(invoice.total) > Number(invoice.paid))
+          .sort((a, b) => a.date.localeCompare(b.date));
+        const oldestInvoice = unpaidInvoices[0];
+        const oldestDate = oldestInvoice ? new Date(`${oldestInvoice.date}T00:00:00`) : null;
+        const daysOutstanding = oldestDate && !Number.isNaN(oldestDate.getTime())
+          ? Math.max(0, Math.floor((today.getTime() - oldestDate.getTime()) / 86_400_000))
+          : 0;
+
+        return { customer, oldestInvoice, unpaidInvoiceCount: unpaidInvoices.length, daysOutstanding };
+      })
+      .sort((a, b) => {
+        const aHasInvoice = a.oldestInvoice ? 1 : 0;
+        const bHasInvoice = b.oldestInvoice ? 1 : 0;
+        return bHasInvoice - aHasInvoice || b.daysOutstanding - a.daysOutstanding || Number(b.customer.balance) - Number(a.customer.balance);
+      });
+  }, [customers, invoices]);
+
+  const totalReceivables = collectionQueue.reduce((total, item) => total + Number(item.customer.balance), 0);
+  const agedReceivables = collectionQueue.filter((item) => item.daysOutstanding > 0);
 
   function overdueContext(customerName: string): string {
     const overdue = invoices
@@ -159,6 +197,37 @@ export default function CustomersPage() {
           </div>
         </div>
       )}
+
+      <section className="card mb-6" aria-labelledby="collections-queue-title">
+        <div className="card-header">
+          <div>
+            <h2 id="collections-queue-title" className="card-title">Collections to review</h2>
+            <p className="text-muted text-sm">Start with the oldest unpaid invoices. Draft a reminder, then record the payment once it arrives.</p>
+          </div>
+          <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {agedReceivables.length > 0 && <span className="badge badge-warning">{agedReceivables.length} aged</span>}
+            <span className={totalReceivables > 0 ? 'badge badge-danger' : 'badge badge-success'}>₹{totalReceivables.toLocaleString('en-IN')} due</span>
+          </div>
+        </div>
+        <div className="table-wrap" style={{ borderLeft: 'none', borderRight: 'none', borderBottom: 'none', borderRadius: 0 }}>
+          <table className="erp-table">
+            <thead><tr><th>Customer</th><th>Oldest unpaid invoice</th><th>Age</th><th className="text-right">Due</th><th className="text-center">Quick action</th></tr></thead>
+            <tbody>
+              {collectionQueue.slice(0, 8).map(({ customer, oldestInvoice, unpaidInvoiceCount: openCount, daysOutstanding }) => (
+                <tr key={customer.id}>
+                  <td><div className="font-semibold">{customer.name}</div><div className="text-muted text-sm">{customer.phone || customer.email || 'No contact details'}</div></td>
+                  <td>{oldestInvoice ? <><span className="text-brand font-semibold">{oldestInvoice.id}</span><div className="text-muted text-sm">{openCount} open invoice{openCount === 1 ? '' : 's'} · {oldestInvoice.date}</div></> : <span className="text-muted">No linked open invoice</span>}</td>
+                  <td>{oldestInvoice ? <span className={daysOutstanding > 30 ? 'badge badge-danger' : daysOutstanding > 0 ? 'badge badge-warning' : 'badge badge-info'}>{daysOutstanding === 0 ? 'Due today' : `${daysOutstanding} days`}</span> : <span className="text-muted">—</span>}</td>
+                  <td className="text-right"><strong className="text-danger">₹{Number(customer.balance).toLocaleString('en-IN')}</strong></td>
+                  <td className="text-center"><div className="flex gap-1 justify-center"><button className="btn btn-secondary btn-sm" onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /> Draft reminder</button><button className="btn btn-ghost btn-sm" onClick={() => openPayment(customer)}>Record received</button></div></td>
+                </tr>
+              ))}
+              {collectionQueue.length === 0 && <tr><td colSpan={5}><div className="empty-state"><p className="empty-state-title">{loading || invoicesLoading ? 'Loading collections…' : 'No customer payments need follow-up'}</p><p className="empty-state-desc">{loading || invoicesLoading ? 'Checking customer balances and open invoices.' : 'All customer balances are cleared. New outstanding invoices will appear here.'}</p></div></td></tr>}
+            </tbody>
+          </table>
+        </div>
+        {collectionQueue.length > 8 && <p className="text-muted text-sm" style={{ padding: '12px 16px 0' }}>Showing the first 8 priorities out of {collectionQueue.length} customers with money due.</p>}
+      </section>
 
       {owing.length > 0 && (
         <div className="alert alert-warning mb-4">

@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import { fetchGetWithRetry } from '@/lib/fetchGetWithRetry';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 export type Company = {
@@ -40,7 +41,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch('/api/companies/active');
+      const res = await fetchGetWithRetry('/api/companies/active');
       const body = (await parseJsonOrThrow(res, 'Failed to load company data.')) as { companies?: Company[] } | undefined;
       setCompanies(body?.companies ?? []);
       setConfigError(null);

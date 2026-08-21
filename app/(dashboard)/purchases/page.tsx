@@ -7,6 +7,7 @@ import {
   FileCheck,
   FileText,
   Upload,
+  Undo2,
   Receipt,
   Wallet,
   Truck,
@@ -22,6 +23,7 @@ import {
 } from 'lucide-react';
 import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
 import { savePurchase, receivePurchaseStock } from '@/lib/client-purchases';
+import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-purchase-returns';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
@@ -74,6 +76,12 @@ function pageWindow(current: number, total: number): Array<number | 'gap'> {
   return shown;
 }
 
+type ImportLineReview = {
+  matchedProduct: Product | null;
+  warnings: string[];
+  costDifferencePercent: number | null;
+};
+
 function todayIso() {
   return new Date().toISOString().split('T')[0];
 }
@@ -88,6 +96,65 @@ function isScannableFile(file: File) {
 
 function cleanedGuess(text: string): string {
   return text.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
+}
+
+function normalizeImportText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * Only use exact, explainable matches for imports. A fuzzy match that silently attaches a
+ * supplier's "Seal kit" to the wrong inventory part is much more costly than showing the owner
+ * one extra review warning. The selected datalist format ("PART-1 - Part name") is supported too.
+ */
+function matchImportedProduct(description: string, products: Product[]): Product | null {
+  const trimmed = description.trim();
+  const normalized = normalizeImportText(trimmed);
+  if (!normalized) return null;
+
+  return products.find((product) => {
+    const partNumber = product.part_number.trim();
+    const partNumberPrefix = partNumber
+      ? new RegExp(`^${partNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s*[-:|]\\s*|\\s*$)`, 'i')
+      : null;
+    return normalized === normalizeImportText(product.name)
+      || normalized === normalizeImportText(`${partNumber} - ${product.name}`)
+      || normalized === normalizeImportText(partNumber)
+      || Boolean(partNumberPrefix?.test(trimmed));
+  }) ?? null;
+}
+
+function reviewImportedLines(lines: ImportedLine[], products: Product[]): ImportLineReview[] {
+  const descriptionCounts = new Map<string, number>();
+  for (const line of lines) {
+    const key = normalizeImportText(line.description);
+    if (key) descriptionCounts.set(key, (descriptionCounts.get(key) ?? 0) + 1);
+  }
+
+  return lines.map((line) => {
+    const matchedProduct = matchImportedProduct(line.description, products);
+    const warnings: string[] = [];
+    const descriptionKey = normalizeImportText(line.description);
+    let costDifferencePercent: number | null = null;
+
+    if (!line.description.trim()) warnings.push('Missing item description');
+    if (!Number.isFinite(line.quantity) || line.quantity <= 0) warnings.push('Quantity must be greater than zero');
+    if (!Number.isFinite(line.unit_price) || line.unit_price <= 0) warnings.push('Unit cost must be greater than zero');
+    if (descriptionKey && (descriptionCounts.get(descriptionKey) ?? 0) > 1) warnings.push('This item appears more than once in this import');
+
+    if (!matchedProduct) {
+      if (line.description.trim()) warnings.push('No exact inventory match — a new part will be created');
+    } else if (matchedProduct.cost_price > 0 && line.unit_price > 0) {
+      costDifferencePercent = ((line.unit_price - matchedProduct.cost_price) / matchedProduct.cost_price) * 100;
+      if (Math.abs(costDifferencePercent) >= 5) {
+        warnings.push(`Cost is ${Math.abs(costDifferencePercent).toFixed(0)}% ${costDifferencePercent > 0 ? 'higher' : 'lower'} than previous cost (₹${Number(matchedProduct.cost_price).toLocaleString()})`);
+      }
+    } else if (matchedProduct.cost_price <= 0 && line.unit_price > 0) {
+      warnings.push('Matched part has no previous cost to compare');
+    }
+
+    return { matchedProduct, warnings, costDifferencePercent };
+  });
 }
 
 export default function PurchasesPage() {
@@ -125,9 +192,27 @@ export default function PurchasesPage() {
   const [importError, setImportError] = useState('');
   const [importPreview, setImportPreview] = useState<{ fileName: string; lines: ImportedLine[]; supplier: string; supplierGstin: string; fileHash: string | null } | null>(null);
   const [confirmingImport, setConfirmingImport] = useState(false);
+  const [returningOrder, setReturningOrder] = useState<PurchaseOrder | null>(null);
+  const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
+  const [returnNote, setReturnNote] = useState('');
+  const [returnError, setReturnError] = useState('');
+  const [savingReturn, setSavingReturn] = useState(false);
+  const [returnableQtyByPoItemId, setReturnableQtyByPoItemId] = useState<Record<string, number> | null>(null);
+  const [loadingReturnAvailability, setLoadingReturnAvailability] = useState(false);
 
   const total = lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
   const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
+  const importReviews = importPreview ? reviewImportedLines(importPreview.lines, products) : [];
+  const importWarningCount = importReviews.reduce((count, review) => count + review.warnings.length, 0);
+  const importNewPartCount = importReviews.filter((review) => !review.matchedProduct).length;
+  const importPriceChangeCount = importReviews.filter((review) => review.costDifferencePercent !== null && Math.abs(review.costDifferencePercent) >= 5).length;
+  const importHasInvalidLine = importPreview?.lines.some((line) => !line.description.trim() || !Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.unit_price) || line.unit_price <= 0) ?? false;
+  const returnableItems = returningOrder ? poItems.filter((item) => item.po_id === returningOrder.id) : [];
+  const selectedReturnLines = returnableItems
+    .map((item) => ({ item, qty: Number(returnQuantities[item.id] ?? 0) }))
+    .filter(({ qty }) => Number.isFinite(qty) && qty > 0);
+  const returnTotal = selectedReturnLines.reduce((sum, { item, qty }) => sum + qty * Number(item.unit_cost), 0);
+  const hasInvalidReturnQuantity = selectedReturnLines.some(({ item, qty }) => qty > Number(returnableQtyByPoItemId?.[item.id] ?? 0));
 
   const openPurchaseModal = () => {
     setSupplierName('');
@@ -140,8 +225,76 @@ export default function PurchasesPage() {
     setShowPurchaseModal(true);
   };
 
+  const openReturnModal = async (order: PurchaseOrder) => {
+    const originalLines = poItems.filter((item) => item.po_id === order.id);
+    setReturningOrder(order);
+    setReturnQuantities(Object.fromEntries(originalLines.map((item) => [item.id, 0])));
+    setReturnNote('');
+    setReturnError(originalLines.length === 0 ? 'No item lines are available for this purchase, so it cannot be returned safely.' : '');
+    setReturnableQtyByPoItemId(null);
+    if (!activeCompany || originalLines.length === 0) return;
+    setLoadingReturnAvailability(true);
+    try {
+      const availability = await getReturnablePurchaseItems(activeCompany.id, order.id);
+      setReturnableQtyByPoItemId(Object.fromEntries(availability.map((line) => [line.po_item_id, Number(line.returnable_qty)])));
+    } catch (error) {
+      setReturnError(error instanceof Error ? error.message : 'Could not check return availability. Nothing can be returned until this is resolved.');
+    } finally {
+      setLoadingReturnAvailability(false);
+    }
+  };
+
+  const updateReturnQuantity = (poItemId: string, value: string) => {
+    const qty = value === '' ? 0 : Number(value);
+    setReturnQuantities((current) => ({ ...current, [poItemId]: qty }));
+  };
+
+  const submitPurchaseReturn = async () => {
+    if (!returningOrder || !activeCompany) return;
+    if (selectedReturnLines.length === 0) {
+      setReturnError('Choose a quantity to return for at least one item.');
+      return;
+    }
+    if (hasInvalidReturnQuantity) {
+      setReturnError('A return quantity cannot exceed the quantity still available from this purchase.');
+      return;
+    }
+    const supplier = suppliers.find((row) => row.name.trim().toLowerCase() === returningOrder.supplier.trim().toLowerCase());
+    if (!supplier) {
+      setReturnError(`Cannot find ${returningOrder.supplier} in the supplier directory. Add or correct the supplier before returning stock.`);
+      return;
+    }
+    if (!window.confirm(`Record this supplier return for ₹${returnTotal.toLocaleString()}? Inventory will decrease and the supplier payable will decrease in the same transaction.`)) return;
+
+    setReturnError('');
+    setSavingReturn(true);
+    try {
+      const result = await recordPurchaseReturn({
+        companyId: activeCompany.id,
+        poId: returningOrder.id,
+        supplierId: supplier.id,
+        lines: selectedReturnLines.map(({ item, qty }) => ({ poItemId: item.id, qty })),
+        note: returnNote,
+      });
+      await Promise.all([reloadPurchaseOrders(), reloadPoItems(), reloadGrns(), reloadSuppliers(), reloadProducts()]);
+      const returnNumber = typeof result.return_number === 'string' ? ` (${result.return_number})` : '';
+      setFeedback(`${returningOrder.id}: supplier return of ₹${returnTotal.toLocaleString()} recorded${returnNumber}. Stock and supplier balance were updated together.`);
+      setReturningOrder(null);
+    } catch (error) {
+      setReturnError(error instanceof Error ? error.message : 'Could not record this supplier return. Nothing was changed.');
+    } finally {
+      setSavingReturn(false);
+    }
+  };
+
   const updateLine = (index: number, patch: Partial<POLine>) => {
     setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+  };
+
+  const updateImportedLine = (index: number, patch: Partial<ImportedLine>) => {
+    setImportPreview((current) => current
+      ? { ...current, lines: current.lines.map((line, i) => (i === index ? { ...line, ...patch } : line)) }
+      : null);
   };
 
   async function resolveSupplier(name: string, gstin?: string): Promise<Supplier> {
@@ -351,6 +504,10 @@ export default function PurchasesPage() {
   const confirmImportedPO = async () => {
     if (!importPreview || !importPreview.supplier.trim() || !activeCompany) return;
     setImportError('');
+    if (importHasInvalidLine) {
+      setImportError('Fix every highlighted row before recording: each item needs a description, quantity, and unit cost greater than zero.');
+      return;
+    }
     setConfirmingImport(true);
     try {
       const supplierRow = await resolveSupplier(importPreview.supplier, importPreview.supplierGstin);
@@ -664,7 +821,7 @@ export default function PurchasesPage() {
               </td>
               <td className="text-center">{po.status !== 'received'
                 ? <button className="btn btn-secondary btn-sm" onClick={() => markReceived(po.id)}><PackageCheck size={14} /> Mark Received</button>
-                : <span className="text-muted">—</span>}</td>
+                : <button className="btn btn-secondary btn-sm" onClick={() => openReturnModal(po)} title="Return some or all received items to this supplier"><Undo2 size={14} /> Return Items</button>}</td>
             </tr>;
           })}
           {pagedOrders.length === 0 && (
@@ -723,25 +880,84 @@ export default function PurchasesPage() {
 
       {activeTab === 'invoices' && <div className="card empty-state"><div className="empty-state-icon"><FileCheck size={22} /></div><p className="empty-state-title">Supplier invoice matching isn&apos;t available yet</p><p className="empty-state-desc">This will let you upload supplier invoices and match them against purchases — not built yet.</p></div>}
 
-      {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '640px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
+      {returningOrder && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '820px' }} role="dialog" aria-modal="true" aria-labelledby="purchase-return-title">
+        <div className="modal-header"><h3 id="purchase-return-title" className="modal-title">Return items to {returningOrder.supplier}</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingReturn} onClick={() => setReturningOrder(null)}>✕</button></div>
+        <div className="modal-body flex flex-col gap-4">
+          {returnError && <div className="alert alert-danger" role="alert">{returnError}</div>}
+          <div className="card card-sm bg-surface" style={{ padding: '12px' }}>
+            <p style={{ fontSize: '13px', margin: 0 }}><strong>{returningOrder.id}</strong> · received {formatDay(returningOrder.date)} · original total ₹{Number(returningOrder.total).toLocaleString()}</p>
+            <p className="text-muted" style={{ fontSize: '12px', margin: '6px 0 0' }}>{loadingReturnAvailability ? 'Checking what is still available from this purchase…' : 'Only enter items actually sent back. Saving reduces stock and the supplier payable together. If this purchase was already paid, the lower payable becomes supplier credit.'}</p>
+          </div>
+          <div className="table-wrap">
+            <div className="tbl-toolbar">
+              <div className="tbl-toolbar-title">
+                <strong>Items on {returningOrder.id}</strong>
+                <small>Available is what is still left to send back from this purchase</small>
+              </div>
+            </div>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table className="erp-table">
+                <thead><tr><th>Item</th><th>Part #</th><th className="text-right">Purchased</th><th className="text-right">Available</th><th className="text-right">Unit cost</th><th style={{ minWidth: '150px' }} className="text-right">Return now</th></tr></thead>
+                <tbody>{returnableItems.map((item) => {
+                  const selected = Number(returnQuantities[item.id] ?? 0);
+                  const availableQty = Number(returnableQtyByPoItemId?.[item.id] ?? 0);
+                  const invalid = selected > availableQty || selected < 0 || !Number.isFinite(selected);
+                  return <tr key={item.id} style={invalid ? { background: 'var(--color-danger-bg)' } : undefined}>
+                    <td style={{ fontWeight: 600 }}>{item.name}</td><td className="text-muted">{item.part_number || '—'}</td><td className="text-right">{Number(item.qty)}</td><td className="text-right">{returnableQtyByPoItemId === null ? '—' : availableQty}</td><td className="text-right">₹{Number(item.unit_cost).toLocaleString()}</td>
+                    <td><input type="number" min="0" max={availableQty} step="0.01" className="form-input text-right" aria-label={`Return quantity for ${item.name}`} value={returnQuantities[item.id] ?? 0} disabled={savingReturn || returnableQtyByPoItemId === null} onChange={(event) => updateReturnQuantity(item.id, event.target.value)} /></td>
+                  </tr>;
+                })}
+                {returnableItems.length === 0 && <tr><td colSpan={6}><div className="empty-state"><p className="empty-state-title">No returnable item lines found</p><p className="empty-state-desc">This older purchase has no linked PO lines, so it cannot be safely returned.</p></div></td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Reason / supplier reference <span className="text-muted">(optional)</span></label>
+            <textarea className="form-input" rows={3} maxLength={1000} placeholder="Example: damaged seal kit, supplier RMA 123" value={returnNote} disabled={savingReturn} onChange={(event) => setReturnNote(event.target.value)} />
+          </div>
+          <div className="flex justify-between items-center invoice-summary">
+            <span className="text-muted">{selectedReturnLines.length} selected line{selectedReturnLines.length === 1 ? '' : 's'}</span>
+            <div><strong>Supplier return total: </strong><span className="invoice-total">₹{returnTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
+          </div>
+        </div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingReturn} onClick={() => setReturningOrder(null)}>Cancel</button><button type="button" className="btn btn-primary" disabled={savingReturn || loadingReturnAvailability || returnableQtyByPoItemId === null || selectedReturnLines.length === 0 || hasInvalidReturnQuantity || returnableItems.length === 0} onClick={submitPurchaseReturn}>{savingReturn ? 'Recording…' : loadingReturnAvailability ? 'Checking stock…' : 'Review & Record Return'}</button></div>
+      </div></div>}
+
+      {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
         <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Record Purchase from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={confirmingImport} onClick={() => setImportPreview(null)}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
           {importError && <div className="alert alert-danger" role="alert">{importError}</div>}
 
-          <div className="flex items-center gap-3">
-            <div className="kpi-icon-wrap" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}><FileText size={18} /></div>
-            <div>
-              <strong style={{ fontSize: '13.5px' }}>{importPreview.fileName}</strong>
-              <p className="text-muted" style={{ fontSize: '12px' }}>
-                Read <strong>{importPreview.lines.length} item(s)</strong>, total ₹{money(importedPreviewTotal)}
-              </p>
+          <div className="flex justify-between items-center gap-3" style={{ flexWrap: 'wrap' }}>
+            <div className="flex items-center gap-3">
+              <div className="kpi-icon-wrap" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}><FileText size={18} /></div>
+              <div>
+                <strong style={{ fontSize: '13.5px' }}>{importPreview.fileName}</strong>
+                <p className="text-muted" style={{ fontSize: '12px' }}>
+                  Read <strong>{importPreview.lines.length} item(s)</strong>, total ₹{money(importedPreviewTotal)}
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+              <span className="badge badge-success">{importPreview.lines.length - importNewPartCount} matched</span>
+              {importNewPartCount > 0 && <span className="badge badge-warning">{importNewPartCount} new part{importNewPartCount === 1 ? '' : 's'}</span>}
+              {importPriceChangeCount > 0 && <span className="badge badge-warning">{importPriceChangeCount} price check{importPriceChangeCount === 1 ? '' : 's'}</span>}
+              {importWarningCount > 0 && <span className="badge badge-danger">{importWarningCount} review warning{importWarningCount === 1 ? '' : 's'}</span>}
             </div>
           </div>
 
+          <p className="text-muted" style={{ fontSize: '12px' }}>
+            Exact matches are attached to existing inventory. Unmatched rows create a new part when saved; review those carefully before continuing.
+          </p>
           <div className="form-group">
             <label className="form-label">Supplier</label>
             <input list="purchase-supplier-options" className="form-input" placeholder="Type or select a supplier" value={importPreview.supplier} onChange={(event) => setImportPreview({ ...importPreview, supplier: event.target.value })} />
             <datalist id="purchase-supplier-options">{supplierOptions.map((s) => <option key={s} value={s} />)}</datalist>
+            {importPreview.supplier.trim() && !suppliers.some((supplier) => supplier.name.toLowerCase() === importPreview.supplier.trim().toLowerCase()) && (
+              <small className="text-warning">New supplier — this name will be created when you record the purchase.</small>
+            )}
             {importPreview.supplierGstin.trim() && (
               <small style={{ color: 'var(--text-muted)' }}>
                 GSTIN read from document: {importPreview.supplierGstin.trim()} — saved against this supplier if it&apos;s a new one.
@@ -750,32 +966,48 @@ export default function PurchasesPage() {
           </div>
 
           {/* Exactly what was read out of the file — nothing added, nothing rounded away — so it
-              can be checked before it becomes stock and a supplier balance. */}
+              can be checked, and corrected, before it becomes stock and a supplier balance. */}
+          <datalist id="import-part-options">{partOptions.map((option) => <option key={option.value} value={option.value} />)}</datalist>
+
           <div className="table-wrap">
-            <div style={{ overflowX: 'auto', maxHeight: '240px', overflowY: 'auto' }}>
+            <div className="tbl-toolbar">
+              <div className="tbl-toolbar-title">
+                <strong>Review imported items</strong>
+                <small>Edit a row to correct it before saving — a red row must be fixed first</small>
+              </div>
+            </div>
+
+            <div style={{ overflowX: 'auto', maxHeight: '330px', overflowY: 'auto' }}>
               <table className="erp-table">
-                <thead><tr><th>Line item</th><th className="text-right">Qty</th><th className="text-right">Rate (₹)</th><th className="text-right">Amount (₹)</th></tr></thead>
-                <tbody>
-                  {importPreview.lines.map((line, index) => (
-                    <tr key={index}>
-                      <td>{line.description}</td>
-                      <td className="text-right">{line.quantity}</td>
-                      <td className="text-right">₹{money(line.unit_price)}</td>
-                      <td className="text-right font-semibold">₹{money(line.quantity * line.unit_price)}</td>
-                    </tr>
-                  ))}
-                </tbody>
+                <thead><tr><th>Item</th><th className="text-right">Qty</th><th className="text-right">Unit cost (₹)</th><th className="text-right">Amount (₹)</th><th>Inventory match / review</th></tr></thead>
+                <tbody>{importPreview.lines.map((line, index) => {
+                  const review = importReviews[index];
+                  const isInvalid = !line.description.trim() || line.quantity <= 0 || line.unit_price <= 0;
+                  return <tr key={index} style={isInvalid ? { background: 'var(--color-danger-bg)' } : undefined}>
+                    <td style={{ minWidth: '220px' }}><input list="import-part-options" className="form-input" aria-label={`Item ${index + 1}`} value={line.description} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { description: event.target.value })} /></td>
+                    <td style={{ minWidth: '82px' }}><input type="number" min="1" className="form-input text-right" aria-label={`Quantity for item ${index + 1}`} value={line.quantity} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { quantity: Number(event.target.value) })} /></td>
+                    <td style={{ minWidth: '118px' }}><input type="number" min="0.01" step="0.01" className="form-input text-right" aria-label={`Unit cost for item ${index + 1}`} value={line.unit_price} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { unit_price: Number(event.target.value) })} /></td>
+                    <td className="text-right font-semibold">₹{money(line.quantity * line.unit_price)}</td>
+                    <td style={{ minWidth: '260px' }}>
+                      {review?.matchedProduct ? <div><span className="badge badge-success">Matched</span> <strong style={{ fontSize: '12px' }}>{review.matchedProduct.part_number}</strong><div className="text-muted" style={{ fontSize: '12px', marginTop: '3px' }}>{review.matchedProduct.name}</div></div> : <span className="badge badge-warning">New part</span>}
+                      {review?.warnings.map((warning) => <div key={warning} className={warning.includes('must be') ? 'text-danger' : 'text-warning'} style={{ fontSize: '12px', marginTop: '4px' }}>{warning}</div>)}
+                    </td>
+                  </tr>;
+                })}</tbody>
               </table>
             </div>
+
             <div className="pager">
               <div className="pager-info"><strong>{importPreview.lines.length}</strong> {importPreview.lines.length === 1 ? 'line item' : 'line items'}</div>
               <div className="pager-info">Total <strong>₹{money(importedPreviewTotal)}</strong></div>
             </div>
           </div>
 
+          {importHasInvalidLine && <div className="alert alert-danger" role="alert">Fix the red rows before recording this purchase.</div>}
+
           <p className="text-muted" style={{ fontSize: '12px' }}>Anything here that isn&apos;t already in Inventory is added as a new part when you record this purchase.</p>
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={confirmingImport} onClick={() => setImportPreview(null)}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier.trim() || confirmingImport}>{confirmingImport ? 'Saving…' : 'Record Purchase'}</button></div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={confirmingImport} onClick={() => setImportPreview(null)}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier.trim() || importHasInvalidLine || confirmingImport}>{confirmingImport ? 'Saving…' : `Record Purchase${importWarningCount > 0 ? ' After Review' : ''}`}</button></div>
       </div></div>}
 
       {showPurchaseModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="purchase-modal-title"><form onSubmit={recordPurchase}>

@@ -71,6 +71,10 @@ export default function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps
             <Link
               key={item.name}
               href={item.href}
+              // Every dashboard destination is dynamic and authenticated. Next's default
+              // viewport prefetch turns this persistent sidebar into a burst of server renders
+              // (and proxy/auth checks) before the user has asked to visit any of them.
+              prefetch={false}
               className={`sidebar-item ${isActive ? 'active' : ''}`}
               onClick={onNavigate}
             >

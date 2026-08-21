@@ -352,13 +352,12 @@ export default function InventoryPage() {
       if (imported.length === 0) {
         throw new Error('Couldn’t find a part name/description column in this file. Recognized headers include things like "Name", "Item Name", "Description", or "Part Number" — check your column titles, or share them and we can adjust the import.');
       }
-      for (const product of imported) {
-        await fetch('/api/local/products', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...product, company_id: activeCompany?.id }),
-        });
-      }
+      const res = await fetch('/api/local/products?bulk=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: imported.map((product) => ({ ...product, company_id: activeCompany?.id })) }),
+      });
+      await parseJsonOrThrow(res, 'Failed to import parts.');
       await reload();
       const guessNote = guessedFields.length > 0
         ? ` Your file's column titles didn't clearly label ${guessedFields.join(', ')}, so those were guessed from the numbers — please spot-check a few rows.`

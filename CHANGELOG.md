@@ -2,6 +2,29 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-20 — AI features now have a backup, instead of failing when Google is busy
+
+Google's free AI service refuses requests when it's under heavy load — the "high demand" error you've
+been hitting. Until now that meant the feature you clicked simply didn't work until Google recovered.
+
+Every AI feature now has a second service standing behind it. If Google is busy, slow, or down, the
+app quietly retries the same request on Groq (a free service, no card needed) and you get your answer
+without noticing anything happened. If Google is only briefly stumbling, it retries there first before
+switching. Only when *both* fail do you see a message — and it's now one plain sentence rather than a
+wall of technical text.
+
+Covered: Business Insights, Stock Reorder Forecast, Reports summaries, expense categorising,
+payment-reminder drafts, part-detail suggestions, Website Catalog descriptions, and scanning a
+**photo** of a supplier invoice to record a purchase.
+
+Three things still depend on Google specifically and can't switch: scanning a **PDF** invoice
+(photos of invoices are covered), Reference Search in the Website Catalog, and AI product photo
+generation. Those fail safely with a message, exactly as before — for a PDF, photographing the invoice
+instead will now go through the backup.
+
+Nothing changes in how you use the app, and no setting to turn on — the backup key goes in the same
+configuration file as the Google one.
+
 ## 2026-08-19 — Removed Daily Briefing
 
 Taken out completely, at the owner's request. That's the popup that used to open by itself once a
