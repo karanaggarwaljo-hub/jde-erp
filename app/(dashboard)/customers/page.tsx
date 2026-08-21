@@ -1,7 +1,7 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
-import { Plus, Phone, Mail, MapPin, Sparkles } from 'lucide-react';
+import { Fragment, FormEvent, useMemo, useState } from 'react';
+import { Plus, Phone, Mail, MapPin, Sparkles, IndianRupee, Users, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
 import AddCustomerModal from '@/components/AddCustomerModal';
@@ -20,6 +20,17 @@ type Customer = {
 
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string };
 
+type LedgerFilter = 'all' | 'balance' | 'settled';
+
+const PAGE_SIZE = 12;
+
+// The dot on a .brand-chip only ever carries an existing token — never a literal colour.
+const TYPE_DOT: Record<string, string | undefined> = {
+  wholesale: 'var(--chart-amber)',
+  dealer: 'var(--chart-blue)',
+  retail: 'var(--ink-3)',
+};
+
 export default function CustomersPage() {
   const { rows: customers, loading, create, adjust } = useCompanyTable<Customer>('customers');
   const { rows: invoices, update: updateInvoice } = useCompanyTable<Invoice>('invoices');
@@ -28,6 +39,8 @@ export default function CustomersPage() {
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [reminderCustomer, setReminderCustomer] = useState<Customer | null>(null);
   const [feedback, setFeedback] = useState('');
+  const [filter, setFilter] = useState<LedgerFilter>('all');
+  const [page, setPage] = useState(1);
 
   function overdueContext(customerName: string): string {
     const overdue = invoices
@@ -65,30 +78,229 @@ export default function CustomersPage() {
     setPaymentCustomer(null);
   };
 
+  // How many invoices this customer still has open. Counted with exactly the same test the
+  // payment flow above uses, off invoices this page already loads — nothing estimated.
+  const unpaidInvoiceCount = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const inv of invoices) {
+      if (Number(inv.total) > Number(inv.paid)) counts.set(inv.customer, (counts.get(inv.customer) ?? 0) + 1);
+    }
+    return counts;
+  }, [invoices]);
+
+  const balanceOf = (customer: Customer) => Number(customer.balance) || 0;
+
+  // Every figure below is a straight roll-up of the customer rows on screen.
+  const owing = customers.filter((customer) => balanceOf(customer) > 0);
+  const settled = customers.filter((customer) => balanceOf(customer) <= 0);
+  const totalOutstanding = customers.reduce((sum, customer) => sum + balanceOf(customer), 0);
+  const largestDebtor = owing.reduce<Customer | null>(
+    (top, customer) => (!top || balanceOf(customer) > balanceOf(top) ? customer : top),
+    null,
+  );
+
+  const selectFilter = (next: LedgerFilter) => {
+    setFilter(next);
+    setPage(1);
+  };
+
+  const filtered = filter === 'balance' ? owing : filter === 'settled' ? settled : customers;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const firstIndex = (currentPage - 1) * PAGE_SIZE;
+  const visible = filtered.slice(firstIndex, firstIndex + PAGE_SIZE);
+  const pageOutstanding = visible.reduce((sum, customer) => sum + balanceOf(customer), 0);
+  const pageNumbers = Array.from({ length: totalPages }, (_, index) => index + 1).filter(
+    (number) => number === 1 || number === totalPages || Math.abs(number - currentPage) <= 1,
+  );
+
   return (
     <div>
-      <div className="page-header"><div><h1 className="page-title">Customer Ledger & Directory</h1><p className="page-subtitle">Track accounts receivable, GST numbers and purchase histories</p></div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}><Plus size={16} /> Add New Customer</button></div>
+      <div className="page-header">
+        <div>
+          <div className="eyebrow">Accounts receivable</div>
+          <h1 className="page-title">Customers</h1>
+          <p className="page-subtitle">Track accounts receivable, GST numbers and purchase histories</p>
+        </div>
+        <button className="btn btn-primary" onClick={() => setShowModal(true)}><Plus size={16} /> Add New Customer</button>
+      </div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
 
-      <div className="grid-4 mb-6">
-        {customers.length === 0 && (
-          <div className="card" style={{ gridColumn: '1 / -1', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
-            {loading ? 'Loading customers…' : 'No customers yet — add your first customer to get started.'}
+      {/* auto-fit rather than the shared auto-fill so three cards stretch across the row
+          instead of leaving two empty tracks on a wide screen. */}
+      {customers.length > 0 && (
+        <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+          <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
+            <div className="flex justify-between items-center">
+              <span className="kpi-label">Total outstanding</span>
+              <div className="kpi-icon-wrap"><IndianRupee size={18} /></div>
+            </div>
+            <div className="kpi-value">₹{totalOutstanding.toLocaleString()}</div>
+            <span className="kpi-context">Sum of every customer balance on file</span>
           </div>
+
+          <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-blue)', '--kpi-color-bg': 'var(--color-info-bg)' } as React.CSSProperties}>
+            <div className="flex justify-between items-center">
+              <span className="kpi-label">Customers who owe</span>
+              <div className="kpi-icon-wrap"><Users size={18} /></div>
+            </div>
+            <div className="kpi-value">{owing.length}</div>
+            <span className="kpi-context">of {customers.length} accounts · {settled.length} settled</span>
+          </div>
+
+          <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-red)', '--kpi-color-bg': 'var(--rose-tint)' } as React.CSSProperties}>
+            <div className="flex justify-between items-center">
+              <span className="kpi-label">Largest balance</span>
+              <div className="kpi-icon-wrap"><TrendingUp size={18} /></div>
+            </div>
+            <div className="kpi-value">₹{(largestDebtor ? balanceOf(largestDebtor) : 0).toLocaleString()}</div>
+            <span className="kpi-context">{largestDebtor ? largestDebtor.name : 'No customer is carrying a balance'}</span>
+          </div>
+        </div>
+      )}
+
+      {owing.length > 0 && (
+        <div className="alert alert-warning mb-4">
+          <AlertTriangle size={16} style={{ flex: 'none', marginTop: '1px' }} />
+          <span>
+            {owing.length} customer{owing.length > 1 ? 's are' : ' is'} carrying a balance, ₹{totalOutstanding.toLocaleString()} in total.
+          </span>
+          <button type="button" className="alert-action" onClick={() => selectFilter('balance')}>Show who owes</button>
+        </div>
+      )}
+
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="tbl-toolbar">
+          <div className="tbl-toolbar-title">
+            <strong>Customer ledger</strong>
+            <small>Outstanding balances, GST numbers and contact details</small>
+          </div>
+          <div className="tbl-tools">
+            <div className="tabs" role="tablist" aria-label="Filter customers">
+              <button type="button" role="tab" aria-selected={filter === 'all'} className={`tab ${filter === 'all' ? 'active' : ''}`} onClick={() => selectFilter('all')}>
+                All <span className="tab-count">{customers.length}</span>
+              </button>
+              <button type="button" role="tab" aria-selected={filter === 'balance'} className={`tab ${filter === 'balance' ? 'active' : ''}`} onClick={() => selectFilter('balance')}>
+                With balance <span className="tab-count">{owing.length}</span>
+              </button>
+              <button type="button" role="tab" aria-selected={filter === 'settled'} className={`tab ${filter === 'settled' ? 'active' : ''}`} onClick={() => selectFilter('settled')}>
+                Settled <span className="tab-count">{settled.length}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {customers.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-icon"><Users size={22} /></div>
+            <div className="empty-state-title">{loading ? 'Loading customers…' : 'No customers yet'}</div>
+            <p className="empty-state-desc">
+              {loading ? 'Fetching the customer ledger for this company.' : 'Add your first customer to get started.'}
+            </p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-state-title">Nothing in this view</div>
+            <p className="empty-state-desc">
+              {filter === 'balance' ? 'No customer is carrying a balance right now.' : 'Every customer on file is carrying a balance.'}
+            </p>
+          </div>
+        ) : (
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="erp-table" style={{ minWidth: '940px' }}>
+                <thead>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Contact</th>
+                    <th>GSTIN</th>
+                    <th>Type</th>
+                    <th className="text-right" style={{ textAlign: 'right' }}>Outstanding</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visible.map((customer) => {
+                    const balance = balanceOf(customer);
+                    const openInvoices = unpaidInvoiceCount.get(customer.name) ?? 0;
+                    const typeKey = (customer.type || '').toLowerCase();
+                    return (
+                      <tr key={customer.id}>
+                        <td>
+                          <div className="font-semibold">{customer.name}</div>
+                          <div className="text-muted text-sm flex items-center gap-2" style={{ maxWidth: '260px', marginTop: '2px' }}>
+                            <MapPin size={12} />
+                            <span className="truncate">{customer.address || 'No address on file'}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="directory-details">
+                            <div className="flex items-center gap-2"><Phone size={13} /><span>{customer.phone || 'No phone'}</span></div>
+                            <div className="flex items-center gap-2"><Mail size={13} /><span className="truncate" style={{ maxWidth: '190px' }}>{customer.email || 'No email'}</span></div>
+                          </div>
+                        </td>
+                        <td>
+                          {customer.gstin
+                            ? <span className="pn-chip">{customer.gstin}</span>
+                            : <span className="text-muted text-sm">Not provided</span>}
+                        </td>
+                        <td>
+                          {customer.type
+                            ? <span className="brand-chip" style={{ '--brand-chip-color': TYPE_DOT[typeKey] ?? 'var(--ink-3)' } as React.CSSProperties}>{customer.type.charAt(0).toUpperCase() + customer.type.slice(1)}</span>
+                            : <span className="text-muted text-sm">—</span>}
+                        </td>
+                        <td className="text-right">
+                          {balance > 0 ? (
+                            <>
+                              <strong>₹{balance.toLocaleString()}</strong>
+                              {openInvoices > 0 && (
+                                <div className="text-muted text-sm">{openInvoices} unpaid invoice{openInvoices > 1 ? 's' : ''}</div>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-muted">₹0</span>
+                          )}
+                        </td>
+                        <td>
+                          {balance > 0
+                            ? <span className="badge badge-warning">Outstanding</span>
+                            : <span className="badge badge-success">Settled</span>}
+                        </td>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            <button className="btn btn-secondary btn-sm" disabled={!customer.balance} onClick={() => openPayment(customer)}>Received</button>
+                            <button className="btn btn-ghost btn-sm" aria-label={`Draft payment reminder for ${customer.name}`} title="Draft a payment reminder" disabled={!customer.balance} onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="pager">
+              <div className="pager-info">
+                Showing <strong>{firstIndex + 1}–{firstIndex + visible.length}</strong> of <strong>{filtered.length}</strong> customers
+                {pageOutstanding > 0 && <> · <strong>₹{pageOutstanding.toLocaleString()}</strong> outstanding on this page</>}
+              </div>
+              {totalPages > 1 && (
+                <div className="pager-controls">
+                  <button type="button" className="pager-btn" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={15} /></button>
+                  {pageNumbers.map((number, index) => (
+                    <Fragment key={number}>
+                      {index > 0 && number - pageNumbers[index - 1] > 1 && <span className="pager-info">…</span>}
+                      <button type="button" className={`pager-btn ${number === currentPage ? 'active' : ''}`} aria-current={number === currentPage ? 'page' : undefined} onClick={() => setPage(number)}>{number}</button>
+                    </Fragment>
+                  ))}
+                  <button type="button" className="pager-btn" aria-label="Next page" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}><ChevronRight size={15} /></button>
+                </div>
+              )}
+            </div>
+          </>
         )}
-        {customers.map((customer) => <div key={customer.id} className="card flex flex-col justify-between">
-          <div><div className="flex justify-between items-start mb-2"><span className="badge badge-info">{customer.type.toUpperCase()}</span><span className="customer-gstin">GSTIN: {customer.gstin || 'Not provided'}</span></div>
-            <h3 className="directory-card-title">{customer.name}</h3>
-            <div className="directory-details"><div className="flex items-center gap-2"><Phone size={13} /><span>{customer.phone || 'No phone'}</span></div><div className="flex items-center gap-2"><Mail size={13} /><span>{customer.email || 'No email'}</span></div><div className="flex items-center gap-2"><MapPin size={13} /><span className="truncate">{customer.address || 'No address'}</span></div></div>
-          </div>
-          <div className="directory-financials"><div><small>Outstanding</small><strong className={customer.balance > 0 ? 'text-danger' : 'text-success'}>₹{customer.balance.toLocaleString()}</strong></div></div>
-          <div className="flex gap-2 mt-2">
-            <button className="btn btn-secondary btn-sm w-full" style={{ justifyContent: 'center' }} disabled={!customer.balance} onClick={() => openPayment(customer)}>Received</button>
-            <button className="btn btn-ghost btn-sm" aria-label={`Draft payment reminder for ${customer.name}`} title="Draft a payment reminder" disabled={!customer.balance} onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /></button>
-          </div>
-        </div>)}
       </div>
 
       {showModal && (
