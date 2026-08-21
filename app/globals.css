@@ -364,9 +364,14 @@ input, textarea, select { font-family: inherit; }
   font-variant-numeric: tabular-nums;
 }
 
+/* Holds Settings and Sign Out — administration, kept out of the grouped daily nav above.
+   Stacked with the same rhythm as a nav group so the two don't read as one control. */
 .sidebar-footer {
   padding: 12px;
   border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 /* ===================================================
