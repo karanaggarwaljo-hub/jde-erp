@@ -173,6 +173,46 @@ export default function InventoryPage() {
     return ((sale - cost) / sale) * 100;
   })();
 
+  // Everything the summary panel shows, derived from what is currently typed. Nothing here is
+  // stored or guessed — an empty field simply produces an empty readout, and each warning
+  // describes a condition that is actually true of the numbers on screen right now.
+  const draft = (() => {
+    const cost = Number(formData.cost_price) || 0;
+    const sale = Number(formData.sale_price) || 0;
+    const mrp = Number(formData.mrp) || 0;
+    const stock = Number(formData.current_stock) || 0;
+    const reorder = Number(formData.min_stock) || 0;
+    const isLow = reorder > 0 && stock <= reorder;
+    const isOut = stock <= 0;
+
+    const warnings: Array<{ text: string; tone: string }> = [];
+    if (cost > 0 && sale > 0 && sale < cost) {
+      warnings.push({ text: `Sale price is below cost — you would lose ₹${money(cost - sale)} on every piece sold.`, tone: 'alert-danger' });
+    }
+    if (mrp > 0 && sale > mrp) {
+      warnings.push({ text: 'Sale price is above MRP, which is the maximum a customer can legally be charged.', tone: 'alert-warning' });
+    }
+    if (reorder <= 0) {
+      warnings.push({ text: 'No reorder level set, so this part will never appear in the low-stock list.', tone: 'alert-warning' });
+    }
+
+    return {
+      name: formData.name.trim(),
+      partNumber: formData.part_number.trim(),
+      brand: formData.brand.trim(),
+      category: formData.category.trim(),
+      cost, sale, mrp, stock, isLow,
+      stockValue: stock * cost,
+      meterPercent: reorder > 0 ? Math.max(0, Math.min(100, Math.round((stock / (reorder * 2)) * 100))) : null,
+      stockBadge: isOut
+        ? { label: 'Out of stock', tone: 'badge-danger' }
+        : isLow
+          ? { label: `Low · ${stock} of ${reorder}`, tone: 'badge-warning' }
+          : { label: `${stock} in stock`, tone: 'badge-success' },
+      warnings,
+    };
+  })();
+
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.part_number.toLowerCase().includes(search.toLowerCase()) ||
@@ -654,13 +694,24 @@ export default function InventoryPage() {
       {/* Add / Edit Product Modal */}
       {showModal && (
         <div className="modal-overlay">
-          <div className="modal-box">
+          <div className="modal-box" style={{ maxWidth: '980px' }}>
             <div className="modal-header">
-              <h3 className="modal-title">{editingProduct ? 'Edit Spare Part' : 'Add New Spare Part'}</h3>
+              <div>
+                <h3 className="modal-title">{editingProduct ? 'Edit Spare Part' : 'Add New Spare Part'}</h3>
+                <p className="page-subtitle" style={{ marginTop: '2px' }}>
+                  {editingProduct
+                    ? <>Editing <span className="pn-chip">{editingProduct.part_number}</span> · changes apply the moment you save</>
+                    : 'Added to this company’s catalogue and available to sell straight away'}
+                </p>
+              </div>
               <button className="btn btn-ghost btn-sm" disabled={savingProduct} onClick={() => setShowModal(false)}>✕</button>
             </div>
             <form onSubmit={handleSave}>
-              <div className="modal-body flex flex-col gap-4">
+              {/* Form on the left, a live picture of the part on the right — the same split the
+                  invoice dialog uses, so what you are about to create is visible while you type
+                  rather than only after saving. */}
+              <div className="modal-body part-form">
+                <div className="part-form-fields">
                 {saveError && <div className="alert alert-danger" role="alert">{saveError}</div>}
                 {possibleDuplicate && (
                   <div className="alert alert-warning" role="alert">
@@ -778,6 +829,78 @@ export default function InventoryPage() {
                     </div>
                   </div>
                 </div>
+                </div>
+
+                {/* ── Live summary of the part being described ───────────────── */}
+                <aside className="part-form-summary">
+                  <div className="card" style={{ background: 'var(--surface-2)' }}>
+                    <div className="form-section-head" style={{ marginBottom: '12px' }}>
+                      <h4>{editingProduct ? 'After saving' : 'New part'}</h4>
+                    </div>
+
+                    <div style={{ marginBottom: '14px' }}>
+                      <div className="directory-card-title" style={{ marginBottom: '6px' }}>
+                        {draft.name || <span className="text-muted">Part name goes here</span>}
+                      </div>
+                      <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+                        {draft.partNumber && <span className="pn-chip">{draft.partNumber}</span>}
+                        {draft.brand && (
+                          <span className="brand-chip" style={{ ['--brand-chip-color' as string]: brandChipColor(draft.brand) } as React.CSSProperties}>
+                            {draft.brand}
+                          </span>
+                        )}
+                        {draft.category && <span className="badge badge-muted">{draft.category}</span>}
+                      </div>
+                    </div>
+
+                    {/* Same stock wording the table uses, so a part reads identically here and there. */}
+                    <div className="flex justify-between items-center" style={{ marginBottom: '4px' }}>
+                      <span className="text-muted" style={{ fontSize: '12.5px' }}>Opening stock</span>
+                      <span className={`badge ${draft.stockBadge.tone}`}>{draft.stockBadge.label}</span>
+                    </div>
+                    {draft.meterPercent !== null && (
+                      <div className={`meter ${draft.stock <= 0 ? 'meter--out' : draft.isLow ? 'meter--low' : ''}`} style={{ marginBottom: '14px' }}>
+                        <i style={{ width: `${draft.meterPercent}%` }} />
+                      </div>
+                    )}
+
+                    <div className="report-summary" style={{ maxWidth: 'none', margin: 0, padding: 0, gap: 0 }}>
+                      <div className="report-line"><span className="text-muted">Cost price</span><strong>{draft.cost > 0 ? `₹${money(draft.cost)}` : '—'}</strong></div>
+                      <div className="report-line"><span className="text-muted">Sale price</span><strong>{draft.sale > 0 ? `₹${money(draft.sale)}` : '—'}</strong></div>
+                      {draft.mrp > 0 && (
+                        <div className="report-line"><span className="text-muted">MRP</span><strong>₹{money(draft.mrp)}</strong></div>
+                      )}
+                      {draftMargin !== null && (
+                        <div className="report-line report-strong">
+                          <span>Margin per piece</span>
+                          <strong className={draftMargin < 0 ? 'text-danger' : 'text-success'}>
+                            ₹{money(draft.sale - draft.cost)} · {draftMargin.toFixed(1)}%
+                          </strong>
+                        </div>
+                      )}
+                    </div>
+
+                    {draft.stockValue > 0 && (
+                      <div className="report-total mt-2">
+                        <div>
+                          <small>Opening stock at cost</small>
+                          <strong>₹{wholeMoney(draft.stockValue)}</strong>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Only things that are actually wrong or genuinely missing — never nagging. */}
+                    {draft.warnings.length > 0 && (
+                      <div className="flex flex-col gap-2 mt-2">
+                        {draft.warnings.map((warning) => (
+                          <div key={warning.text} className={`alert ${warning.tone}`} role="status" style={{ fontSize: '12.5px', padding: '9px 11px' }}>
+                            {warning.text}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </aside>
               </div>
 
               <div className="modal-footer">

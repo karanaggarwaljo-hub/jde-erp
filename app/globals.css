@@ -1641,3 +1641,36 @@ Modal
 
 .form-readout.is-good { background: var(--em-tint); color: var(--em); }
 .form-readout.is-bad { background: var(--rose-tint); color: var(--rose); }
+
+/* ===================================================
+   Two-Column Dialog (form + live summary)
+   Used by Add/Edit Part. Mirrors the invoice dialog's split: you fill the left,
+   and the right shows what you are actually about to create, updating as you type.
+   =================================================== */
+.part-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 22px;
+  align-items: start;
+}
+
+.part-form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* Stays in view while the left column scrolls, so the totals never scroll away mid-form. */
+.part-form-summary {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+}
+
+/* Below ~820px the summary can't hold a sensible column width, so it stacks under the form
+   rather than squeezing both into something unusable. */
+@media (max-width: 860px) {
+  .part-form { grid-template-columns: 1fr; }
+  .part-form-summary { position: static; }
+}
