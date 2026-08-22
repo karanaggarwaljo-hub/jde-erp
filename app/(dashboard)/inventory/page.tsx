@@ -163,6 +163,16 @@ export default function InventoryPage() {
     ? products.find((p) => p.name.trim().toLowerCase() === formData.name.trim().toLowerCase())
     : undefined;
 
+  // Margin implied by whatever cost and sale price are currently typed into the form. Null until
+  // both are genuine positive numbers — a part priced at zero has no meaningful margin, and a
+  // half-filled form should show nothing rather than a misleading 100%.
+  const draftMargin = (() => {
+    const cost = Number(formData.cost_price);
+    const sale = Number(formData.sale_price);
+    if (!(cost > 0) || !(sale > 0)) return null;
+    return ((sale - cost) / sale) * 100;
+  })();
+
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.part_number.toLowerCase().includes(search.toLowerCase()) ||
@@ -657,79 +667,115 @@ export default function InventoryPage() {
                     A part named &quot;{possibleDuplicate.name}&quot; already exists ({possibleDuplicate.part_number}, {possibleDuplicate.current_stock} in stock) — this will add a separate, second entry rather than update it. If you meant to edit the existing one, cancel and use its Edit button instead.
                   </div>
                 )}
-                <div className="form-grid-3">
-                  <div className="form-group">
-                    <label className="form-label">Part Number *</label>
-                    <input className="form-input" required value={formData.part_number} onChange={e => setFormData({ ...formData, part_number: e.target.value })} />
+                {/* ── What the part is ───────────────────────────────────────── */}
+                <div className="form-section">
+                  <div className="form-section-head">
+                    <h4>Part details</h4>
+                    <small>Fields marked * are required</small>
                   </div>
+
                   <div className="form-group">
-                    <label className="form-label">OEM Number</label>
-                    <input className="form-input" value={formData.oem_number} onChange={e => setFormData({ ...formData, oem_number: e.target.value })} />
+                    <label className="form-label">Part Name / Description *</label>
+                    <input className="form-input" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} onBlur={suggestPartDetails} />
+                    <small style={{ color: 'var(--text-muted)' }}>{suggestFailed ? "Couldn't get a suggestion this time — go ahead and fill these in yourself." : 'Brand and category are suggested once you finish typing this — override either anytime.'}</small>
                   </div>
+
+                  <div className="form-grid-2">
+                    <div className="form-group">
+                      <label className="form-label flex items-center gap-1">Brand {suggesting && <Sparkles size={12} className="text-brand spin" />}</label>
+                      <input className="form-input" value={formData.brand} onChange={e => setFormData({ ...formData, brand: e.target.value })} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label flex items-center gap-1">Category {suggesting && <Sparkles size={12} className="text-brand spin" />}</label>
+                      <input
+                        className="form-input"
+                        list="category-options"
+                        placeholder="Pick or type a new category"
+                        value={formData.category}
+                        onChange={e => setFormData({ ...formData, category: e.target.value })}
+                      />
+                      <datalist id="category-options">
+                        {categoryOptions.map((category) => <option key={category} value={category} />)}
+                      </datalist>
+                    </div>
+                  </div>
+
                   <div className="form-group">
-                    <label className="form-label">HSN Code</label>
-                    <input className="form-input" placeholder="e.g. 84314990" value={formData.hsn_code} onChange={e => setFormData({ ...formData, hsn_code: e.target.value })} />
+                    <label className="form-label">Fits which machines</label>
+                    <input className="form-input" placeholder="e.g. JCB 3DX, JCB 4DX" value={formData.compatibility} onChange={e => setFormData({ ...formData, compatibility: e.target.value })} />
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">Part Name / Description *</label>
-                  <input className="form-input" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} onBlur={suggestPartDetails} />
-                  <small style={{ color: 'var(--text-muted)' }}>{suggestFailed ? "Couldn't get a suggestion this time — go ahead and fill these in yourself." : 'Brand and category are suggested once you finish typing this — override either anytime.'}</small>
-                </div>
-
-                <div className="form-grid-2">
-                  <div className="form-group">
-                    <label className="form-label flex items-center gap-1">Brand {suggesting && <Sparkles size={12} className="text-brand spin" />}</label>
-                    <input className="form-input" value={formData.brand} onChange={e => setFormData({ ...formData, brand: e.target.value })} />
+                {/* ── How it is identified on paper ──────────────────────────── */}
+                <div className="form-section">
+                  <div className="form-section-head">
+                    <h4>Reference numbers</h4>
+                    <small>HSN is what appears on a GST invoice</small>
                   </div>
-                  <div className="form-group">
-                    <label className="form-label flex items-center gap-1">Category {suggesting && <Sparkles size={12} className="text-brand spin" />}</label>
-                    <input
-                      className="form-input"
-                      list="category-options"
-                      placeholder="Pick or type a new category"
-                      value={formData.category}
-                      onChange={e => setFormData({ ...formData, category: e.target.value })}
-                    />
-                    <datalist id="category-options">
-                      {categoryOptions.map((category) => <option key={category} value={category} />)}
-                    </datalist>
+                  <div className="form-grid-3">
+                    <div className="form-group">
+                      <label className="form-label">Part Number *</label>
+                      <input className="form-input" required value={formData.part_number} onChange={e => setFormData({ ...formData, part_number: e.target.value })} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">OEM Number</label>
+                      <input className="form-input" value={formData.oem_number} onChange={e => setFormData({ ...formData, oem_number: e.target.value })} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">HSN Code</label>
+                      <input className="form-input" placeholder="e.g. 84314990" value={formData.hsn_code} onChange={e => setFormData({ ...formData, hsn_code: e.target.value })} />
+                    </div>
                   </div>
                 </div>
 
-                <div className="form-group">
-                  <label className="form-label">Compatibility (Vehicle Models)</label>
-                  <input className="form-input" placeholder="e.g. Toyota Innova 2015-2023" value={formData.compatibility} onChange={e => setFormData({ ...formData, compatibility: e.target.value })} />
+                {/* ── What it costs and sells for ────────────────────────────── */}
+                <div className="form-section">
+                  <div className="form-section-head">
+                    <h4>Pricing</h4>
+                    {/* Worked out live from what is being typed, so the margin is checked before
+                        saving rather than discovered later in a report. Only shown once both
+                        numbers are real — never a placeholder. */}
+                    {draftMargin !== null && (
+                      <span className={`form-readout ${draftMargin < 0 ? 'is-bad' : draftMargin >= 15 ? 'is-good' : ''}`}>
+                        Margin {draftMargin.toFixed(1)}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="form-grid-3">
+                    <div className="form-group">
+                      <label className="form-label">Cost Price (₹)</label>
+                      <input type="number" className="form-input" value={formData.cost_price} onChange={e => setFormData({ ...formData, cost_price: e.target.value })} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">MRP (₹)</label>
+                      <input type="number" className="form-input" value={formData.mrp} onChange={e => setFormData({ ...formData, mrp: e.target.value })} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Sale Price (₹) *</label>
+                      <input type="number" className="form-input" required value={formData.sale_price} onChange={e => setFormData({ ...formData, sale_price: e.target.value })} />
+                    </div>
+                  </div>
                 </div>
 
-                <div className="form-grid-3">
-                  <div className="form-group">
-                    <label className="form-label">Cost Price (₹)</label>
-                    <input type="number" className="form-input" value={formData.cost_price} onChange={e => setFormData({ ...formData, cost_price: e.target.value })} />
+                {/* ── How much there is and where it sits ────────────────────── */}
+                <div className="form-section">
+                  <div className="form-section-head">
+                    <h4>Stock</h4>
+                    <small>Below the threshold, this part shows as low stock</small>
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">MRP (₹)</label>
-                    <input type="number" className="form-input" value={formData.mrp} onChange={e => setFormData({ ...formData, mrp: e.target.value })} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Sale Price (₹) *</label>
-                    <input type="number" className="form-input" required value={formData.sale_price} onChange={e => setFormData({ ...formData, sale_price: e.target.value })} />
-                  </div>
-                </div>
-
-                <div className="form-grid-3">
-                  <div className="form-group">
-                    <label className="form-label">Initial Stock{!editingProduct && ' *'}</label>
-                    <input type="number" className="form-input" min={editingProduct ? 0 : 1} required={!editingProduct} value={formData.current_stock} onChange={e => setFormData({ ...formData, current_stock: e.target.value })} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Min Stock Threshold</label>
-                    <input type="number" className="form-input" value={formData.min_stock} onChange={e => setFormData({ ...formData, min_stock: e.target.value })} />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Rack Location</label>
-                    <input className="form-input" placeholder="e.g. A-01" value={formData.location} onChange={e => setFormData({ ...formData, location: e.target.value })} />
+                  <div className="form-grid-3">
+                    <div className="form-group">
+                      <label className="form-label">Initial Stock{!editingProduct && ' *'}</label>
+                      <input type="number" className="form-input" min={editingProduct ? 0 : 1} required={!editingProduct} value={formData.current_stock} onChange={e => setFormData({ ...formData, current_stock: e.target.value })} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Min Stock Threshold</label>
+                      <input type="number" className="form-input" value={formData.min_stock} onChange={e => setFormData({ ...formData, min_stock: e.target.value })} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Rack Location</label>
+                      <input className="form-input" placeholder="e.g. A-01" value={formData.location} onChange={e => setFormData({ ...formData, location: e.target.value })} />
+                    </div>
                   </div>
                 </div>
               </div>
