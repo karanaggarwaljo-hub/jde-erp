@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ChangeEvent, useState } from 'react';
+import { ChangeEvent, useRef, useState } from 'react';
 import {
   Plus,
   Search,
@@ -89,6 +89,16 @@ const meterPercent = (p: Product) => {
   return Math.max(0, Math.min(100, Math.round((Number(p.current_stock) / (reorder * 2)) * 100)));
 };
 
+// "SP-0018" -> "SP-0019", preserving the prefix and the zero padding. Falls back to returning
+// the input untouched when there is no trailing number to advance, so an unusual part-number
+// scheme is never mangled into something wrong — the user just types the next one themselves.
+function nextPartNumber(current: string): string {
+  const match = current.match(/^(.*?)(\d+)(\D*)$/);
+  if (!match) return current;
+  const [, prefix, digits, suffix] = match;
+  return `${prefix}${String(Number(digits) + 1).padStart(digits.length, '0')}${suffix}`;
+}
+
 // Which page buttons to show: short lists show every page, long ones collapse to 1 … n-1 n n+1 … last.
 function pageWindow(current: number, total: number): Array<number | 'gap'> {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -137,6 +147,9 @@ export default function InventoryPage() {
   const [suggestFailed, setSuggestFailed] = useState(false);
   const [savingProduct, setSavingProduct] = useState(false);
   const [saveError, setSaveError] = useState('');
+  // How many parts this one trip through the dialog has already saved — drives the
+  // running count and the footer wording, and resets whenever the dialog is reopened.
+  const [savedThisSession, setSavedThisSession] = useState(0);
 
   const [formData, setFormData] = useState({
     part_number: '',
@@ -281,6 +294,7 @@ export default function InventoryPage() {
     setEditingProduct(null);
     setSaveError('');
     setSuggestFailed(false);
+    setSavedThisSession(0);
     setFormData({
       part_number: `SP-00${products.length + 1}`,
       oem_number: '',
@@ -299,8 +313,14 @@ export default function InventoryPage() {
     setShowModal(true);
   };
 
+  // Set by the "Save & add another" button just before submit, so one handler covers both paths.
+  // A ref rather than state: it must be readable inside this submit, not on the next render.
+  const addAnotherRef = useRef(false);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const addAnother = addAnotherRef.current;
+    addAnotherRef.current = false;
     setSaveError('');
     setSavingProduct(true);
     try {
@@ -352,8 +372,39 @@ export default function InventoryPage() {
       // showing the old number until a full page reload. Reloading both tables here, after
       // everything above has actually finished, is what makes the screen match the database.
       await Promise.all([reload(), reloadStockLayers()]);
+
+      if (addAnother && !editingProduct) {
+        // Stay in the dialog for the next part. Parts are almost never added one at a time at a
+        // counter — a delivery arrives and five filters of the same brand go on the same rack —
+        // so brand, category, rack and reorder level carry over and only the part-specific
+        // fields reset. The part number advances from the one just saved.
+        const added = savedThisSession + 1;
+        setSavedThisSession(added);
+        setFormData((current) => ({
+          ...current,
+          part_number: nextPartNumber(current.part_number),
+          name: '',
+          hsn_code: '',
+          compatibility: '',
+          cost_price: '',
+          mrp: '',
+          sale_price: '',
+          current_stock: '',
+          // brand, category, location and min_stock deliberately kept.
+        }));
+        setSuggestFailed(false);
+        setFeedback(`${added} ${added === 1 ? 'part' : 'parts'} added — keep going, or Done when finished.`);
+        return;
+      }
+
       setShowModal(false);
-      setFeedback(editingProduct ? 'Part updated successfully.' : 'New part added to inventory.');
+      setFeedback(
+        editingProduct
+          ? 'Part updated successfully.'
+          : savedThisSession > 0
+            ? `${savedThisSession + 1} parts added to inventory.`
+            : 'New part added to inventory.',
+      );
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Failed to save this part — please try again.');
     } finally {
@@ -365,6 +416,7 @@ export default function InventoryPage() {
     setEditingProduct(product);
     setSaveError('');
     setSuggestFailed(false);
+    setSavedThisSession(0);
     setFormData({
       part_number: product.part_number,
       oem_number: product.oem_number,
@@ -763,14 +815,14 @@ export default function InventoryPage() {
                     <h4>Reference numbers</h4>
                     <small>HSN is what appears on a GST invoice</small>
                   </div>
-                  <div className="form-grid-3">
+                  {/* OEM number was dropped from this form at the owner's request — it is not part
+                      of how this business identifies a part. The field itself is kept in state and
+                      still round-trips through save, so any OEM already recorded on an older part
+                      survives an edit here instead of being blanked. */}
+                  <div className="form-grid-2">
                     <div className="form-group">
                       <label className="form-label">Part Number *</label>
                       <input className="form-input" required value={formData.part_number} onChange={e => setFormData({ ...formData, part_number: e.target.value })} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">OEM Number</label>
-                      <input className="form-input" value={formData.oem_number} onChange={e => setFormData({ ...formData, oem_number: e.target.value })} />
                     </div>
                     <div className="form-group">
                       <label className="form-label">HSN Code</label>
@@ -903,9 +955,31 @@ export default function InventoryPage() {
                 </aside>
               </div>
 
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" disabled={savingProduct} onClick={() => setShowModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary" disabled={savingProduct}>{savingProduct ? 'Saving…' : 'Save Product'}</button>
+              <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+                <span className="text-muted" style={{ fontSize: '12.5px' }}>
+                  {savedThisSession > 0
+                    ? `${savedThisSession} ${savedThisSession === 1 ? 'part' : 'parts'} added so far`
+                    : ''}
+                </span>
+                <div className="flex gap-2">
+                  <button type="button" className="btn btn-secondary" disabled={savingProduct} onClick={() => setShowModal(false)}>
+                    {savedThisSession > 0 ? 'Done' : 'Cancel'}
+                  </button>
+                  {/* Only offered when adding: "another" makes no sense mid-edit of one part. */}
+                  {!editingProduct && (
+                    <button
+                      type="submit"
+                      className="btn btn-secondary"
+                      disabled={savingProduct}
+                      onClick={() => { addAnotherRef.current = true; }}
+                    >
+                      <Plus size={15} /> Save &amp; add another
+                    </button>
+                  )}
+                  <button type="submit" className="btn btn-primary" disabled={savingProduct}>
+                    {savingProduct ? 'Saving…' : editingProduct ? 'Save Changes' : 'Save Part'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
