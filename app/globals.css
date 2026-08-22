@@ -1591,3 +1591,53 @@ Modal
 }
 
 .alert-action:hover { background: var(--panel-2); }
+
+/* ===================================================
+   Form Sections
+   For long dialogs (Add Part has 13 fields): breaks one flat wall of inputs into
+   labelled groups, so the form reads as a few small decisions rather than a list.
+   =================================================== */
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* The first section follows the dialog header, which already provides the rule. */
+.form-section:first-of-type { padding-top: 0; border-top: none; }
+
+.form-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.form-section-head h4 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--ink-3);
+  margin: 0;
+}
+
+.form-section-head small { font-size: 12px; color: var(--ink-4); }
+
+/* Live read-out beside a section heading (e.g. the margin implied by cost vs sale price).
+   Reacts to what is being typed, so it is a check the user makes before saving, not after. */
+.form-readout {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 9px;
+  border-radius: 100px;
+  background: var(--panel-2);
+  color: var(--ink-2);
+}
+
+.form-readout.is-good { background: var(--em-tint); color: var(--em); }
+.form-readout.is-bad { background: var(--rose-tint); color: var(--rose); }
