@@ -1,4 +1,4 @@
-import { dbErrorMessage, receivePurchaseStock } from '@/lib/db';
+import { dbErrorMessage, isBusinessRuleError, receivePurchaseStock } from '@/lib/db';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { getCurrentUser } from '@/lib/auth/dal';
 
@@ -57,6 +57,7 @@ async function recordPurchaseReturn(body: Record<string, unknown>) {
     return Response.json(data, { status: 201 });
   } catch (error) {
     console.error('POST /api/purchases/receive (return) failed:', error);
+    if (isBusinessRuleError(error)) return Response.json({ error: dbErrorMessage(error, 'This supplier return could not be recorded.') }, { status: 422 });
     return Response.json({ error: dbErrorMessage(error, 'Could not record this supplier return.') }, { status: 500 });
   }
 }
@@ -88,6 +89,7 @@ export async function GET(request: Request) {
     return Response.json(data ?? []);
   } catch (error) {
     console.error('GET /api/purchases/receive (return availability) failed:', error);
+    if (isBusinessRuleError(error)) return Response.json({ error: dbErrorMessage(error, 'Supplier return availability could not be read.') }, { status: 422 });
     return Response.json({ error: dbErrorMessage(error, 'Could not load supplier return availability.') }, { status: 500 });
   }
 }
@@ -120,6 +122,7 @@ export async function POST(request: Request) {
     return Response.json(po);
   } catch (error) {
     console.error('POST /api/purchases/receive failed:', error);
+    if (isBusinessRuleError(error)) return Response.json({ error: dbErrorMessage(error, 'This purchase could not be marked received.') }, { status: 422 });
     return Response.json({ error: dbErrorMessage(error, 'Failed to mark this purchase received.') }, { status: 500 });
   }
 }
