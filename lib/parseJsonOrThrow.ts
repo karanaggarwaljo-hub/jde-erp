@@ -22,6 +22,13 @@ export async function parseJsonOrThrow(res: Response, fallback: string): Promise
       throw new Error(`The ERP is busy and did not save this action.${wait}`);
     }
     if (res.status >= 500) {
+      // The user gets one calm sentence, but the server's own explanation is worth keeping: a
+      // real fault reaching here used to leave no trace anywhere the owner (or anyone helping
+      // them) could see, which is exactly how a broken database function went unnoticed.
+      const detail = body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string'
+        ? (body as { error: string }).error
+        : text.slice(0, 300);
+      console.error(`Request to ${res.url} failed with ${res.status}:`, detail || '(no response body)');
       throw new Error('The ERP is temporarily unavailable. Your action was not saved — please try again in a moment.');
     }
     const message = body && typeof body === 'object' && 'error' in body && typeof (body as { error: unknown }).error === 'string'

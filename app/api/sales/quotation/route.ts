@@ -1,4 +1,5 @@
 import { requireOwner } from '@/lib/auth/dal';
+import { isBusinessRuleError } from '@/lib/db';
 import { convertQuotation, loadQuotation, saveQuotation } from '@/lib/quotation-server';
 
 export const dynamic = 'force-dynamic';
@@ -40,6 +41,7 @@ export async function POST(request: Request) {
     return Response.json({ error: 'Unknown quotation action.' }, { status: 400 });
   } catch (error) {
     console.error('POST /api/sales/quotation failed:', error);
+    if (isBusinessRuleError(error)) return Response.json({ error: errorMessage(error, 'This quotation action was rejected.') }, { status: 422 });
     return Response.json({ error: errorMessage(error, 'Quotation action failed.') }, { status: 500 });
   }
 }

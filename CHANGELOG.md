@@ -2,6 +2,26 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-23 — Fixed: sales returns could never be recorded
+
+Every attempt to record a sales return failed with "The ERP is temporarily unavailable". It wasn't a
+temporary problem and it wasn't your connection: the database routine that records a return had a
+naming clash in it, so the database refused the very first step, every time, for every invoice.
+Nothing was ever half-saved — the return simply didn't happen.
+
+The routine is fixed. **This one needs the database script to be run** (`scripts/fix-sales-return-ambiguous-id.sql`)
+— updating the app alone does not fix it.
+
+Two related improvements, so this kind of thing surfaces instead of hiding:
+
+- When the database rejects something for a real business reason — "return quantity exceeds the
+  remaining quantity", "the customer does not match this invoice" — you now see that actual
+  sentence. Until now every one of those was replaced with the generic "temporarily unavailable"
+  message, which told you nothing about what to change. Applies to sales returns, supplier returns,
+  recording and receiving purchases, and quotations.
+- When something genuinely does break, the real reason is now written to the browser console.
+  Previously it was discarded entirely, which is why this bug went unnoticed.
+
 ## 2026-08-23 — Invoices now recognise parts you already stock, and fill in what's missing
 
 Until now, an imported invoice only recognised an existing part if the wording matched almost

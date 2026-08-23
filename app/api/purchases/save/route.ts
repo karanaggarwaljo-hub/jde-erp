@@ -1,4 +1,4 @@
-import { dbErrorMessage, savePurchase } from '@/lib/db';
+import { dbErrorMessage, isBusinessRuleError, savePurchase } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +29,7 @@ export async function POST(request: Request) {
     return Response.json(po, { status: 201 });
   } catch (error) {
     console.error('POST /api/purchases/save failed:', error);
+    if (isBusinessRuleError(error)) return Response.json({ error: dbErrorMessage(error, 'This purchase could not be recorded.') }, { status: 422 });
     return Response.json({ error: dbErrorMessage(error, 'Failed to record this purchase.') }, { status: 500 });
   }
 }

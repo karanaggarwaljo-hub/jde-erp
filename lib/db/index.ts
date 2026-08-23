@@ -7,6 +7,17 @@ import { TABLES, type TableName } from './schema';
  *  instead so API routes can always return a real message to the client rather than a generic
  *  one (or, if uncaught, a response with no body at all — which crashes callers on `res.json()`
  *  with a raw "Unexpected end of JSON input" instead of anything actionable). */
+/** True when Postgres deliberately rejected the operation with `raise exception` — a business
+ *  rule the owner can act on ("Return quantity exceeds the remaining quantity for X"), not a
+ *  fault. SQLSTATE P0001 is the code Postgres assigns those, which is exactly what separates a
+ *  rule from a genuine failure: routes can answer 422 with the real sentence instead of a 500,
+ *  which the browser deliberately replaces with "the ERP is temporarily unavailable". */
+export function isBusinessRuleError(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === 'object' && 'code' in error && (error as { code?: unknown }).code === 'P0001'
+  );
+}
+
 export function dbErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error) return error.message;
   if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') return error.message;
