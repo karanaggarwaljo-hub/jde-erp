@@ -2,6 +2,33 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-23 — Invoices now recognise parts you already stock, and fill in what's missing
+
+Until now, an imported invoice only recognised an existing part if the wording matched almost
+exactly. So when a supplier billed the same physical part under their own name, the app quietly
+created a **second** part, put the stock there, and left your original sitting at zero. Two records,
+one real part.
+
+Three things change:
+
+**The scanner now reads the identifiers.** Part number, OEM number, brand and HSN code are pulled
+off each line of the invoice, where before only the description, quantity and price were read.
+
+**Matching uses those identifiers first.** If the invoice prints a part number you already have on
+file, it restocks that part — no matter what the supplier chose to call it. It also cross-checks:
+suppliers often print an OEM number in their own "part no" column, so both are compared both ways.
+
+**Where the name only looks similar, you decide.** The review screen shows "Same part?" with the
+existing part, its current stock, and buttons for **Same part** / **Different part**. Nothing is
+linked on a guess — attaching stock to the wrong part is much harder to unpick than one click — and
+the purchase can't be recorded while an item is still undecided.
+
+Alongside this, an invoice now **fills in blanks** on parts you already stock: a missing brand, OEM
+number, HSN code, or a part number that was only ever an auto-generated "SP-014" placeholder. Details
+you entered yourself are never overwritten — where the invoice disagrees with what's on file, the
+review screen tells you and keeps yours. New parts created from an invoice now also start with the
+real part number from the document instead of an SP-### placeholder.
+
 ## 2026-08-22 — AI answers no longer wait on whichever service is being slow
 
 The backup service already covered Google *failing*. This covers Google being *slow*, which was

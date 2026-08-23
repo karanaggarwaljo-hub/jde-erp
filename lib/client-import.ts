@@ -1,10 +1,27 @@
 import * as XLSX from 'xlsx';
 
-export type ImportedLine = { description: string; quantity: number; unit_price: number };
+/** One purchased line, from a spreadsheet or from a scanned invoice.
+ *
+ *  The identifier fields are optional and often absent — a supplier document may print none of
+ *  them. They exist because a description alone is a poor key: the same physical part arrives
+ *  named differently from every supplier, while its part/OEM number does not move. */
+export type ImportedLine = {
+  description: string;
+  quantity: number;
+  unit_price: number;
+  part_number?: string | null;
+  oem_number?: string | null;
+  brand?: string | null;
+  hsn_code?: string | null;
+};
 
 const DESCRIPTION_KEYS = ['description', 'item', 'item name', 'part', 'part name', 'product', 'name'];
 const QUANTITY_KEYS = ['quantity', 'qty'];
 const PRICE_KEYS = ['unit price', 'unit_price', 'price', 'rate', 'cost', 'cost price'];
+const LINE_PART_NUMBER_KEYS = ['part number', 'part no', 'part_no', 'partno', 'item code', 'item_code', 'code', 'cat no', 'catalogue no', 'catalog no', 'sku'];
+const LINE_OEM_KEYS = ['oem number', 'oem no', 'oem', 'oe number', 'oe no'];
+const LINE_BRAND_KEYS = ['brand', 'make', 'manufacturer'];
+const LINE_HSN_KEYS = ['hsn code', 'hsn', 'hsn/sac', 'hsn sac', 'hsn no'];
 
 function normalizeHeader(header: string): string {
   return header
@@ -203,7 +220,20 @@ export async function parseSpreadsheetFile(file: File): Promise<ImportedLine[]> 
     if (!description) continue;
     const quantity = qtyKey ? Number(row[qtyKey]) || 0 : 0;
     const unitPrice = priceKey ? Number(row[priceKey]) || 0 : 0;
-    lines.push({ description, quantity: quantity || 1, unit_price: unitPrice });
+    const cell = (keys: string[]): string | null => {
+      const key = findKey(row, keys);
+      const value = key ? String(row[key]).trim() : '';
+      return value || null;
+    };
+    lines.push({
+      description,
+      quantity: quantity || 1,
+      unit_price: unitPrice,
+      part_number: cell(LINE_PART_NUMBER_KEYS),
+      oem_number: cell(LINE_OEM_KEYS),
+      brand: cell(LINE_BRAND_KEYS),
+      hsn_code: cell(LINE_HSN_KEYS),
+    });
   }
   return lines;
 }
