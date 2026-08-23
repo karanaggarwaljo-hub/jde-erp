@@ -131,6 +131,35 @@ To verify the chain end to end, including a forced failure:
 npx tsx scripts/ai-fallback-check.ts
 ```
 
+### Matching imported invoice lines to inventory
+
+`lib/import-matching.ts` decides whether a line on an imported invoice restocks a part already on
+file or creates a new one. It is deliberately a separate, dependency-free module rather than page
+code: this is where a mistake costs real money, and being pure is what lets
+`scripts/import-matching-check.ts` exercise it directly.
+
+The order is: identifiers, then exact text, then — only as a *suggestion* — word similarity.
+
+- Part number and OEM number are compared **both ways** (line part ↔ product OEM and vice versa),
+  because suppliers routinely print an OEM code in their own "part no" column. An identifier hit is
+  an `exact` match and is acted on unattended.
+- Auto-generated `SP-###` part numbers are treated as placeholders, never as identifiers — the app
+  invented them, so they prove nothing and may be overwritten by a real one.
+- A name-similarity hit (Dice coefficient over words, ≥ 0.55) is only ever `suggested`. The review
+  screen asks the owner, and the purchase cannot be recorded while a suggestion is undecided.
+  Auto-linking here was rejected deliberately: wrongly merging two parts moves stock and cost onto
+  the wrong record, which is far more expensive than a click.
+
+`planFieldUpdates()` then decides what the invoice may teach an existing part: blank fields (and
+placeholder part numbers, and a zero cost) are filled in; anything already entered is left alone and
+any disagreement is surfaced in the review screen instead of applied. Enrichment runs *after* the
+purchase is safely recorded and never fails it — a part keeping a blank brand is cosmetic, undoing a
+recorded purchase is not.
+
+```bash
+npx tsx scripts/import-matching-check.ts
+```
+
 ### Backups
 
 A JSON snapshot of every table is saved to `data/backups/` once per day automatically while the app is running (and on-demand from Settings → Data Backups). Snapshots older than 7 days are pruned automatically. This is a local safety net in addition to whatever backup/PITR your Supabase plan provides — it never touches your live data.

@@ -22,6 +22,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
+import { matchImportedLine, normalizeImportText, planFieldUpdates, type LineMatch, type MatchableProduct } from '@/lib/import-matching';
 import { savePurchase, receivePurchaseStock } from '@/lib/client-purchases';
 import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-purchase-returns';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -31,7 +32,7 @@ type PurchaseTab = 'purchases' | 'invoices';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 type POLine = { description: string; quantity: number; unit_price: number };
 
-type Product = { id: string; company_id: string; part_number: string; name: string; category: string; cost_price: number; current_stock: number };
+type Product = { id: string; company_id: string; part_number: string; oem_number: string; hsn_code: string; brand: string; name: string; category: string; cost_price: number; current_stock: number };
 type Supplier = { id: string; company_id: string; name: string; balance: number };
 type PurchaseOrder = { id: string; company_id: string; supplier: string; date: string; expected: string; items: number; total: number; paid: number; status: string };
 type Grn = { id: string; company_id: string; po_number: string; supplier: string; received_at: string; status: string };
@@ -76,9 +77,21 @@ function pageWindow(current: number, total: number): Array<number | 'gap'> {
   return shown;
 }
 
+/** The value stored in the link map when the owner has looked at a suggestion and rejected it —
+ *  distinct from "not yet decided", which is what an absent entry means. */
+const NEW_PART = 'new';
+
 type ImportLineReview = {
-  matchedProduct: Product | null;
+  match: LineMatch;
+  /** The part this line will actually be recorded against — after any owner decision. */
+  matchedProduct: MatchableProduct | null;
+  /** True while a suggested match is still waiting on Link / Keep separate. */
+  needsDecision: boolean;
   warnings: string[];
+  /** Fields where the invoice disagrees with data already on the part. Reported, never applied. */
+  conflicts: string[];
+  /** Blank fields on the existing part that this invoice will fill in. */
+  fills: string[];
   costDifferencePercent: number | null;
 };
 
@@ -98,41 +111,23 @@ function cleanedGuess(text: string): string {
   return text.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
 }
 
-function normalizeImportText(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
-}
-
-/**
- * Only use exact, explainable matches for imports. A fuzzy match that silently attaches a
- * supplier's "Seal kit" to the wrong inventory part is much more costly than showing the owner
- * one extra review warning. The selected datalist format ("PART-1 - Part name") is supported too.
- */
-function matchImportedProduct(description: string, products: Product[]): Product | null {
-  const trimmed = description.trim();
-  const normalized = normalizeImportText(trimmed);
-  if (!normalized) return null;
-
-  return products.find((product) => {
-    const partNumber = product.part_number.trim();
-    const partNumberPrefix = partNumber
-      ? new RegExp(`^${partNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s*[-:|]\\s*|\\s*$)`, 'i')
-      : null;
-    return normalized === normalizeImportText(product.name)
-      || normalized === normalizeImportText(`${partNumber} - ${product.name}`)
-      || normalized === normalizeImportText(partNumber)
-      || Boolean(partNumberPrefix?.test(trimmed));
-  }) ?? null;
-}
-
-function reviewImportedLines(lines: ImportedLine[], products: Product[]): ImportLineReview[] {
+function reviewImportedLines(lines: ImportedLine[], products: Product[], links: Record<number, string>): ImportLineReview[] {
   const descriptionCounts = new Map<string, number>();
   for (const line of lines) {
     const key = normalizeImportText(line.description);
     if (key) descriptionCounts.set(key, (descriptionCounts.get(key) ?? 0) + 1);
   }
 
-  return lines.map((line) => {
-    const matchedProduct = matchImportedProduct(line.description, products);
+  return lines.map((line, index) => {
+    const match = matchImportedLine(line, products);
+
+    // An owner decision always wins over what the matcher guessed — including the decision to
+    // keep a suggested line separate and create a new part after all.
+    const decision = links[index];
+    const decided = decision === NEW_PART ? null : decision ? products.find((product) => product.id === decision) ?? null : undefined;
+    const matchedProduct = decided !== undefined ? decided : match.kind === 'exact' ? match.product : null;
+    const needsDecision = match.kind === 'suggested' && decision === undefined;
+
     const warnings: string[] = [];
     const descriptionKey = normalizeImportText(line.description);
     let costDifferencePercent: number | null = null;
@@ -143,17 +138,17 @@ function reviewImportedLines(lines: ImportedLine[], products: Product[]): Import
     if (descriptionKey && (descriptionCounts.get(descriptionKey) ?? 0) > 1) warnings.push('This item appears more than once in this import');
 
     if (!matchedProduct) {
-      if (line.description.trim()) warnings.push('No exact inventory match — a new part will be created');
+      if (line.description.trim() && !needsDecision) warnings.push('No inventory match — a new part will be created');
     } else if (matchedProduct.cost_price > 0 && line.unit_price > 0) {
       costDifferencePercent = ((line.unit_price - matchedProduct.cost_price) / matchedProduct.cost_price) * 100;
       if (Math.abs(costDifferencePercent) >= 5) {
         warnings.push(`Cost is ${Math.abs(costDifferencePercent).toFixed(0)}% ${costDifferencePercent > 0 ? 'higher' : 'lower'} than previous cost (₹${Number(matchedProduct.cost_price).toLocaleString()})`);
       }
-    } else if (matchedProduct.cost_price <= 0 && line.unit_price > 0) {
-      warnings.push('Matched part has no previous cost to compare');
     }
 
-    return { matchedProduct, warnings, costDifferencePercent };
+    const plan = matchedProduct ? planFieldUpdates(line, matchedProduct) : null;
+
+    return { match, matchedProduct, needsDecision, warnings, conflicts: plan?.conflicts ?? [], fills: plan?.filled ?? [], costDifferencePercent };
   });
 }
 
@@ -192,6 +187,9 @@ export default function PurchasesPage() {
   const [importError, setImportError] = useState('');
   const [importPreview, setImportPreview] = useState<{ fileName: string; lines: ImportedLine[]; supplier: string; supplierGstin: string; fileHash: string | null } | null>(null);
   const [confirmingImport, setConfirmingImport] = useState(false);
+  // Line index -> the part the owner linked it to, or NEW_PART for "keep this separate".
+  // Only suggested (not exact) matches ever need an entry here.
+  const [importLinks, setImportLinks] = useState<Record<number, string>>({});
   const [returningOrder, setReturningOrder] = useState<PurchaseOrder | null>(null);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [returnNote, setReturnNote] = useState('');
@@ -202,9 +200,11 @@ export default function PurchasesPage() {
 
   const total = lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
   const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
-  const importReviews = importPreview ? reviewImportedLines(importPreview.lines, products) : [];
-  const importWarningCount = importReviews.reduce((count, review) => count + review.warnings.length, 0);
-  const importNewPartCount = importReviews.filter((review) => !review.matchedProduct).length;
+  const importReviews = importPreview ? reviewImportedLines(importPreview.lines, products, importLinks) : [];
+  const importWarningCount = importReviews.reduce((count, review) => count + review.warnings.length + review.conflicts.length, 0);
+  const importNewPartCount = importReviews.filter((review) => !review.matchedProduct && !review.needsDecision).length;
+  const importUndecidedCount = importReviews.filter((review) => review.needsDecision).length;
+  const importFillCount = importReviews.reduce((count, review) => count + review.fills.length, 0);
   const importPriceChangeCount = importReviews.filter((review) => review.costDifferencePercent !== null && Math.abs(review.costDifferencePercent) >= 5).length;
   const importHasInvalidLine = importPreview?.lines.some((line) => !line.description.trim() || !Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.unit_price) || line.unit_price <= 0) ?? false;
   const returnableItems = returningOrder ? poItems.filter((item) => item.po_id === returningOrder.id) : [];
@@ -328,24 +328,29 @@ export default function PurchasesPage() {
    *  plain natural-language and can contain " - " for unrelated reasons (e.g. "LOADER CUTTER KIT
    *  - JCB", where JCB is a brand, not a part number). Splitting there mangled real line items
    *  into a part "number" like "PIN" named "12400" instead of one part named "PIN - 12400". */
-  async function resolveProduct(description: string, unitCost: number, knownProducts: Product[], splitOnDash = true): Promise<Product | null> {
+  async function resolveProduct(description: string, unitCost: number, knownProducts: Product[], splitOnDash = true, source?: ImportedLine): Promise<Product | null> {
     const trimmed = description.trim();
     if (!trimmed) return null;
     const existing = knownProducts.find((p) => `${p.part_number} - ${p.name}` === trimmed);
     if (existing) return existing;
 
     const separatorIndex = splitOnDash ? trimmed.indexOf(' - ') : -1;
-    const partNumber = separatorIndex > 0 ? trimmed.slice(0, separatorIndex).trim() : `SP-${String(knownProducts.length + 1).padStart(3, '0')}`;
-    const name = separatorIndex > 0 ? trimmed.slice(separatorIndex + 3).trim() : trimmed;
+    // A part number printed on the document beats both the " - " convention and the SP-### stand-in:
+    // it is the real code, and recording it now is what lets the next invoice recognise this part.
+    const documentPartNumber = (source?.part_number ?? '').trim();
+    const partNumber = documentPartNumber
+      || (separatorIndex > 0 ? trimmed.slice(0, separatorIndex).trim() : `SP-${String(knownProducts.length + 1).padStart(3, '0')}`);
+    const name = separatorIndex > 0 && !documentPartNumber ? trimmed.slice(separatorIndex + 3).trim() : trimmed;
 
     const res = await fetch('/api/local/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         part_number: partNumber,
-        oem_number: '',
+        oem_number: (source?.oem_number ?? '').trim(),
+        hsn_code: (source?.hsn_code ?? '').trim(),
         name: name || trimmed,
-        brand: '',
+        brand: (source?.brand ?? '').trim(),
         category: '',
         compatibility: '',
         // Sale price starts equal to cost (0% margin) rather than a guessed markup — an honest
@@ -459,6 +464,7 @@ export default function PurchasesPage() {
     setImportError('');
     setFeedback('');
     setImportPreview(null);
+    setImportLinks({});
     setImporting(true);
     try {
       if (isSpreadsheetFile(file)) {
@@ -515,11 +521,27 @@ export default function PurchasesPage() {
 
       const knownProducts = [...products];
       const items = [];
-      for (const line of importPreview.lines) {
+      // Field updates are collected here and applied only after the purchase itself is safely
+      // recorded — enriching a part for a purchase that then failed to save would be a lie.
+      const enrichments: { product: MatchableProduct; fills: Record<string, string | number> }[] = [];
+
+      for (const [index, line] of importPreview.lines.entries()) {
         if (!line.description.trim()) continue;
-        // false: this description is raw AI-scanned invoice text, not a manually-typed
-        // "part number - name" pair — see resolveProduct's own comment for why that matters.
-        const matchedProduct = await resolveProduct(line.description, line.unit_price, knownProducts, false);
+
+        // Whatever the review screen concluded — an identifier match, the owner's own Link
+        // decision, or nothing — is what gets recorded. Only genuinely unmatched lines create a
+        // new part, and that new part now carries the document's real identifiers.
+        const review = importReviews[index];
+        const matchedProduct = review?.matchedProduct
+          // false: this description is raw AI-scanned invoice text, not a manually-typed
+          // "part number - name" pair — see resolveProduct's own comment for why that matters.
+          ?? await resolveProduct(line.description, line.unit_price, knownProducts, false, line);
+
+        if (review?.matchedProduct) {
+          const plan = planFieldUpdates(line, review.matchedProduct);
+          if (Object.keys(plan.fills).length) enrichments.push({ product: review.matchedProduct, fills: plan.fills });
+        }
+
         items.push({
           product_id: matchedProduct?.id ?? null,
           part_number: matchedProduct?.part_number ?? '',
@@ -543,10 +565,34 @@ export default function PurchasesPage() {
         sourceFileHash: importPreview.fileHash,
       });
 
+      // The purchase is now safely recorded, so fill in what this document taught us about parts
+      // already on file. Deliberately not fatal: a part that keeps a blank brand is a cosmetic
+      // loss, and undoing a recorded purchase over one would be far worse. Failures are counted
+      // and reported rather than thrown.
+      let enriched = 0;
+      let enrichFailures = 0;
+      for (const { product, fills } of enrichments) {
+        try {
+          const res = await fetch(`/api/local/products/${product.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fills),
+          });
+          if (!res.ok) throw new Error(String(res.status));
+          enriched += 1;
+        } catch (error) {
+          enrichFailures += 1;
+          console.error(`Could not fill in details for part ${product.part_number}:`, error);
+        }
+      }
+
       await Promise.all([reloadPurchaseOrders(), reloadPoItems(), reloadGrns(), reloadSuppliers(), reloadProducts()]);
 
-      setFeedback(`${po.id} recorded from ${importPreview.fileName} — ${items.length} item(s), ₹${importedTotal.toLocaleString()} from ${supplierRow.name}.`);
+      const enrichedNote = enriched > 0 ? ` Filled in missing details on ${enriched} existing part${enriched === 1 ? '' : 's'}.` : '';
+      const failureNote = enrichFailures > 0 ? ` ${enrichFailures} part${enrichFailures === 1 ? '' : 's'} could not be updated — check them in Inventory.` : '';
+      setFeedback(`${po.id} recorded from ${importPreview.fileName} — ${items.length} item(s), ₹${importedTotal.toLocaleString()} from ${supplierRow.name}.${enrichedNote}${failureNote}`);
       setImportPreview(null);
+      setImportLinks({});
       setActiveTab('purchases');
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Inventory before retrying.');
@@ -926,7 +972,7 @@ export default function PurchasesPage() {
       </div></div>}
 
       {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
-        <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Record Purchase from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={confirmingImport} onClick={() => setImportPreview(null)}>✕</button></div>
+        <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Record Purchase from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={confirmingImport} onClick={() => { setImportPreview(null); setImportLinks({}); }}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
           {importError && <div className="alert alert-danger" role="alert">{importError}</div>}
 
@@ -982,14 +1028,56 @@ export default function PurchasesPage() {
                 <thead><tr><th>Item</th><th className="text-right">Qty</th><th className="text-right">Unit cost (₹)</th><th className="text-right">Amount (₹)</th><th>Inventory match / review</th></tr></thead>
                 <tbody>{importPreview.lines.map((line, index) => {
                   const review = importReviews[index];
+                  const suggestion = review?.match.kind === 'suggested' ? review.match.product : null;
                   const isInvalid = !line.description.trim() || line.quantity <= 0 || line.unit_price <= 0;
                   return <tr key={index} style={isInvalid ? { background: 'var(--color-danger-bg)' } : undefined}>
                     <td style={{ minWidth: '220px' }}><input list="import-part-options" className="form-input" aria-label={`Item ${index + 1}`} value={line.description} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { description: event.target.value })} /></td>
                     <td style={{ minWidth: '82px' }}><input type="number" min="1" className="form-input text-right" aria-label={`Quantity for item ${index + 1}`} value={line.quantity} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { quantity: Number(event.target.value) })} /></td>
                     <td style={{ minWidth: '118px' }}><input type="number" min="0.01" step="0.01" className="form-input text-right" aria-label={`Unit cost for item ${index + 1}`} value={line.unit_price} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { unit_price: Number(event.target.value) })} /></td>
                     <td className="text-right font-semibold">₹{money(line.quantity * line.unit_price)}</td>
-                    <td style={{ minWidth: '260px' }}>
-                      {review?.matchedProduct ? <div><span className="badge badge-success">Matched</span> <strong style={{ fontSize: '12px' }}>{review.matchedProduct.part_number}</strong><div className="text-muted" style={{ fontSize: '12px', marginTop: '3px' }}>{review.matchedProduct.name}</div></div> : <span className="badge badge-warning">New part</span>}
+                    <td style={{ minWidth: '300px' }}>
+                      {review?.needsDecision && review.match.kind === 'suggested' ? (
+                        // Deliberately unresolved until the owner says so: the names only look
+                        // alike, and guessing wrong puts this stock on the wrong part.
+                        <div>
+                          <span className="badge badge-warning">Same part?</span>
+                          <div style={{ fontSize: '12px', marginTop: '3px' }}>
+                            <strong>{review.match.product.part_number}</strong> — {review.match.product.name}
+                            <div className="text-muted">Already in stock: {review.match.product.current_stock} · {review.match.reason}</div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '5px' }}>
+                            <button type="button" className="btn btn-sm btn-primary" disabled={confirmingImport}
+                              onClick={() => setImportLinks((current) => ({ ...current, [index]: suggestion?.id ?? NEW_PART }))}>
+                              Same part
+                            </button>
+                            <button type="button" className="btn btn-sm btn-secondary" disabled={confirmingImport}
+                              onClick={() => setImportLinks((current) => ({ ...current, [index]: NEW_PART }))}>
+                              Different part
+                            </button>
+                          </div>
+                        </div>
+                      ) : review?.matchedProduct ? (
+                        <div>
+                          <span className="badge badge-success">{importLinks[index] ? 'Linked by you' : 'Matched'}</span>{' '}
+                          <strong style={{ fontSize: '12px' }}>{review.matchedProduct.part_number}</strong>
+                          <div className="text-muted" style={{ fontSize: '12px', marginTop: '3px' }}>
+                            {review.matchedProduct.name}
+                            {review.match.kind === 'exact' && !importLinks[index] ? ` · ${review.match.reason}` : ''}
+                          </div>
+                          {importLinks[index] && importLinks[index] !== NEW_PART && (
+                            <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '0', fontSize: '11px' }} disabled={confirmingImport}
+                              onClick={() => setImportLinks((current) => ({ ...current, [index]: NEW_PART }))}>
+                              Undo — make it a new part
+                            </button>
+                          )}
+                        </div>
+                      ) : <span className="badge badge-warning">New part</span>}
+                      {review && review.fills.length > 0 && (
+                        <div className="text-success" style={{ fontSize: '12px', marginTop: '4px' }}>
+                          Will fill in from this invoice: {review.fills.join(', ')}
+                        </div>
+                      )}
+                      {review?.conflicts.map((conflict) => <div key={conflict} className="text-warning" style={{ fontSize: '12px', marginTop: '4px' }}>{conflict}</div>)}
                       {review?.warnings.map((warning) => <div key={warning} className={warning.includes('must be') ? 'text-danger' : 'text-warning'} style={{ fontSize: '12px', marginTop: '4px' }}>{warning}</div>)}
                     </td>
                   </tr>;
@@ -1004,10 +1092,19 @@ export default function PurchasesPage() {
           </div>
 
           {importHasInvalidLine && <div className="alert alert-danger" role="alert">Fix the red rows before recording this purchase.</div>}
+          {importUndecidedCount > 0 && (
+            <div className="alert alert-warning" role="alert">
+              {importUndecidedCount === 1 ? 'One item looks' : `${importUndecidedCount} items look`} like {importUndecidedCount === 1 ? 'a part' : 'parts'} you already stock under a different name.
+              Choose <strong>Same part</strong> or <strong>Different part</strong> for each — otherwise a duplicate part gets created.
+            </div>
+          )}
 
-          <p className="text-muted" style={{ fontSize: '12px' }}>Anything here that isn&apos;t already in Inventory is added as a new part when you record this purchase.</p>
+          <p className="text-muted" style={{ fontSize: '12px' }}>
+            Anything here that isn&apos;t already in Inventory is added as a new part when you record this purchase.
+            {importFillCount > 0 && ' Blank details on parts you already stock will be filled in from this invoice; anything you entered yourself is left alone.'}
+          </p>
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={confirmingImport} onClick={() => setImportPreview(null)}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier.trim() || importHasInvalidLine || confirmingImport}>{confirmingImport ? 'Saving…' : `Record Purchase${importWarningCount > 0 ? ' After Review' : ''}`}</button></div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={confirmingImport} onClick={() => { setImportPreview(null); setImportLinks({}); }}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier.trim() || importHasInvalidLine || importUndecidedCount > 0 || confirmingImport}>{confirmingImport ? 'Saving…' : `Record Purchase${importWarningCount > 0 ? ' After Review' : ''}`}</button></div>
       </div></div>}
 
       {showPurchaseModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="purchase-modal-title"><form onSubmit={recordPurchase}>
