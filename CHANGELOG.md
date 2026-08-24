@@ -2,6 +2,17 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-24 — Fixed: Google Search Console "Sitemap is HTML" error
+
+The website had no sitemap at all — the app never had that page — so when Google requested
+`/sitemap.xml` it got redirected to the login page and reported "Sitemap is HTML."
+
+Added a real sitemap listing the Website Catalog and every published product, plus a `robots.txt`
+that tells search engines to leave the private dashboard alone and only look at the catalog. Also
+had to add both to the list of pages reachable without logging in — otherwise a search engine
+would still get redirected to the login page instead of the sitemap itself, even with the page now
+existing. Should clear the Search Console error within a few days of Google re-checking it.
+
 ## 2026-08-24 — Fixed: Quotation's Print button had the same bug as Invoice's did
 
 Yesterday's invoice fix (below) left one sibling untouched on purpose: the Quotation view's Print
