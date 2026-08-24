@@ -289,12 +289,61 @@ export async function saveSalesInvoice(input: SaveSalesInvoiceInput): Promise<Re
 }
 
 /** Atomically deletes a sales invoice — restores FIFO stock for every line item, reverses the
- *  customer balance, then removes the items and the invoice — as one database transaction. */
+ *  customer balance, then removes the items and the invoice — as one database transaction.
+ *  jde_delete_sales_invoice itself refuses this once a payment has been recorded against the
+ *  invoice (see scripts/customer-payments.sql) — delete/edit that payment first. */
 export async function deleteSalesInvoice(invoiceId: string, customerId: string | null, outstanding: number): Promise<void> {
   const { error } = await getClient().rpc('jde_delete_sales_invoice', {
     p_invoice_id: invoiceId,
     p_customer_id: customerId,
     p_outstanding: outstanding,
+  });
+  if (error) throw error;
+}
+
+export type PaymentAllocationInput = { invoiceId: string; amount: number };
+
+export type ReceiveCustomerPaymentInput = {
+  companyId: string;
+  customerId: string;
+  date: string;
+  amount: number;
+  note: string;
+  /** Which invoices this payment settles, and how much of it goes to each. Must sum to exactly
+   *  `amount` — jde_receive_customer_payment enforces this, so every rupee entered is always
+   *  accounted for against a real invoice, never left floating as an unexplained credit. */
+  allocations: PaymentAllocationInput[];
+};
+
+/** Atomically records one payment against a customer and applies it across the invoices the
+ *  owner chose — the payment row, its per-invoice allocations, each invoice's paid/status, and
+ *  the customer's running balance all land together (jde_receive_customer_payment), instead of
+ *  hand-editing each invoice's paid amount separately with no record that the payment itself
+ *  ever happened. This is what lets a customer who bought across several days on credit pay the
+ *  running total in one visit, with a receipt to show for it. */
+export async function receiveCustomerPayment(input: ReceiveCustomerPaymentInput): Promise<{ payment_id: string; applied_total: number }> {
+  const { data, error } = await getClient()
+    .rpc('jde_receive_customer_payment', {
+      p_company_id: input.companyId,
+      p_customer_id: input.customerId,
+      p_date: input.date,
+      p_amount: input.amount,
+      p_note: input.note,
+      p_allocations: input.allocations.map((line) => ({ invoice_id: line.invoiceId, amount: line.amount })),
+    })
+    .single();
+  if (error) throw error;
+  return data as { payment_id: string; applied_total: number };
+}
+
+/** Atomically reverses a recorded payment — puts every invoice it was applied to back to its
+ *  prior paid amount and status, corrects the customer's balance by the same total, then removes
+ *  the payment and its allocations. Used when a payment was entered wrong, not for a genuine
+ *  refund (which is a business decision belonging to a real transaction, not an undo button). */
+export async function deleteCustomerPayment(companyId: string, paymentId: string): Promise<void> {
+  const { error } = await getClient().rpc('jde_delete_customer_payment', {
+    p_company_id: companyId,
+    p_payment_id: paymentId,
   });
   if (error) throw error;
 }

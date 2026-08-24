@@ -1,10 +1,11 @@
 'use client';
 
-import { Fragment, FormEvent, useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { Plus, Phone, Mail, MapPin, Sparkles, IndianRupee, Users, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
 import AddCustomerModal from '@/components/AddCustomerModal';
+import ReceivePaymentModal from '@/components/ReceivePaymentModal';
 
 type Customer = {
   id: string;
@@ -39,11 +40,10 @@ type CollectionQueueItem = {
 };
 
 export default function CustomersPage() {
-  const { rows: customers, loading, create, adjust } = useCompanyTable<Customer>('customers');
-  const { rows: invoices, loading: invoicesLoading, update: updateInvoice } = useCompanyTable<Invoice>('invoices');
+  const { rows: customers, loading, create } = useCompanyTable<Customer>('customers');
+  const { rows: invoices, loading: invoicesLoading } = useCompanyTable<Invoice>('invoices');
   const [showModal, setShowModal] = useState(false);
-  const [paymentCustomer, setPaymentCustomer] = useState<Customer | null>(null);
-  const [paymentAmount, setPaymentAmount] = useState(0);
+  const [payingCustomerId, setPayingCustomerId] = useState<string | null>(null);
   const [reminderCustomer, setReminderCustomer] = useState<Customer | null>(null);
   const [feedback, setFeedback] = useState('');
   const [filter, setFilter] = useState<LedgerFilter>('all');
@@ -88,33 +88,7 @@ export default function CustomersPage() {
     return `${overdue.length} unpaid invoice${overdue.length > 1 ? 's' : ''}, oldest ${overdue[0].id} dated ${overdue[0].date}.`;
   }
 
-  const openPayment = (customer: Customer) => {
-    setPaymentCustomer(customer);
-    setPaymentAmount(customer.balance);
-  };
-
-  const recordPayment = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!paymentCustomer) return;
-    const received = Math.min(Math.max(paymentAmount, 0), paymentCustomer.balance);
-
-    let remaining = received;
-    const outstandingInvoices = invoices
-      .filter((inv) => inv.customer === paymentCustomer.name && Number(inv.total) > Number(inv.paid))
-      .sort((a, b) => a.date.localeCompare(b.date));
-    for (const inv of outstandingInvoices) {
-      if (remaining <= 0) break;
-      const due = Number(inv.total) - Number(inv.paid);
-      const apply = Math.min(due, remaining);
-      const newPaid = Number(inv.paid) + apply;
-      await updateInvoice(inv.id, { paid: newPaid, status: newPaid >= Number(inv.total) ? 'paid' : 'partial' });
-      remaining -= apply;
-    }
-
-    await adjust(paymentCustomer.id, -received);
-    setFeedback(`₹${received.toLocaleString()} payment received from ${paymentCustomer.name}.`);
-    setPaymentCustomer(null);
-  };
+  const openPayment = (customer: Customer) => setPayingCustomerId(customer.id);
 
   // How many invoices this customer still has open. Counted with exactly the same test the
   // payment flow above uses, off invoices this page already loads — nothing estimated.
@@ -380,11 +354,16 @@ export default function CustomersPage() {
         />
       )}
 
-      {paymentCustomer && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="payment-modal-title"><form onSubmit={recordPayment}>
-        <div className="modal-header"><h3 id="payment-modal-title" className="modal-title">Record Payment Received</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setPaymentCustomer(null)}>✕</button></div>
-        <div className="modal-body flex flex-col gap-4"><p>Outstanding balance for <strong>{paymentCustomer.name}</strong>: ₹{paymentCustomer.balance.toLocaleString()}</p><div className="form-group"><label className="form-label">Amount Received (₹)</label><input type="number" min="1" max={paymentCustomer.balance} className="form-input" value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} /></div></div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setPaymentCustomer(null)}>Cancel</button><button type="submit" className="btn btn-primary">Record Payment</button></div>
-      </form></div></div>}
+      {payingCustomerId && (
+        <ReceivePaymentModal
+          customerId={payingCustomerId}
+          onClose={() => setPayingCustomerId(null)}
+          onRecorded={(result) => {
+            setPayingCustomerId(null);
+            setFeedback(`₹${result.appliedTotal.toLocaleString('en-IN')} received from ${result.customerName} (${result.paymentId}).`);
+          }}
+        />
+      )}
 
       {reminderCustomer && (
         <PaymentReminderModal

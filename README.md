@@ -160,6 +160,42 @@ recorded purchase is not.
 npx tsx scripts/import-matching-check.ts
 ```
 
+### Printing an invoice
+
+`app/(dashboard)/sales/invoice/[id]/page.tsx` is a formatted, letterhead invoice document (company
+name/GSTIN/address, bill-to, line items, GST breakdown reconstructed exactly from stored figures,
+balance due) with a Print/Save-as-PDF button — reached from the Print icon on any invoice row or
+the View Invoice modal. It lives inside `(dashboard)` (to reuse `CompanyProvider`), and hides the
+sidebar/topbar only when actually printing, via `@media print` rules in `globals.css`.
+
+### Receiving a customer payment
+
+A customer who buys on credit across several days and pays the running total in one visit needs
+that payment recorded as its own event, applied across the specific invoices it settles — not each
+invoice hand-edited with nothing left to show a payment ever happened. `jde_receive_customer_payment`
+(`scripts/customer-payments.sql`) does this atomically: the payment row, its per-invoice
+allocations, each invoice's paid/status, and the customer's balance land together, or not at all.
+
+The owner chooses which invoices a payment applies to (`components/ReceivePaymentModal.tsx`, used
+from both the Sales page and the Customers page) — a "Fill oldest first" button gives a starting
+point, still fully editable. The amounts entered must add up to exactly the payment amount; nothing
+is left as an unexplained credit. The Sales page's Customer Ledger tab
+(`lib/customer-ledger.ts`) then shows one customer's invoices and payments together, in order, with
+a running balance — reversing a payment (for one entered wrong, not a refund) puts every invoice it
+touched back to how it was.
+
+An invoice with a payment already recorded against it can no longer be deleted directly —
+`jde_delete_sales_invoice` refuses with a message to reverse the payment first, so a payment
+allocation can never point at a row that no longer exists.
+
+`payments_received`/`payment_allocations` are read-only through the generic `/api/local/[table]`
+routes (writing there would bypass the balance/status bookkeeping) — recording or reversing a
+payment always goes through `/api/sales/payments`.
+
+```bash
+npx tsx scripts/customer-ledger-check.ts
+```
+
 ### Backups
 
 A JSON snapshot of every table is saved to `data/backups/` once per day automatically while the app is running (and on-demand from Settings → Data Backups). Snapshots older than 7 days are pruned automatically. This is a local safety net in addition to whatever backup/PITR your Supabase plan provides — it never touches your live data.
