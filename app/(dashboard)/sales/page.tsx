@@ -36,16 +36,25 @@ import ReceivePaymentModal from '@/components/ReceivePaymentModal';
 
 type SalesTab = 'invoices' | 'quotations' | 'ledger';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
-type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid';
+type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid' | 'drafts';
 type InvoiceLine = { part: string; qty: number; price: number };
 
 type Product = { id: string; company_id: string; part_number: string; name: string; brand: string; hsn_code: string; category: string; sale_price: number; current_stock: number };
 type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
-type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string; discount_percent: number; discount_amount: number };
+// gst_percent / gst_amount are on the invoice table but were never filled in by the atomic save,
+// so they are absent on every invoice written before this screen started recording them.
+type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string; discount_percent: number; discount_amount: number; gst_percent?: number | null; gst_amount?: number | null };
 type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
 type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_price: number; line_total: number };
 type Payment = { id: string; company_id: string; customer_id: string; customer: string; date: string; amount: number; note: string; created_at: string };
 type PaymentAllocation = { id: string; payment_id: string; company_id: string; invoice_id: string; amount: number; created_at: string };
+
+// Everything the printable document needs, captured at the moment it is opened. A snapshot rather
+// than a live lookup, so the document keeps showing the invoice it was opened for even after the
+// dialog behind it has been reset for the next sale.
+// The status the atomic save is given for a sale the owner wants to park and finish later. It
+// reserves stock like any other invoice, but nothing is billed and nothing is owed yet.
+const DRAFT_STATUS = 'draft';
 
 function todayIso() {
   return new Date().toISOString().split('T')[0];
@@ -132,7 +141,7 @@ const WALK_IN_CUSTOMER = 'Walk-in Customer';
 export default function SalesPage() {
   const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
   const { rows: customers, create: createCustomer, reload: reloadCustomers } = useCompanyTable<Customer>('customers');
-  const { rows: invoices, loading: invoicesLoading, reload: reloadInvoices } = useCompanyTable<Invoice>('invoices');
+  const { rows: invoices, loading: invoicesLoading, reload: reloadInvoices, update: updateInvoiceRow } = useCompanyTable<Invoice>('invoices');
   const { rows: quotations, loading: quotationsLoading, reload: reloadQuotations } = useCompanyTable<Quotation>('quotations');
   const { rows: invoiceItems, reload: reloadInvoiceItems } = useCompanyTable<InvoiceItem>('invoice_items');
   const { rows: payments, reload: reloadPayments } = useCompanyTable<Payment>('payments_received');
@@ -168,6 +177,7 @@ export default function SalesPage() {
   const [feedback, setFeedback] = useState('');
   const [invoiceError, setInvoiceError] = useState('');
   const [savingInvoice, setSavingInvoice] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentModalCustomerId, setPaymentModalCustomerId] = useState<string | undefined>(undefined);
   const [ledgerCustomerId, setLedgerCustomerId] = useState('');
@@ -179,6 +189,7 @@ export default function SalesPage() {
     setPaymentModalCustomerId(customerId);
     setShowPaymentModal(true);
   };
+
   const [deleteError, setDeleteError] = useState('');
   const [deletingInvoice, setDeletingInvoice] = useState(false);
   const [customer, setCustomer] = useState('');
@@ -220,7 +231,11 @@ export default function SalesPage() {
 
   const selectedCustomer = customers.find((c) => c.name === customer);
   const customerLabel = customer.trim() || WALK_IN_CUSTOMER;
-  const editingOldOutstanding = editingInvoice ? Number(editingInvoice.total) - Number(editingInvoice.paid) : 0;
+  // A parked draft opens in this dialog exactly like an edit, with one difference that matters for
+  // money: parking it added nothing to the customer's balance, so confirming it has to start from
+  // zero outstanding. Starting from its total would reverse a debt that was never recorded.
+  const editingDraft = Boolean(editingInvoice && editingInvoice.status === DRAFT_STATUS);
+  const editingOldOutstanding = editingInvoice && !editingDraft ? Number(editingInvoice.total) - Number(editingInvoice.paid) : 0;
   const newOutstanding = total - paidAmount;
 
   // Place of supply comes from the company's own GSTIN — the first two digits are the statutory
@@ -244,11 +259,20 @@ export default function SalesPage() {
     return invoice.id.toLowerCase().includes(query) || invoice.customer.toLowerCase().includes(query) || items.toLowerCase().includes(query);
   });
 
-  const totalRevenue = invoices.reduce((t, inv) => t + Number(inv.total || 0), 0);
-  const avgOrderValue = invoices.length > 0 ? totalRevenue / invoices.length : 0;
-  const outstandingDue = invoices.reduce((t, inv) => t + Math.max(0, Number(inv.total) - Number(inv.paid)), 0);
+  // A draft is a parked sale, not a sale. It holds stock, but nothing has been billed and nothing
+  // is owed — so every money figure on this screen is summed over the live invoices only.
+  const isDraft = (invoice: Invoice) => invoice.status === DRAFT_STATUS;
+  const liveInvoices = invoices.filter((invoice) => !isDraft(invoice));
+  const draftInvoices = invoices.filter(isDraft);
+  const draftInvoiceIds = new Set(draftInvoices.map((invoice) => invoice.id));
+
+  const totalRevenue = liveInvoices.reduce((t, inv) => t + Number(inv.total || 0), 0);
+  const avgOrderValue = liveInvoices.length > 0 ? totalRevenue / liveInvoices.length : 0;
+  const outstandingDue = liveInvoices.reduce((t, inv) => t + Math.max(0, Number(inv.total) - Number(inv.paid)), 0);
   const productRevenue = new Map<string, number>();
   for (const item of invoiceItems) {
+    // Line items belonging to a draft are left out for the same reason: nothing has been sold yet.
+    if (draftInvoiceIds.has(item.invoice_id)) continue;
     productRevenue.set(item.name, (productRevenue.get(item.name) ?? 0) + Number(item.line_total || 0));
   }
   const topProduct = Array.from(productRevenue.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -261,18 +285,21 @@ export default function SalesPage() {
   const isPartlyPaid = (invoice: Invoice) => Number(invoice.paid) > 0 && balanceOf(invoice) > 0;
   const isUnpaid = (invoice: Invoice) => Number(invoice.paid) <= 0 && balanceOf(invoice) > 0;
 
-  const settledCount = invoices.filter(isSettled).length;
-  const partialCount = invoices.filter(isPartlyPaid).length;
-  const unpaidCount = invoices.filter(isUnpaid).length;
+  const settledCount = liveInvoices.filter(isSettled).length;
+  const partialCount = liveInvoices.filter(isPartlyPaid).length;
+  const unpaidCount = liveInvoices.filter(isUnpaid).length;
   const dueCount = partialCount + unpaidCount;
 
   // Tab counts are taken from the search result rather than the whole ledger, so the number on a
-  // tab is always exactly how many rows clicking it will show.
+  // tab is always exactly how many rows clicking it will show. The payment tabs are drawn from the
+  // live invoices only: a draft owes nothing, so it belongs in none of them and has its own tab.
+  const filteredLiveInvoices = filteredInvoices.filter((invoice) => !isDraft(invoice));
   const paymentTabs: Array<{ key: PaymentFilter; label: string; title: string; rows: Invoice[] }> = [
     { key: 'all', label: 'All', title: 'All invoices', rows: filteredInvoices },
-    { key: 'paid', label: 'Paid', title: 'Fully settled invoices', rows: filteredInvoices.filter(isSettled) },
-    { key: 'partial', label: 'Partial', title: 'Part-paid invoices', rows: filteredInvoices.filter(isPartlyPaid) },
-    { key: 'unpaid', label: 'Unpaid', title: 'Invoices with nothing received', rows: filteredInvoices.filter(isUnpaid) },
+    { key: 'paid', label: 'Paid', title: 'Fully settled invoices', rows: filteredLiveInvoices.filter(isSettled) },
+    { key: 'partial', label: 'Partial', title: 'Part-paid invoices', rows: filteredLiveInvoices.filter(isPartlyPaid) },
+    { key: 'unpaid', label: 'Unpaid', title: 'Invoices with nothing received', rows: filteredLiveInvoices.filter(isUnpaid) },
+    { key: 'drafts', label: 'Drafts', title: 'Parked drafts — stock is reserved, nothing is billed', rows: filteredInvoices.filter(isDraft) },
   ];
   const activePaymentTab = paymentTabs.find((tab) => tab.key === paymentFilter) ?? paymentTabs[0];
   const visibleInvoices = activePaymentTab.rows;
@@ -283,9 +310,13 @@ export default function SalesPage() {
   const currentPage = Math.min(page, totalPages);
   const pageStart = (currentPage - 1) * PAGE_SIZE;
   const pagedInvoices = visibleInvoices.slice(pageStart, pageStart + PAGE_SIZE);
-  const pageTotal = pagedInvoices.reduce((sum, inv) => sum + Number(inv.total || 0), 0);
-  const pageReceived = pagedInvoices.reduce((sum, inv) => sum + Number(inv.paid || 0), 0);
-  const pageDue = pagedInvoices.reduce((sum, inv) => sum + Math.max(0, balanceOf(inv)), 0);
+  // Drafts are listed but never added into the money on the footer, and the footer says how many
+  // rows it left out so the figures can't be misread as covering everything on screen.
+  const pagedSales = pagedInvoices.filter((inv) => !isDraft(inv));
+  const pagedDraftCount = pagedInvoices.length - pagedSales.length;
+  const pageTotal = pagedSales.reduce((sum, inv) => sum + Number(inv.total || 0), 0);
+  const pageReceived = pagedSales.reduce((sum, inv) => sum + Number(inv.paid || 0), 0);
+  const pageDue = pagedSales.reduce((sum, inv) => sum + Math.max(0, balanceOf(inv)), 0);
 
   // Only whole units that are still returnable count towards a credit note.
   const selectedReturnItems = returnableItems
@@ -463,6 +494,91 @@ export default function SalesPage() {
     setLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, ...patch } : line));
   };
 
+  // The line payload the atomic save expects — the same mapping the create and edit paths have
+  // always used, now shared with Save as Draft so a parked sale is stored exactly like a billed one.
+  const invoiceItemPayload = (sourceLines: InvoiceLine[]) => sourceLines
+    .filter((line) => line.part.trim())
+    .map((line) => {
+      const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
+      return {
+        product_id: product?.id ?? null,
+        part_number: product?.part_number ?? '',
+        name: product?.name ?? line.part,
+        qty: line.qty,
+        unit_price: line.price,
+        line_total: line.qty * line.price,
+      };
+    });
+
+  // gst_percent and gst_amount are display-only columns: they exist so a saved invoice can print
+  // its correct tax split later. The invoice itself is already saved correctly by the atomic call
+  // that runs before this, so a failure here is logged and ignored — it must never turn a
+  // completed sale into an error on screen.
+  const rememberGstSplit = async (invoiceId: string, percent: number, amount: number) => {
+    try {
+      await updateInvoiceRow(invoiceId, { gst_percent: percent, gst_amount: amount });
+    } catch (error) {
+      console.error(`Could not record the GST split on ${invoiceId} — the invoice itself is saved.`, error);
+    }
+  };
+
+  // Parks the sale on screen without billing it. Deliberately the same atomic call as Create
+  // Invoice — so the FIFO stock is reserved there and then, which is what the owner asked for —
+  // with nothing received and nothing added to the customer's balance, because nothing is owed
+  // until the sale is confirmed.
+  const saveDraftInvoice = async () => {
+    if (!activeCompany || editingInvoice) return;
+
+    const unmatchedLine = lines.find((line) => line.part.trim() && !partOptions.some((part) => part.value === line.part));
+    if (unmatchedLine) {
+      setInvoiceError(`"${unmatchedLine.part}" doesn't match a part in Inventory — pick one from the dropdown list.`);
+      return;
+    }
+
+    const items = invoiceItemPayload(lines);
+    if (items.length === 0 || total <= 0) {
+      setInvoiceError('Add at least one part with a quantity and price before parking this sale as a draft.');
+      return;
+    }
+
+    setInvoiceError('');
+    setSavingDraft(true);
+    try {
+      const invoice = await saveSalesInvoice({
+        companyId: activeCompany.id,
+        invoiceId: null,
+        isEdit: false,
+        customerLabel,
+        oldCustomerId: null,
+        newCustomerId: selectedCustomer?.id ?? null,
+        oldOutstanding: 0,
+        newOutstanding: 0,
+        date: invoiceDate,
+        items,
+        total,
+        paid: 0,
+        status: DRAFT_STATUS,
+        mode: 'Credit',
+        discountPercent,
+        discountAmount,
+      });
+
+      const draftId = String(invoice.id);
+      await rememberGstSplit(draftId, gstPercent, gstAmount);
+      // No customer reload: parking a draft leaves every balance exactly as it was.
+      await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadProducts()]);
+      setShowInvoiceModal(false);
+      setActiveTab('invoices');
+      setPaymentFilter('drafts');
+      setPage(1);
+      setFeedback(`${draftId} parked as a draft for ${customerLabel} — stock is reserved, nothing is billed yet.`);
+    } catch (error) {
+      setInvoiceError(error instanceof Error ? error.message : 'Failed to park this sale as a draft — please check Sales and Inventory before retrying.');
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
   const saveInvoice = async (event: FormEvent) => {
     event.preventDefault();
     if (!activeCompany) return;
@@ -473,19 +589,7 @@ export default function SalesPage() {
       return;
     }
 
-    const items = lines
-      .filter((line) => line.part.trim())
-      .map((line) => {
-        const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
-        return {
-          product_id: product?.id ?? null,
-          part_number: product?.part_number ?? '',
-          name: product?.name ?? line.part,
-          qty: line.qty,
-          unit_price: line.price,
-          line_total: line.qty * line.price,
-        };
-      });
+    const items = invoiceItemPayload(lines);
     const status = paidAmount >= total && total > 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
 
     setInvoiceError('');
@@ -494,6 +598,9 @@ export default function SalesPage() {
       if (editingInvoice) {
         const oldCustomerRow = customers.find((c) => c.name === editingInvoice.customer);
         const newCustomerRow = customers.find((c) => c.name === customer);
+        // Confirming a parked draft is this same edit, carrying the real status and the real
+        // outstanding: the stock was reserved when it was parked and the edit path reconciles it.
+        const wasDraft = editingInvoice.status === DRAFT_STATUS;
 
         // Atomic on the database side (jde_save_sales_invoice): fully undoes the old invoice's
         // stock effect, draws fresh FIFO batches for the new lines, and adjusts the customer
@@ -517,10 +624,16 @@ export default function SalesPage() {
           discountAmount,
         });
 
+        await rememberGstSplit(editingInvoice.id, gstPercent, gstAmount);
         await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
         setShowInvoiceModal(false);
         setEditingInvoice(null);
-        setFeedback(`${editingInvoice.id} updated.`);
+        if (wasDraft) {
+          // It has just left the Drafts tab, so move the list to where it now lives.
+          setPaymentFilter('all');
+          setPage(1);
+        }
+        setFeedback(wasDraft ? `${editingInvoice.id} confirmed — the parked draft is now a live invoice.` : `${editingInvoice.id} updated.`);
         return;
       }
 
@@ -546,10 +659,17 @@ export default function SalesPage() {
         discountAmount,
       });
 
+      const createdId = String(invoice.id);
+      await rememberGstSplit(createdId, gstPercent, gstAmount);
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
       setShowInvoiceModal(false);
       setActiveTab('invoices');
-      setFeedback(`${invoice.id} generated for ${customerLabel}.`);
+      setFeedback(`${createdId} generated for ${customerLabel}.`);
+      // What the owner asked for: the finished invoice opens as soon as the sale is created,
+      // rather than having to be hunted down in the list. It opens the real invoice route on the
+      // id the server just returned — the same document the Print button on any row opens, so
+      // there is one invoice document in the app rather than two that could drift apart.
+      window.open(`/sales/invoice/${createdId}`, '_blank');
     } catch (error) {
       setInvoiceError(error instanceof Error ? error.message : 'Failed to save this invoice — please check Sales and Inventory before retrying.');
     } finally {
@@ -563,12 +683,17 @@ export default function SalesPage() {
     setDeletingInvoice(true);
     try {
       const custRow = customers.find((c) => c.name === deleteCandidate.customer);
-      const due = Number(deleteCandidate.total) - Number(deleteCandidate.paid);
+      const discardingDraft = isDraft(deleteCandidate);
+      // A draft never added anything to the customer's balance, so there is nothing to reverse —
+      // passing its total here would credit the customer for a debt that was never recorded.
+      const due = discardingDraft ? 0 : Number(deleteCandidate.total) - Number(deleteCandidate.paid);
       // Atomic on the database side (jde_delete_sales_invoice): restores FIFO stock for every
       // line item and reverses the customer balance before removing the invoice itself.
       await deleteSalesInvoice(deleteCandidate.id, custRow?.id ?? null, due);
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
-      setFeedback(`${deleteCandidate.id} deleted — stock and customer balance reversed.`);
+      setFeedback(discardingDraft
+        ? `${deleteCandidate.id} discarded — the reserved stock is back in inventory.`
+        : `${deleteCandidate.id} deleted — stock and customer balance reversed.`);
       setDeleteCandidate(null);
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : `Failed to delete ${deleteCandidate.id}.`);
@@ -597,7 +722,7 @@ export default function SalesPage() {
   };
 
   const ledgerSummary = invoices.length > 0
-    ? ` · ${invoices.length} ${invoices.length === 1 ? 'invoice' : 'invoices'} on file${dueCount > 0 ? `, ${dueCount} still carrying a balance` : ''}`
+    ? ` · ${liveInvoices.length} ${liveInvoices.length === 1 ? 'invoice' : 'invoices'} on file${dueCount > 0 ? `, ${dueCount} still carrying a balance` : ''}${draftInvoices.length > 0 ? `, ${draftInvoices.length} ${draftInvoices.length === 1 ? 'draft parked' : 'drafts parked'}` : ''}`
     : '';
 
   const openSalesReturn = async (invoice: Invoice) => {
@@ -943,6 +1068,11 @@ export default function SalesPage() {
                 <div className="pager-info">
                   Showing <strong>{pageStart + 1}–{pageStart + pagedInvoices.length}</strong> of <strong>{visibleInvoices.length}</strong> invoices
                   {' · '}page total <strong>₹{money(pageTotal)}</strong> · received <strong>₹{money(pageReceived)}</strong> · balance due <strong>₹{money(pageDue)}</strong>
+                  {/* Said out loud, because otherwise these figures look like they cover every
+                      row on screen — a draft is not a sale and is deliberately not counted. */}
+                  {pagedDraftCount > 0 && (
+                    <> · excludes {pagedDraftCount} {pagedDraftCount === 1 ? 'draft' : 'drafts'} on this page</>
+                  )}
                 </div>
                 {totalPages > 1 && (
                   <div className="pager-controls">
@@ -1450,7 +1580,28 @@ export default function SalesPage() {
                     : 'Settled in full — nothing will be added to any outstanding balance.'}
               </div>
               <button type="button" className="btn btn-secondary" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>Cancel</button>
-              <button type="submit" className="btn btn-primary" disabled={!total || savingInvoice}>{savingInvoice ? 'Saving…' : editingInvoice ? `Save Changes · ₹${paise(total)}` : `Create Invoice · ₹${paise(total)}`}</button>
+              {/* Parking is only offered on a new sale. An invoice that already exists is either
+                  a draft being confirmed or a live invoice being corrected — neither is something
+                  you park again. */}
+              {!editingInvoice && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={!total || savingInvoice || savingDraft}
+                  onClick={saveDraftInvoice}
+                >
+                  {savingDraft ? 'Parking…' : 'Save as Draft'}
+                </button>
+              )}
+              <button type="submit" className="btn btn-primary" disabled={!total || savingInvoice || savingDraft}>
+                {savingInvoice
+                  ? 'Saving…'
+                  : editingInvoice
+                    ? editingInvoice.status === DRAFT_STATUS
+                      ? `Confirm Invoice · ₹${paise(total)}`
+                      : `Save Changes · ₹${paise(total)}`
+                    : `Create Invoice · ₹${paise(total)}`}
+              </button>
             </div>
           </form>
         </div></div>
