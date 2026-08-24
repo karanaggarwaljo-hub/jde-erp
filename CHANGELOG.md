@@ -2,6 +2,15 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-24 — Fixed: Quotation's Print button had the same bug as Invoice's did
+
+Yesterday's invoice fix (below) left one sibling untouched on purpose: the Quotation view's Print
+button, and the Print icon on each quotation row, had the exact same problem — printing the whole
+dashboard screen instead of the quotation. Both now open a real, formatted quotation document —
+your business letterhead, the customer, every line item, GST breakdown, quotation total, and a
+clear "this is a quotation, not a tax invoice" note — with the same Print / Save as PDF button the
+invoice page has.
+
 ## 2026-08-24 — Printable invoices, and recording a customer's payment across several purchases
 
 Two things Sales couldn't do until now.
