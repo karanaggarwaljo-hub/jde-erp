@@ -1674,3 +1674,110 @@ Modal
   .part-form { grid-template-columns: 1fr; }
   .part-form-summary { position: static; }
 }
+
+/* ===================================================
+   Print — Tax Invoice (.invoice-doc)
+
+   Every rule here is gated on `body:has(.invoice-doc)`, so it can only ever fire while a
+   printable invoice is actually on screen. Printing anywhere else in the app — the Reports
+   page, the quotation view — goes through the browser's normal whole-page print exactly as
+   it did before, untouched. On a browser without :has() the whole block is simply dropped,
+   which lands on that same old behaviour rather than on a broken sheet.
+
+   On paper the invoice is the only thing that gets ink: sidebar, topbar, dialog chrome and
+   buttons all step aside, and the document prints black on white at A4.
+   =================================================== */
+@media print {
+  /* A *named* page, claimed only by a body that holds an invoice. An unnamed @page would
+     re-margin every other print in the app; this way the A4 sheet setup travels with the
+     invoice and nothing else changes size. */
+  @page invoice { size: A4 portrait; margin: 14mm; }
+
+  body:has(.invoice-doc) { page: invoice; background: #FFFFFF !important; }
+
+  /* Ink nothing that is not the invoice. Done with visibility rather than display so the
+     document never has to leave the dialog React rendered it in — it stays where it is and
+     everything around it simply stops printing. */
+  body:has(.invoice-doc) * { visibility: hidden !important; }
+  body:has(.invoice-doc) .invoice-doc,
+  body:has(.invoice-doc) .invoice-doc * { visibility: visible !important; }
+
+  /* Chrome that would otherwise still reserve empty space on the sheet. */
+  body:has(.invoice-doc) .erp-sidebar,
+  body:has(.invoice-doc) .sidebar-backdrop,
+  body:has(.invoice-doc) .erp-topbar,
+  body:has(.invoice-doc) .modal-header,
+  body:has(.invoice-doc) .modal-footer { display: none !important; }
+
+  /* Unwind the layout between <body> and the invoice — the sidebar gutter, the scroll caps,
+     the centring scrim — so the document starts at the top-left of the page and is free to
+     run onto as many sheets as it needs. */
+  body:has(.invoice-doc) .erp-root { display: block !important; background: #FFFFFF !important; }
+  body:has(.invoice-doc) .erp-main { display: block !important; margin-left: 0 !important; min-height: 0 !important; }
+  body:has(.invoice-doc) .erp-content { padding: 0 !important; overflow: visible !important; }
+  body:has(.invoice-doc) .modal-overlay {
+    position: static !important;
+    display: block !important;
+    padding: 0 !important;
+    background: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    animation: none !important;
+  }
+  body:has(.invoice-doc) .modal-box {
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    animation: none !important;
+    background: #FFFFFF !important;
+  }
+  body:has(.invoice-doc) .modal-body { padding: 0 !important; }
+
+  /* Plain black on white. The screen palette is tinted navy for a lit display and prints
+     muddy, and the tinted panels turn into grey slabs on a mono printer. */
+  body:has(.invoice-doc) .invoice-doc,
+  body:has(.invoice-doc) .invoice-doc * {
+    background: transparent !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  body:has(.invoice-doc) .invoice-doc {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 11pt;
+  }
+
+  /* Rules have to be restated in black: the tokens they came from are translucent navy,
+     which all but disappears on paper. */
+  body:has(.invoice-doc) .invoice-doc .table-wrap {
+    border: 1px solid #000000 !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+  }
+  body:has(.invoice-doc) .invoice-doc .erp-table th,
+  body:has(.invoice-doc) .invoice-doc .erp-table td { border-bottom: 1px solid #000000 !important; }
+  body:has(.invoice-doc) .invoice-doc .report-line { border-bottom: 1px solid #000000 !important; }
+  body:has(.invoice-doc) .invoice-doc .report-total {
+    border: 1px solid #000000 !important;
+    border-left-width: 3px !important;
+    border-radius: 0 !important;
+  }
+  body:has(.invoice-doc) .invoice-doc .card,
+  body:has(.invoice-doc) .invoice-doc .alert,
+  body:has(.invoice-doc) .invoice-doc .badge { border: 1px solid #000000 !important; border-radius: 0 !important; }
+  body:has(.invoice-doc) .invoice-doc .divider { background: #000000 !important; }
+
+  /* A line item, the totals block and the signature line each stay whole on one sheet; the
+     column headers repeat when the item table does run over. */
+  body:has(.invoice-doc) .invoice-doc thead { display: table-header-group; }
+  body:has(.invoice-doc) .invoice-doc tr,
+  body:has(.invoice-doc) .invoice-doc .report-total,
+  body:has(.invoice-doc) .invoice-doc footer { page-break-inside: avoid; break-inside: avoid; }
+}
