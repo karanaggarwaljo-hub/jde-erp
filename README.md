@@ -203,6 +203,20 @@ payment always goes through `/api/sales/payments`.
 npx tsx scripts/customer-ledger-check.ts
 ```
 
+### Sitemap and robots.txt
+
+`app/sitemap.ts` and `app/robots.ts` use Next.js's built-in conventions to serve `/sitemap.xml` and
+`/robots.txt`. Both list only the Website Catalog (`/catalog` and each published product) — the one
+public surface this app has (see `PUBLIC_PREFIXES` in `proxy.ts`) — never any dashboard route.
+
+Getting this right needed a change in two places, not one: the routes themselves, and `proxy.ts`'s
+`PUBLIC_EXACT` allowlist. Without the latter, an unauthenticated crawler requesting either path was
+redirected to `/login` like any other page — a real page, but an HTML one, which is exactly what
+produces Search Console's "Sitemap is HTML" error. Both files fall back to
+`https://jd-enterprise.com` (matching the CORS allowlist already hardcoded in
+`app/api/public/catalog/route.ts`) when `NEXT_PUBLIC_SITE_URL` isn't set, so a missing env var can't
+silently produce a sitemap full of `localhost` URLs.
+
 ### Backups
 
 A JSON snapshot of every table is saved to `data/backups/` once per day automatically while the app is running (and on-demand from Settings → Data Backups). Snapshots older than 7 days are pruned automatically. This is a local safety net in addition to whatever backup/PITR your Supabase plan provides — it never touches your live data.

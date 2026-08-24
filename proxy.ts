@@ -13,7 +13,11 @@ export const config = {
 
 
 // Reachable by anyone, no session required at all.
-const PUBLIC_EXACT = new Set(['/login', '/forgot-password', '/auth/callback', '/api/auth/login', '/api/auth/logout', '/api/auth/forgot-password', '/api/catalog-rfq', '/api/catalog-event', '/api/public/catalog']);
+// sitemap.xml/robots.txt matter here specifically: without this, an unauthenticated crawler
+// hitting either gets redirected to /login like any other page — which is what actually produced
+// Search Console's "Sitemap is HTML" error, not merely the routes being absent before app/sitemap.ts
+// and app/robots.ts existed.
+const PUBLIC_EXACT = new Set(['/login', '/forgot-password', '/auth/callback', '/api/auth/login', '/api/auth/logout', '/api/auth/forgot-password', '/api/catalog-rfq', '/api/catalog-event', '/api/public/catalog', '/sitemap.xml', '/robots.txt']);
 const PUBLIC_PREFIXES = ['/catalog'];
 
 
