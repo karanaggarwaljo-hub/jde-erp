@@ -26,7 +26,6 @@ import {
   Wallet,
   History,
 } from 'lucide-react';
-import { printCurrentPage } from '@/lib/client-export';
 import { saveSalesInvoice, deleteSalesInvoice, deleteCustomerPayment } from '@/lib/client-sales';
 import { createSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem } from '@/lib/client-sales-returns';
 import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } from '@/lib/client-quotations';
@@ -352,15 +351,14 @@ export default function SalesPage() {
     setShowQuotationModal(true);
   };
 
-  const loadQuotationFor = async (quote: Quotation, purpose: 'view' | 'edit' | 'print') => {
+  const loadQuotationFor = async (quote: Quotation, purpose: 'view' | 'edit') => {
     if (!activeCompany) return;
     setLoadingQuotation(true);
     setQuotationError('');
     try {
       const detail = await getQuotation(quote.id, activeCompany.id);
-      if (purpose === 'view' || purpose === 'print') {
+      if (purpose === 'view') {
         setViewingQuotation(detail);
-        if (purpose === 'print') window.setTimeout(printCurrentPage, 0);
         return;
       }
       if (detail.status === 'converted') {
@@ -999,7 +997,7 @@ export default function SalesPage() {
                 <td className="text-center"><div className="flex justify-between gap-1 items-center">
                   <button className="btn btn-ghost btn-sm" title="View quotation" aria-label={`View ${quote.id}`} disabled={loadingQuotation} onClick={() => void loadQuotationFor(quote, 'view')}><Eye size={14} /></button>
                   <button className="btn btn-ghost btn-sm" title="Edit quotation" aria-label={`Edit ${quote.id}`} disabled={loadingQuotation || quote.status === 'converted'} onClick={() => void loadQuotationFor(quote, 'edit')}><Pencil size={14} /></button>
-                  <button className="btn btn-ghost btn-sm" title="Print quotation" aria-label={`Print ${quote.id}`} disabled={loadingQuotation} onClick={() => void loadQuotationFor(quote, 'print')}><Printer size={14} /></button>
+                  <button className="btn btn-ghost btn-sm" title="Print quotation" aria-label={`Print ${quote.id}`} onClick={() => window.open(`/sales/quotation/${quote.id}`, '_blank')}><Printer size={14} /></button>
                   <button className="btn btn-secondary btn-sm" disabled={convertingQuotationId === quote.id || quote.status === 'converted'} onClick={() => void convertQuote(quote)}>{convertingQuotationId === quote.id ? 'Converting…' : quote.status === 'converted' ? 'Converted' : 'Convert'}</button>
                 </div></td>
               </tr>)}
@@ -1123,7 +1121,7 @@ export default function SalesPage() {
           <div className="table-wrap"><table className="erp-table"><thead><tr><th>Part</th><th className="text-right">Qty</th><th className="text-right">Unit Price</th><th className="text-right">Line Total</th></tr></thead><tbody>{viewingQuotation.items.map((item, index) => <tr key={`${item.part_number}-${index}`}><td><div style={{ fontWeight: 600 }}>{item.name}</div><small className="text-muted">{item.part_number}</small></td><td className="text-right">{item.qty}</td><td className="text-right">₹{Number(item.unit_price).toLocaleString()}</td><td className="text-right">₹{Number(item.line_total).toLocaleString()}</td></tr>)}</tbody></table></div>
           <div className="report-summary"><div className="report-line"><span>Subtotal</span><span>₹{Number(viewingQuotation.subtotal ?? viewingQuotation.total).toLocaleString()}</span></div>{Number(viewingQuotation.discount_amount) > 0 && <div className="report-line"><span>Discount ({Number(viewingQuotation.discount_percent).toFixed(1)}%)</span><span className="text-danger">-₹{Number(viewingQuotation.discount_amount).toLocaleString()}</span></div>}<div className="report-line"><span>GST ({Number(viewingQuotation.gst_percent ?? 0).toFixed(1)}%)</span><span>₹{Number(viewingQuotation.gst_amount ?? 0).toLocaleString()}</span></div><div className="report-line report-strong"><span>Quotation Total</span><strong>₹{Number(viewingQuotation.total).toLocaleString()}</strong></div></div>
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={printCurrentPage}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingQuotation(null)}>Close</button></div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/quotation/${viewingQuotation.id}`, '_blank')}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingQuotation(null)}>Close</button></div>
       </div></div>}
 
       {showQuotationModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="quotation-modal-title"><form onSubmit={saveQuote}>

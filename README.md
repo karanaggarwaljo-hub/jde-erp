@@ -160,13 +160,20 @@ recorded purchase is not.
 npx tsx scripts/import-matching-check.ts
 ```
 
-### Printing an invoice
+### Printing an invoice or quotation
 
-`app/(dashboard)/sales/invoice/[id]/page.tsx` is a formatted, letterhead invoice document (company
-name/GSTIN/address, bill-to, line items, GST breakdown reconstructed exactly from stored figures,
-balance due) with a Print/Save-as-PDF button — reached from the Print icon on any invoice row or
-the View Invoice modal. It lives inside `(dashboard)` (to reuse `CompanyProvider`), and hides the
-sidebar/topbar only when actually printing, via `@media print` rules in `globals.css`.
+`app/(dashboard)/sales/invoice/[id]/page.tsx` and `app/(dashboard)/sales/quotation/[id]/page.tsx`
+are formatted, letterhead documents (company name/GSTIN/address, bill-to, line items, GST
+breakdown, balance due or quotation total) with a Print/Save-as-PDF button — reached from the Print
+icon on any invoice/quotation row or their View modals. Both live inside `(dashboard)` (to reuse
+`CompanyProvider`), and hide the sidebar/topbar only when actually printing, via `@media print`
+rules in `globals.css` shared by both. The invoice page reads already-loaded table rows (an
+invoice's line items are in the same `useCompanyTable` cache every other Sales view shares); the
+quotation page fetches fresh from `GET /api/sales/quotation` instead, since a quotation's items
+live in a table nothing else on that route loads and quotations are only ever looked up one at a
+time. `lib/client-export.ts`'s `printCurrentPage()` (a plain `window.print()`) is still exactly
+right for Reports, which genuinely wants the whole page printed — it's deliberately not used for
+either of these, where printing the surrounding dashboard chrome would be the bug being fixed.
 
 ### Receiving a customer payment
 
