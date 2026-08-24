@@ -22,6 +22,8 @@ export const TABLES: Record<string, TableSchema> = {
   catalog_products: { primaryKey: 'id', companyScoped: true },
   catalog_leads: { primaryKey: 'id', companyScoped: true },
   catalog_events: { primaryKey: 'id', companyScoped: true },
+  payments_received: { primaryKey: 'id', companyScoped: true },
+  payment_allocations: { primaryKey: 'id', companyScoped: true },
 };
 
 export type TableName = keyof typeof TABLES;

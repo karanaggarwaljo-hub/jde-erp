@@ -21,11 +21,17 @@ const SCAN_JSON_SCHEMA = {
         type: 'object',
         additionalProperties: false,
         properties: {
-          description: { type: 'string' },
+          description: { type: 'string', description: 'The item description as printed, without the part/OEM number when those appear in their own columns.' },
           quantity: { type: 'number' },
           unit_price: { type: 'number' },
+          // These identify the part far more reliably than its description does: two suppliers
+          // will write the same physical part under different names, but the number stays put.
+          part_number: { ...NULLABLE_STRING, description: 'The supplier’s part/catalogue/item code for this line, as printed — often in its own column headed Part No, Item Code, Cat No, or printed alongside the description. Null if the document does not show one for this line.' },
+          oem_number: { ...NULLABLE_STRING, description: 'The OEM / original-equipment number for this line, if the document prints one separately from the supplier’s own part number. Null otherwise.' },
+          brand: { ...NULLABLE_STRING, description: 'The manufacturer or brand named on this specific line (e.g. Bosch, Tata, JCB). Null if the line does not name one — never infer it from the supplier’s own company name.' },
+          hsn_code: { ...NULLABLE_STRING, description: 'The HSN/SAC code printed for this line. Null if not shown.' },
         },
-        required: ['description', 'quantity', 'unit_price'],
+        required: ['description', 'quantity', 'unit_price', 'part_number', 'oem_number', 'brand', 'hsn_code'],
       },
     },
   },
@@ -36,7 +42,10 @@ const SYSTEM_PROMPT =
   'You are extracting structured purchase order / supplier invoice data from a scanned document or photo for an auto spare ' +
   'parts trading ERP. Extract ONLY what is clearly legible and relevant: the supplier name, the supplier’s own GSTIN (not ' +
   'the buyer’s), the order/invoice date, the expected delivery date if stated, and the line items actually being ordered ' +
-  'or billed (description, quantity, unit price). Do not extract or fabricate letterhead boilerplate, terms and conditions, ' +
+  'or billed (description, quantity, unit price). For every line item also capture the part/item code, OEM number, brand and ' +
+  'HSN code when the document actually prints them — these are what let the ERP recognise a part it already stocks even when ' +
+  'this supplier names it differently, so read the line’s own columns carefully. Never guess one: a wrong part number is far ' +
+  'worse than a null. Do not extract or fabricate letterhead boilerplate, terms and conditions, ' +
   'bank/payment details, signatures, stamps, or any text unrelated to the order. If a field is not clearly present or ' +
   'legible, return null for it rather than guessing. Never invent a number or item that is not actually visible in the document.';
 

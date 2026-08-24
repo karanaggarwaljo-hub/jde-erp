@@ -16,10 +16,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ tabl
   }
 }
 
+// Reachable for GET (the ledger and Receive Payment screens read them) but never written to
+// directly here: a raw insert would create a payment with no invoice update, no id from the
+// RCPT-#### sequence, and no customer balance change. jde_receive_customer_payment
+// (app/api/sales/payments) is the only path that keeps those four things in step.
+const PAYMENT_TABLES = new Set(['payments_received', 'payment_allocations']);
+
 export async function POST(request: Request, { params }: { params: Promise<{ table: string }> }) {
   const { table } = await params;
   if (!isKnownTable(table)) {
     return Response.json({ error: `Unknown table: ${table}` }, { status: 404 });
+  }
+  if (PAYMENT_TABLES.has(table)) {
+    return Response.json({ error: 'Record a payment through Sales, not this endpoint.' }, { status: 403 });
   }
   try {
     const body = await request.json();

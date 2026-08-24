@@ -1676,108 +1676,99 @@ Modal
 }
 
 /* ===================================================
-   Print — Tax Invoice (.invoice-doc)
-
-   Every rule here is gated on `body:has(.invoice-doc)`, so it can only ever fire while a
-   printable invoice is actually on screen. Printing anywhere else in the app — the Reports
-   page, the quotation view — goes through the browser's normal whole-page print exactly as
-   it did before, untouched. On a browser without :has() the whole block is simply dropped,
-   which lands on that same old behaviour rather than on a broken sheet.
-
-   On paper the invoice is the only thing that gets ink: sidebar, topbar, dialog chrome and
-   buttons all step aside, and the document prints black on white at A4.
+   Printable Sales Invoice (app/(dashboard)/sales/invoice/[id]/page.tsx)
    =================================================== */
+
+/* Hidden only when printing (see @media print below) — on screen this toolbar and any other
+   element carrying the class renders normally. */
+.no-print { }
+
+.invoice-sheet {
+  max-width: 800px;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sh-2);
+  padding: 40px;
+}
+
+.invoice-letterhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid var(--line-2);
+}
+
+.invoice-company-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.invoice-heading { text-align: right; flex: none; }
+
+.invoice-heading-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.invoice-bill-to {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 20px;
+}
+
+.invoice-items-table { margin-bottom: 4px; }
+
+/* Balance Due is the one figure a customer reading a printed invoice actually needs to find —
+   the same tinted-panel-plus-coloured-text pattern as .alert-danger / .badge-danger, so it reads
+   as "this needs attention" without inventing a new visual language for it. */
+.invoice-balance-due {
+  background: var(--rose-tint, var(--color-danger-bg));
+  border: 1px solid var(--rose-line, rgba(185, 28, 60, 0.24));
+  border-bottom: 1px solid var(--rose-line, rgba(185, 28, 60, 0.24)) !important;
+  border-radius: var(--radius-md);
+  padding: 10px 14px !important;
+}
+
 @media print {
-  /* A *named* page, claimed only by a body that holds an invoice. An unnamed @page would
-     re-margin every other print in the app; this way the A4 sheet setup travels with the
-     invoice and nothing else changes size. */
-  @page invoice { size: A4 portrait; margin: 14mm; }
-
-  body:has(.invoice-doc) { page: invoice; background: #FFFFFF !important; }
-
-  /* Ink nothing that is not the invoice. Done with visibility rather than display so the
-     document never has to leave the dialog React rendered it in — it stays where it is and
-     everything around it simply stops printing. */
-  body:has(.invoice-doc) * { visibility: hidden !important; }
-  body:has(.invoice-doc) .invoice-doc,
-  body:has(.invoice-doc) .invoice-doc * { visibility: visible !important; }
-
-  /* Chrome that would otherwise still reserve empty space on the sheet. */
-  body:has(.invoice-doc) .erp-sidebar,
-  body:has(.invoice-doc) .sidebar-backdrop,
-  body:has(.invoice-doc) .erp-topbar,
-  body:has(.invoice-doc) .modal-header,
-  body:has(.invoice-doc) .modal-footer { display: none !important; }
-
-  /* Unwind the layout between <body> and the invoice — the sidebar gutter, the scroll caps,
-     the centring scrim — so the document starts at the top-left of the page and is free to
-     run onto as many sheets as it needs. */
-  body:has(.invoice-doc) .erp-root { display: block !important; background: #FFFFFF !important; }
-  body:has(.invoice-doc) .erp-main { display: block !important; margin-left: 0 !important; min-height: 0 !important; }
-  body:has(.invoice-doc) .erp-content { padding: 0 !important; overflow: visible !important; }
-  body:has(.invoice-doc) .modal-overlay {
-    position: static !important;
-    display: block !important;
-    padding: 0 !important;
-    background: none !important;
-    -webkit-backdrop-filter: none !important;
-    backdrop-filter: none !important;
-    animation: none !important;
+  /* Chrome around the document — never useful on paper. */
+  .erp-sidebar,
+  .erp-topbar,
+  .no-print {
+    display: none !important;
   }
-  body:has(.invoice-doc) .modal-box {
-    width: 100% !important;
-    max-width: none !important;
-    max-height: none !important;
-    overflow: visible !important;
-    border: 0 !important;
-    border-radius: 0 !important;
-    box-shadow: none !important;
-    animation: none !important;
+
+  .erp-main { margin-left: 0 !important; }
+  .erp-content { padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+
+  /* This app has no dark theme today (no data-theme / prefers-color-scheme rules exist in this
+     file), but a printed tax invoice must never inherit a tinted or dark background regardless —
+     force plain white paper with black ink no matter what theming is added later. */
+  html, body {
     background: #FFFFFF !important;
-  }
-  body:has(.invoice-doc) .modal-body { padding: 0 !important; }
-
-  /* Plain black on white. The screen palette is tinted navy for a lit display and prints
-     muddy, and the tinted panels turn into grey slabs on a mono printer. */
-  body:has(.invoice-doc) .invoice-doc,
-  body:has(.invoice-doc) .invoice-doc * {
-    background: transparent !important;
     color: #000000 !important;
-    box-shadow: none !important;
-    text-shadow: none !important;
   }
 
-  body:has(.invoice-doc) .invoice-doc {
-    width: 100% !important;
+  .invoice-sheet {
+    max-width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
-    font-size: 11pt;
-  }
-
-  /* Rules have to be restated in black: the tokens they came from are translucent navy,
-     which all but disappears on paper. */
-  body:has(.invoice-doc) .invoice-doc .table-wrap {
-    border: 1px solid #000000 !important;
-    border-radius: 0 !important;
-    overflow: visible !important;
-  }
-  body:has(.invoice-doc) .invoice-doc .erp-table th,
-  body:has(.invoice-doc) .invoice-doc .erp-table td { border-bottom: 1px solid #000000 !important; }
-  body:has(.invoice-doc) .invoice-doc .report-line { border-bottom: 1px solid #000000 !important; }
-  body:has(.invoice-doc) .invoice-doc .report-total {
-    border: 1px solid #000000 !important;
-    border-left-width: 3px !important;
+    border: none !important;
+    box-shadow: none !important;
     border-radius: 0 !important;
   }
-  body:has(.invoice-doc) .invoice-doc .card,
-  body:has(.invoice-doc) .invoice-doc .alert,
-  body:has(.invoice-doc) .invoice-doc .badge { border: 1px solid #000000 !important; border-radius: 0 !important; }
-  body:has(.invoice-doc) .invoice-doc .divider { background: #000000 !important; }
 
-  /* A line item, the totals block and the signature line each stay whole on one sheet; the
-     column headers repeat when the item table does run over. */
-  body:has(.invoice-doc) .invoice-doc thead { display: table-header-group; }
-  body:has(.invoice-doc) .invoice-doc tr,
-  body:has(.invoice-doc) .invoice-doc .report-total,
-  body:has(.invoice-doc) .invoice-doc footer { page-break-inside: avoid; break-inside: avoid; }
+  .invoice-items-table tr,
+  .report-summary .report-line {
+    break-inside: avoid;
+  }
 }

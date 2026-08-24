@@ -2,6 +2,119 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-24 — Fixed: Google Search Console "Sitemap is HTML" error
+
+The website had no sitemap at all — the app never had that page — so when Google requested
+`/sitemap.xml` it got redirected to the login page and reported "Sitemap is HTML."
+
+Added a real sitemap listing the Website Catalog and every published product, plus a `robots.txt`
+that tells search engines to leave the private dashboard alone and only look at the catalog. Also
+had to add both to the list of pages reachable without logging in — otherwise a search engine
+would still get redirected to the login page instead of the sitemap itself, even with the page now
+existing. Should clear the Search Console error within a few days of Google re-checking it.
+
+## 2026-08-24 — Fixed: Quotation's Print button had the same bug as Invoice's did
+
+Yesterday's invoice fix (below) left one sibling untouched on purpose: the Quotation view's Print
+button, and the Print icon on each quotation row, had the exact same problem — printing the whole
+dashboard screen instead of the quotation. Both now open a real, formatted quotation document —
+your business letterhead, the customer, every line item, GST breakdown, quotation total, and a
+clear "this is a quotation, not a tax invoice" note — with the same Print / Save as PDF button the
+invoice page has.
+
+## 2026-08-24 — Printable invoices, and recording a customer's payment across several purchases
+
+Two things Sales couldn't do until now.
+
+**A real invoice document.** Every invoice's "Print" button used to just print whatever was on
+screen — the whole dashboard, sidebar and all — not the invoice itself. Clicking Print (on an
+invoice row, or from View Invoice) now opens a proper formatted invoice: your business name,
+address and GSTIN at the top, the customer's details, every line item, the GST breakdown, and the
+balance due — with a Print / Save as PDF button, ready to hand to a customer or email as a PDF.
+
+**Recording a payment that covers several purchases at once.** If a customer buys on credit across
+a few separate days and then pays the running total in one visit, that's now one action: **Receive
+Payment**, on Sales and on Customers. Pick the customer, enter what they paid, and choose which of
+their open invoices it covers — a "Fill oldest first" button gives you a starting point, but you
+stay in control of exactly where the money goes. Every rupee has to land on a real invoice; nothing
+is left as an unexplained credit.
+
+This replaces how the Customers page used to "record" a payment — it used to just rewrite invoice
+and balance numbers directly, with nothing recording that a payment had actually happened, and no
+protection if a step failed partway through. A payment is now its own record, with a receipt number,
+and Sales has a new **Customer Ledger** tab showing one customer's invoices and payments together in
+order, with a running balance — which is the direct answer to "did they ever pay me back for all
+three of those." A payment entered wrong can be reversed, which puts its invoices back exactly as
+they were; a payment already recorded against an invoice now blocks that invoice from being deleted
+until the payment itself is dealt with first, so the two can never end up disagreeing with each other.
+
+## 2026-08-23 — Fixed: sales returns could never be recorded
+
+Every attempt to record a sales return failed with "The ERP is temporarily unavailable". It wasn't a
+temporary problem and it wasn't your connection: the database routine that records a return had a
+naming clash in it, so the database refused the very first step, every time, for every invoice.
+Nothing was ever half-saved — the return simply didn't happen.
+
+The routine is fixed. **This one needs the database script to be run** (`scripts/fix-sales-return-ambiguous-id.sql`)
+— updating the app alone does not fix it.
+
+Two related improvements, so this kind of thing surfaces instead of hiding:
+
+- When the database rejects something for a real business reason — "return quantity exceeds the
+  remaining quantity", "the customer does not match this invoice" — you now see that actual
+  sentence. Until now every one of those was replaced with the generic "temporarily unavailable"
+  message, which told you nothing about what to change. Applies to sales returns, supplier returns,
+  recording and receiving purchases, and quotations.
+- When something genuinely does break, the real reason is now written to the browser console.
+  Previously it was discarded entirely, which is why this bug went unnoticed.
+
+## 2026-08-23 — Invoices now recognise parts you already stock, and fill in what's missing
+
+Until now, an imported invoice only recognised an existing part if the wording matched almost
+exactly. So when a supplier billed the same physical part under their own name, the app quietly
+created a **second** part, put the stock there, and left your original sitting at zero. Two records,
+one real part.
+
+Three things change:
+
+**The scanner now reads the identifiers.** Part number, OEM number, brand and HSN code are pulled
+off each line of the invoice, where before only the description, quantity and price were read.
+
+**Matching uses those identifiers first.** If the invoice prints a part number you already have on
+file, it restocks that part — no matter what the supplier chose to call it. It also cross-checks:
+suppliers often print an OEM number in their own "part no" column, so both are compared both ways.
+
+**Where the name only looks similar, you decide.** The review screen shows "Same part?" with the
+existing part, its current stock, and buttons for **Same part** / **Different part**. Nothing is
+linked on a guess — attaching stock to the wrong part is much harder to unpick than one click — and
+the purchase can't be recorded while an item is still undecided.
+
+Alongside this, an invoice now **fills in blanks** on parts you already stock: a missing brand, OEM
+number, HSN code, or a part number that was only ever an auto-generated "SP-014" placeholder. Details
+you entered yourself are never overwritten — where the invoice disagrees with what's on file, the
+review screen tells you and keeps yours. New parts created from an invoice now also start with the
+real part number from the document instead of an SP-### placeholder.
+
+## 2026-08-22 — AI answers no longer wait on whichever service is being slow
+
+The backup service already covered Google *failing*. This covers Google being *slow*, which was
+costing real time: a request could sit for the full 14 seconds waiting on Google before the backup
+was even asked.
+
+Now, if the leading service hasn't answered within a few seconds, the app starts the second one
+alongside it and takes whichever answers first. The slow one is cancelled. A sluggish service now
+costs a few seconds instead of the full wait.
+
+The quick, fiddly things — categorising an expense, suggesting part details, drafting a payment
+reminder — now ask the fastest service first and come back in well under a second. Business Insights,
+the Forecast, Reports summaries, invoice scanning and catalog descriptions still lead with the
+better-quality model, because there the answer matters more than the second saved. Both services stay
+available to every feature either way; this only changes who gets asked first.
+
+Also fixed the real reason the AI kept failing: the app was pointed at `gemini-flash-latest`, which
+automatically follows Google's newest model — and the newest model has the *smallest* free daily
+allowance, as low as 20 requests. Pinning a slightly older model gives far more free usage per day.
+
 ## 2026-08-20 — AI features now have a backup, instead of failing when Google is busy
 
 Google's free AI service refuses requests when it's under heavy load — the "high demand" error you've

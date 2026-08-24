@@ -12,6 +12,8 @@ export type AiJsonRequest = {
   /** Identifies the schema to OpenAI-compatible providers, which require a name. */
   schemaName?: string;
   attachments?: AiAttachment[];
+  /** Defaults to 'quality'. See AiPriority below. */
+  priority?: AiPriority;
 };
 
 export type AiProviderResult = { text: string; model: string };
@@ -24,3 +26,11 @@ export interface AiProvider {
   supports(request: AiJsonRequest): boolean;
   generateJson(request: AiJsonRequest, signal: AbortSignal): Promise<AiProviderResult>;
 }
+
+/** How to weigh speed against answer quality for one request.
+ *
+ *  'speed'   — short, interactive asks where the user is waiting on a field to fill in. Tries
+ *              the fastest provider first, which answers in well under a second.
+ *  'quality' — analysis and document reading, where the better model is worth a couple of
+ *              seconds. This is the default. */
+export type AiPriority = 'speed' | 'quality';

@@ -88,17 +88,38 @@ The app expects these tables in your Supabase project's `public` schema, all pre
 
 ### AI provider fallback
 
-Google's free Gemini tier regularly answers "this model is currently experiencing high demand" under
-load, which used to surface as a failed AI feature. Every AI call now goes through `lib/ai/generate.ts`,
-which tries each configured provider in order (default `gemini,groq`) and only reports an error once
-they have all failed.
+Google's free Gemini tier regularly runs out of quota or answers "this model is currently experiencing
+high demand" under load, which used to surface as a failed AI feature. Every AI call now goes through
+`lib/ai/generate.ts`, which races the configured providers and only reports an error once they have
+all failed.
 
-- A rate-limit, overload, timeout or unparseable answer moves to the next provider; a genuinely
-  transient failure is retried once on the same provider first.
+**Providers are started staggered, not one after the other.** The leading provider gets `AI_HEDGE_MS`
+(4s by default) to work alone; if it hasn't answered by then the next one starts *alongside* it and
+the first valid answer wins, with the loser cancelled. A provider that is merely slow therefore costs
+seconds, not its full timeout. Racing from the very start would double the API calls on the majority
+of requests that answer promptly, which these free tiers cannot spare — hence the delay.
+
+**Requests declare what they care about** via `priority`. Short interactive asks — expense category,
+part-detail suggestions, reminder drafts — pass `'speed'` and lead with the fastest provider
+(`AI_FAST_ORDER`, default `groq,gemini`), which answers in well under a second. Analysis and document
+work leave it at the default `'quality'` and lead with the better model (`AI_PROVIDER_ORDER`). Either
+way both providers remain available, so the choice affects latency, never capability.
+
+Beyond that:
+
+- A rate-limit, overload, timeout or unparseable answer promotes the next provider immediately,
+  without waiting out the hedge delay.
 - A provider that just failed is skipped for a short cooldown (10 min after a quota error) rather
   than being re-tried on every request — unless it is the only one left.
 - A malformed request stops the chain immediately, since it would fail identically everywhere.
 - Providers with no key configured are skipped silently, so Gemini-only setups behave as before.
+- A call abandoned because another provider won is not counted as a failure and never puts a
+  healthy provider into cooldown.
+
+Worth knowing about the Gemini side specifically: `gemini-flash-latest` is an alias that follows
+Google's newest flash model, and the newest model carries the *smallest* free-tier allowance — as
+little as 20 requests a day. Pinning `GEMINI_MODEL` to the previous generation gives far more free
+headroom; see `.env.example`.
 
 Not everything can fail over. Gemini remains the only provider here that reads PDFs, does Google
 Search grounding (Website Catalog → Reference Search) or generates images, so those three keep their
@@ -109,6 +130,92 @@ To verify the chain end to end, including a forced failure:
 ```bash
 npx tsx scripts/ai-fallback-check.ts
 ```
+
+### Matching imported invoice lines to inventory
+
+`lib/import-matching.ts` decides whether a line on an imported invoice restocks a part already on
+file or creates a new one. It is deliberately a separate, dependency-free module rather than page
+code: this is where a mistake costs real money, and being pure is what lets
+`scripts/import-matching-check.ts` exercise it directly.
+
+The order is: identifiers, then exact text, then — only as a *suggestion* — word similarity.
+
+- Part number and OEM number are compared **both ways** (line part ↔ product OEM and vice versa),
+  because suppliers routinely print an OEM code in their own "part no" column. An identifier hit is
+  an `exact` match and is acted on unattended.
+- Auto-generated `SP-###` part numbers are treated as placeholders, never as identifiers — the app
+  invented them, so they prove nothing and may be overwritten by a real one.
+- A name-similarity hit (Dice coefficient over words, ≥ 0.55) is only ever `suggested`. The review
+  screen asks the owner, and the purchase cannot be recorded while a suggestion is undecided.
+  Auto-linking here was rejected deliberately: wrongly merging two parts moves stock and cost onto
+  the wrong record, which is far more expensive than a click.
+
+`planFieldUpdates()` then decides what the invoice may teach an existing part: blank fields (and
+placeholder part numbers, and a zero cost) are filled in; anything already entered is left alone and
+any disagreement is surfaced in the review screen instead of applied. Enrichment runs *after* the
+purchase is safely recorded and never fails it — a part keeping a blank brand is cosmetic, undoing a
+recorded purchase is not.
+
+```bash
+npx tsx scripts/import-matching-check.ts
+```
+
+### Printing an invoice or quotation
+
+`app/(dashboard)/sales/invoice/[id]/page.tsx` and `app/(dashboard)/sales/quotation/[id]/page.tsx`
+are formatted, letterhead documents (company name/GSTIN/address, bill-to, line items, GST
+breakdown, balance due or quotation total) with a Print/Save-as-PDF button — reached from the Print
+icon on any invoice/quotation row or their View modals. Both live inside `(dashboard)` (to reuse
+`CompanyProvider`), and hide the sidebar/topbar only when actually printing, via `@media print`
+rules in `globals.css` shared by both. The invoice page reads already-loaded table rows (an
+invoice's line items are in the same `useCompanyTable` cache every other Sales view shares); the
+quotation page fetches fresh from `GET /api/sales/quotation` instead, since a quotation's items
+live in a table nothing else on that route loads and quotations are only ever looked up one at a
+time. `lib/client-export.ts`'s `printCurrentPage()` (a plain `window.print()`) is still exactly
+right for Reports, which genuinely wants the whole page printed — it's deliberately not used for
+either of these, where printing the surrounding dashboard chrome would be the bug being fixed.
+
+### Receiving a customer payment
+
+A customer who buys on credit across several days and pays the running total in one visit needs
+that payment recorded as its own event, applied across the specific invoices it settles — not each
+invoice hand-edited with nothing left to show a payment ever happened. `jde_receive_customer_payment`
+(`scripts/customer-payments.sql`) does this atomically: the payment row, its per-invoice
+allocations, each invoice's paid/status, and the customer's balance land together, or not at all.
+
+The owner chooses which invoices a payment applies to (`components/ReceivePaymentModal.tsx`, used
+from both the Sales page and the Customers page) — a "Fill oldest first" button gives a starting
+point, still fully editable. The amounts entered must add up to exactly the payment amount; nothing
+is left as an unexplained credit. The Sales page's Customer Ledger tab
+(`lib/customer-ledger.ts`) then shows one customer's invoices and payments together, in order, with
+a running balance — reversing a payment (for one entered wrong, not a refund) puts every invoice it
+touched back to how it was.
+
+An invoice with a payment already recorded against it can no longer be deleted directly —
+`jde_delete_sales_invoice` refuses with a message to reverse the payment first, so a payment
+allocation can never point at a row that no longer exists.
+
+`payments_received`/`payment_allocations` are read-only through the generic `/api/local/[table]`
+routes (writing there would bypass the balance/status bookkeeping) — recording or reversing a
+payment always goes through `/api/sales/payments`.
+
+```bash
+npx tsx scripts/customer-ledger-check.ts
+```
+
+### Sitemap and robots.txt
+
+`app/sitemap.ts` and `app/robots.ts` use Next.js's built-in conventions to serve `/sitemap.xml` and
+`/robots.txt`. Both list only the Website Catalog (`/catalog` and each published product) — the one
+public surface this app has (see `PUBLIC_PREFIXES` in `proxy.ts`) — never any dashboard route.
+
+Getting this right needed a change in two places, not one: the routes themselves, and `proxy.ts`'s
+`PUBLIC_EXACT` allowlist. Without the latter, an unauthenticated crawler requesting either path was
+redirected to `/login` like any other page — a real page, but an HTML one, which is exactly what
+produces Search Console's "Sitemap is HTML" error. Both files fall back to
+`https://jd-enterprise.com` (matching the CORS allowlist already hardcoded in
+`app/api/public/catalog/route.ts`) when `NEXT_PUBLIC_SITE_URL` isn't set, so a missing env var can't
+silently produce a sitemap full of `localhost` URLs.
 
 ### Backups
 

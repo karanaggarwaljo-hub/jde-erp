@@ -2,10 +2,16 @@ import { dbErrorMessage, isKnownTable, updateRow, deleteRow, deleteCompany } fro
 
 export const dynamic = 'force-dynamic';
 
+// See app/api/local/[table]/route.ts for why these two are read-only through this generic path.
+const PAYMENT_TABLES = new Set(['payments_received', 'payment_allocations']);
+
 export async function PATCH(request: Request, { params }: { params: Promise<{ table: string; id: string }> }) {
   const { table, id } = await params;
   if (!isKnownTable(table)) {
     return Response.json({ error: `Unknown table: ${table}` }, { status: 404 });
+  }
+  if (PAYMENT_TABLES.has(table)) {
+    return Response.json({ error: 'A recorded payment cannot be edited — delete it and record it again if it was wrong.' }, { status: 403 });
   }
   try {
     const patch = await request.json();
@@ -22,6 +28,9 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   const { table, id } = await params;
   if (!isKnownTable(table)) {
     return Response.json({ error: `Unknown table: ${table}` }, { status: 404 });
+  }
+  if (PAYMENT_TABLES.has(table)) {
+    return Response.json({ error: 'Delete a payment through Sales, not this endpoint — that also puts its invoices back to how they were.' }, { status: 403 });
   }
   const decodedId = decodeURIComponent(id);
 

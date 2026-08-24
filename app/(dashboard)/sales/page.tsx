@@ -23,17 +23,18 @@ import {
   XCircle,
   MapPin,
   Undo2,
+  Wallet,
+  History,
 } from 'lucide-react';
-import { printCurrentPage } from '@/lib/client-export';
-import { saveSalesInvoice, deleteSalesInvoice } from '@/lib/client-sales';
+import { saveSalesInvoice, deleteSalesInvoice, deleteCustomerPayment } from '@/lib/client-sales';
 import { createSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem } from '@/lib/client-sales-returns';
 import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } from '@/lib/client-quotations';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { buildCustomerLedger } from '@/lib/customer-ledger';
 import AddCustomerModal from '@/components/AddCustomerModal';
-import InvoiceDocument from '@/components/InvoiceDocument';
-import type { Company } from '@/components/CompanyProvider';
+import ReceivePaymentModal from '@/components/ReceivePaymentModal';
 
-type SalesTab = 'invoices' | 'quotations';
+type SalesTab = 'invoices' | 'quotations' | 'ledger';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid' | 'drafts';
 type InvoiceLine = { part: string; qty: number; price: number };
@@ -45,30 +46,12 @@ type Customer = { id: string; company_id: string; name: string; phone: string; e
 type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string; discount_percent: number; discount_amount: number; gst_percent?: number | null; gst_amount?: number | null };
 type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
 type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_price: number; line_total: number };
+type Payment = { id: string; company_id: string; customer_id: string; customer: string; date: string; amount: number; note: string; created_at: string };
+type PaymentAllocation = { id: string; payment_id: string; company_id: string; invoice_id: string; amount: number; created_at: string };
 
 // Everything the printable document needs, captured at the moment it is opened. A snapshot rather
 // than a live lookup, so the document keeps showing the invoice it was opened for even after the
 // dialog behind it has been reset for the next sale.
-type PrintableInvoice = {
-  invoiceId: string;
-  date: string;
-  status: string;
-  company: Company;
-  customer: { name: string; gstin: string; address: string; phone: string; email: string };
-  lines: Array<{ part_number: string; name: string; hsn?: string; qty: number; unit_price: number; line_total: number }>;
-  subtotal: number;
-  discountPercent: number;
-  discountAmount: number;
-  taxableValue: number;
-  // Null when the invoice carries no recorded GST rate. The tax cannot be split back out of a
-  // total, so the document says the rate was not recorded rather than printing a guess.
-  gstPercent: number | null;
-  gstAmount: number | null;
-  isInterState: boolean;
-  total: number;
-  paid: number;
-};
-
 // The status the atomic save is given for a sale the owner wants to park and finish later. It
 // reserves stock like any other invoice, but nothing is billed and nothing is owed yet.
 const DRAFT_STATUS = 'draft';
@@ -161,6 +144,8 @@ export default function SalesPage() {
   const { rows: invoices, loading: invoicesLoading, reload: reloadInvoices, update: updateInvoiceRow } = useCompanyTable<Invoice>('invoices');
   const { rows: quotations, loading: quotationsLoading, reload: reloadQuotations } = useCompanyTable<Quotation>('quotations');
   const { rows: invoiceItems, reload: reloadInvoiceItems } = useCompanyTable<InvoiceItem>('invoice_items');
+  const { rows: payments, reload: reloadPayments } = useCompanyTable<Payment>('payments_received');
+  const { rows: paymentAllocations } = useCompanyTable<PaymentAllocation>('payment_allocations');
 
   // `value`, `price` and `category` are untouched — the save path matches lines on `value` and
   // fills the rate from `price`. The rest are extra fields off the same already-loaded product
@@ -193,9 +178,18 @@ export default function SalesPage() {
   const [invoiceError, setInvoiceError] = useState('');
   const [savingInvoice, setSavingInvoice] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
-  // The finished, print-ready invoice the owner asked to see straight after saving — and the same
-  // document for any invoice already on file.
-  const [documentInvoice, setDocumentInvoice] = useState<PrintableInvoice | null>(null);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentModalCustomerId, setPaymentModalCustomerId] = useState<string | undefined>(undefined);
+  const [ledgerCustomerId, setLedgerCustomerId] = useState('');
+  const [deletePaymentCandidate, setDeletePaymentCandidate] = useState<Payment | null>(null);
+  const [deletingPayment, setDeletingPayment] = useState(false);
+  const [deletePaymentError, setDeletePaymentError] = useState('');
+
+  const openReceivePayment = (customerId?: string) => {
+    setPaymentModalCustomerId(customerId);
+    setShowPaymentModal(true);
+  };
+
   const [deleteError, setDeleteError] = useState('');
   const [deletingInvoice, setDeletingInvoice] = useState(false);
   const [customer, setCustomer] = useState('');
@@ -388,15 +382,14 @@ export default function SalesPage() {
     setShowQuotationModal(true);
   };
 
-  const loadQuotationFor = async (quote: Quotation, purpose: 'view' | 'edit' | 'print') => {
+  const loadQuotationFor = async (quote: Quotation, purpose: 'view' | 'edit') => {
     if (!activeCompany) return;
     setLoadingQuotation(true);
     setQuotationError('');
     try {
       const detail = await getQuotation(quote.id, activeCompany.id);
-      if (purpose === 'view' || purpose === 'print') {
+      if (purpose === 'view') {
         setViewingQuotation(detail);
-        if (purpose === 'print') window.setTimeout(printCurrentPage, 0);
         return;
       }
       if (detail.status === 'converted') {
@@ -527,54 +520,6 @@ export default function SalesPage() {
     } catch (error) {
       console.error(`Could not record the GST split on ${invoiceId} — the invoice itself is saved.`, error);
     }
-  };
-
-  // Bill-to details come off the customer record when there is one. A walk-in sale has no account,
-  // so only the counter label is carried through and the rest stays blank rather than invented.
-  const documentCustomer = (name: string) => {
-    const row = customers.find((entry) => entry.name === name);
-    return { name, gstin: row?.gstin ?? '', address: row?.address ?? '', phone: row?.phone ?? '', email: row?.email ?? '' };
-  };
-
-  // The same printable document, for an invoice already on file. Every figure is read from the
-  // stored row and its line items; nothing is recomputed from a rate the invoice does not carry.
-  const openInvoiceDocument = (invoice: Invoice) => {
-    if (!activeCompany) return;
-    const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
-    const lineSubtotal = items.reduce((sum, item) => sum + Number(item.line_total || 0), 0);
-    const rowDiscountAmount = Number(invoice.discount_amount || 0);
-    // Only invoices saved since this screen started recording the GST split carry a rate. On an
-    // older row the tax is inside the total with no honest way to separate it, so both figures go
-    // through as null and the document prints its "rate not recorded" note.
-    const storedGstPercent = invoice.gst_percent === null || invoice.gst_percent === undefined ? null : Number(invoice.gst_percent);
-    const storedGstAmount = invoice.gst_amount === null || invoice.gst_amount === undefined ? null : Number(invoice.gst_amount);
-    const billTo = documentCustomer(invoice.customer);
-    const billToStateCode = billTo.gstin.trim().slice(0, 2);
-    setDocumentInvoice({
-      invoiceId: invoice.id,
-      date: invoice.date,
-      status: invoice.status,
-      company: activeCompany,
-      customer: billTo,
-      lines: items.map((item) => ({
-        part_number: item.part_number,
-        name: item.name,
-        hsn: products.find((product) => product.part_number === item.part_number)?.hsn_code || undefined,
-        qty: Number(item.qty),
-        unit_price: Number(item.unit_price),
-        line_total: Number(item.line_total),
-      })),
-      subtotal: lineSubtotal,
-      discountPercent: Number(invoice.discount_percent || 0),
-      discountAmount: rowDiscountAmount,
-      taxableValue: lineSubtotal - rowDiscountAmount,
-      gstPercent: storedGstPercent,
-      gstAmount: storedGstAmount,
-      // Claimed only when both GSTINs are on file to compare, exactly as the dialog does.
-      isInterState: Boolean(companyStateCode && billToStateCode && companyStateCode !== billToStateCode),
-      total: Number(invoice.total),
-      paid: Number(invoice.paid),
-    });
   };
 
   // Parks the sale on screen without billing it. Deliberately the same atomic call as Create
@@ -720,34 +665,11 @@ export default function SalesPage() {
       setShowInvoiceModal(false);
       setActiveTab('invoices');
       setFeedback(`${createdId} generated for ${customerLabel}.`);
-      // The finished invoice, opened on the id the server just returned. Every figure below is the
-      // one that was saved a moment ago — none of it is recalculated here.
-      setDocumentInvoice({
-        invoiceId: createdId,
-        date: invoiceDate,
-        status,
-        company: activeCompany,
-        customer: documentCustomer(customerLabel),
-        lines: items.map((item) => ({
-          part_number: item.part_number,
-          name: item.name,
-          // HSN is on the product record, not on the invoice line; a line billed against no
-          // product simply has none to print.
-          hsn: products.find((product) => product.id === item.product_id)?.hsn_code || undefined,
-          qty: item.qty,
-          unit_price: item.unit_price,
-          line_total: item.line_total,
-        })),
-        subtotal,
-        discountPercent,
-        discountAmount,
-        taxableValue: taxableAmount,
-        gstPercent,
-        gstAmount,
-        isInterState: supplyKind === 'inter',
-        total,
-        paid: paidAmount,
-      });
+      // What the owner asked for: the finished invoice opens as soon as the sale is created,
+      // rather than having to be hunted down in the list. It opens the real invoice route on the
+      // id the server just returned — the same document the Print button on any row opens, so
+      // there is one invoice document in the app rather than two that could drift apart.
+      window.open(`/sales/invoice/${createdId}`, '_blank');
     } catch (error) {
       setInvoiceError(error instanceof Error ? error.message : 'Failed to save this invoice — please check Sales and Inventory before retrying.');
     } finally {
@@ -777,6 +699,25 @@ export default function SalesPage() {
       setDeleteError(error instanceof Error ? error.message : `Failed to delete ${deleteCandidate.id}.`);
     } finally {
       setDeletingInvoice(false);
+    }
+  };
+
+  const confirmDeletePayment = async () => {
+    if (!deletePaymentCandidate || !activeCompany) return;
+    setDeletePaymentError('');
+    setDeletingPayment(true);
+    try {
+      // Atomic on the database side (jde_delete_customer_payment): every invoice this payment
+      // touched goes back to its prior paid amount/status and the customer balance is corrected
+      // by the same total, before the payment itself is removed.
+      await deleteCustomerPayment(activeCompany.id, deletePaymentCandidate.id);
+      await Promise.all([reloadInvoices(), reloadCustomers(), reloadPayments()]);
+      setFeedback(`${deletePaymentCandidate.id} reversed — the invoices it was applied to are back to how they were.`);
+      setDeletePaymentCandidate(null);
+    } catch (error) {
+      setDeletePaymentError(error instanceof Error ? error.message : `Failed to reverse ${deletePaymentCandidate.id}.`);
+    } finally {
+      setDeletingPayment(false);
     }
   };
 
@@ -851,6 +792,7 @@ export default function SalesPage() {
           <p className="page-subtitle">Invoices, billing and quotations{ledgerSummary}</p>
         </div>
         <div className="flex gap-2">
+          <button className="btn btn-secondary" onClick={() => openReceivePayment()}><Wallet size={16} /> Receive Payment</button>
           <button className="btn btn-secondary" onClick={openQuotation}><Plus size={16} /> Create Quotation</button>
           <button className="btn btn-primary" onClick={() => openInvoice()}><Plus size={16} /> Create Sales Invoice</button>
         </div>
@@ -881,6 +823,15 @@ export default function SalesPage() {
             onClick={() => setActiveTab('quotations')}
           >
             Quotations <span className="tab-count">{quotations.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'ledger'}
+            className={`tab ${activeTab === 'ledger' ? 'active' : ''}`}
+            onClick={() => setActiveTab('ledger')}
+          >
+            Customer Ledger
           </button>
         </div>
       </div>
@@ -1086,10 +1037,7 @@ export default function SalesPage() {
                         style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         onClick={() => items.length > 0 && openSalesReturn(invoice)}
                       ><Undo2 size={14} /></button>
-                      {/* Opens the invoice itself to print. This used to call printCurrentPage
-                          directly, which printed whatever was on screen — the invoice *list* —
-                          rather than the invoice named on the button. */}
-                      <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Open invoice to print" onClick={() => openInvoiceDocument(invoice)}><Printer size={14} /></button>
+                      <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={() => window.open(`/sales/invoice/${invoice.id}`, '_blank')}><Printer size={14} /></button>
                       <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`} title="Delete invoice" style={{ color: 'var(--color-danger)' }} onClick={() => setDeleteCandidate(invoice)}><Trash2 size={14} /></button>
                     </div></td>
                   </tr>;
@@ -1179,7 +1127,7 @@ export default function SalesPage() {
                 <td className="text-center"><div className="flex justify-between gap-1 items-center">
                   <button className="btn btn-ghost btn-sm" title="View quotation" aria-label={`View ${quote.id}`} disabled={loadingQuotation} onClick={() => void loadQuotationFor(quote, 'view')}><Eye size={14} /></button>
                   <button className="btn btn-ghost btn-sm" title="Edit quotation" aria-label={`Edit ${quote.id}`} disabled={loadingQuotation || quote.status === 'converted'} onClick={() => void loadQuotationFor(quote, 'edit')}><Pencil size={14} /></button>
-                  <button className="btn btn-ghost btn-sm" title="Print quotation" aria-label={`Print ${quote.id}`} disabled={loadingQuotation} onClick={() => void loadQuotationFor(quote, 'print')}><Printer size={14} /></button>
+                  <button className="btn btn-ghost btn-sm" title="Print quotation" aria-label={`Print ${quote.id}`} onClick={() => window.open(`/sales/quotation/${quote.id}`, '_blank')}><Printer size={14} /></button>
                   <button className="btn btn-secondary btn-sm" disabled={convertingQuotationId === quote.id || quote.status === 'converted'} onClick={() => void convertQuote(quote)}>{convertingQuotationId === quote.id ? 'Converting…' : quote.status === 'converted' ? 'Converted' : 'Convert'}</button>
                 </div></td>
               </tr>)}
@@ -1192,6 +1140,110 @@ export default function SalesPage() {
         </div>
       )}
 
+      {activeTab === 'ledger' && (() => {
+        const ledgerCustomer = customers.find((customer) => customer.id === ledgerCustomerId) ?? null;
+        const entries = ledgerCustomer ? buildCustomerLedger(ledgerCustomer.name, invoices, payments, paymentAllocations) : [];
+        let running = 0;
+
+        return (
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="tbl-toolbar">
+              <div className="tbl-toolbar-title">
+                <strong>Customer Ledger</strong>
+                <small>Every invoice and payment for one customer, in order, with a running balance</small>
+              </div>
+              <div className="tbl-tools" style={{ minWidth: '260px' }}>
+                <select className="form-input form-select" value={ledgerCustomerId} onChange={(event) => setLedgerCustomerId(event.target.value)}>
+                  <option value="">Select a customer…</option>
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.name}{Number(customer.balance) > 0 ? ` — ₹${money(customer.balance)} due` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {!ledgerCustomer ? (
+              <div className="empty-state">
+                <div className="empty-state-icon"><History size={22} /></div>
+                <div className="empty-state-title">Choose a customer</div>
+                <p className="empty-state-desc">Their invoices and payments will line up here in order, with a running balance.</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between items-center" style={{ padding: '14px 16px', borderBottom: '1px solid var(--border-default)' }}>
+                  <div>
+                    <strong>{ledgerCustomer.name}</strong>
+                    <div className="text-muted text-sm">{ledgerCustomer.phone || ledgerCustomer.email || 'No contact details'}</div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <div className="text-muted text-sm">Current balance</div>
+                      <strong className={Number(ledgerCustomer.balance) > 0 ? 'text-danger' : 'text-success'}>₹{money(ledgerCustomer.balance)}</strong>
+                    </div>
+                    <button className="btn btn-primary btn-sm" onClick={() => openReceivePayment(ledgerCustomer.id)}><Wallet size={14} /> Receive Payment</button>
+                  </div>
+                </div>
+
+                {entries.length === 0 ? (
+                  <div className="empty-state">
+                    <p className="empty-state-title">No invoices or payments yet</p>
+                    <p className="empty-state-desc">Nothing has been recorded for {ledgerCustomer.name} on this company.</p>
+                  </div>
+                ) : (
+                  <div className="table-wrap" style={{ borderLeft: 'none', borderRight: 'none', borderBottom: 'none', borderRadius: 0 }}>
+                    <table className="erp-table">
+                      <thead><tr><th>Date</th><th>Entry</th><th className="text-right">Invoiced</th><th className="text-right">Received</th><th className="text-right">Balance</th><th></th></tr></thead>
+                      <tbody>
+                        {entries.map((entry) => {
+                          if (entry.kind === 'invoice') {
+                            running += Number(entry.invoice.total);
+                            return (
+                              <tr key={`inv-${entry.invoice.id}`}>
+                                <td>{entry.date}</td>
+                                <td><button type="button" className="text-brand font-semibold" style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }} onClick={() => setViewingInvoice(entry.invoice)}>{entry.invoice.id}</button></td>
+                                <td className="text-right">₹{money(entry.invoice.total)}</td>
+                                <td className="text-right text-muted">—</td>
+                                <td className="text-right">₹{money(running)}</td>
+                                <td></td>
+                              </tr>
+                            );
+                          }
+                          running -= Number(entry.payment.amount);
+                          return (
+                            <tr key={`pay-${entry.payment.id}`}>
+                              <td>{entry.date}</td>
+                              <td>
+                                <span className="font-semibold">{entry.payment.id}</span>
+                                <div className="text-muted text-sm">
+                                  {entry.appliedTo.length > 0
+                                    ? `Applied to ${entry.appliedTo.map((line) => line.invoiceId).join(', ')}`
+                                    : 'Not applied to any invoice'}
+                                  {entry.payment.note ? ` · ${entry.payment.note}` : ''}
+                                </div>
+                              </td>
+                              <td className="text-right text-muted">—</td>
+                              <td className="text-right text-success">₹{money(entry.payment.amount)}</td>
+                              <td className="text-right">₹{money(running)}</td>
+                              <td className="text-center">
+                                <button className="btn btn-ghost btn-sm" aria-label={`Reverse ${entry.payment.id}`} title="Reverse this payment" style={{ color: 'var(--color-danger)' }} onClick={() => setDeletePaymentCandidate(entry.payment)}>
+                                  <Trash2 size={14} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })()}
+
       {viewingQuotation && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '720px' }} role="dialog" aria-modal="true" aria-labelledby="view-quotation-title">
         <div className="modal-header"><div><h3 id="view-quotation-title" className="modal-title">{viewingQuotation.id}</h3><p className="text-muted text-sm">Quotation — inventory is unchanged until conversion.</p></div><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setViewingQuotation(null)}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
@@ -1199,7 +1251,7 @@ export default function SalesPage() {
           <div className="table-wrap"><table className="erp-table"><thead><tr><th>Part</th><th className="text-right">Qty</th><th className="text-right">Unit Price</th><th className="text-right">Line Total</th></tr></thead><tbody>{viewingQuotation.items.map((item, index) => <tr key={`${item.part_number}-${index}`}><td><div style={{ fontWeight: 600 }}>{item.name}</div><small className="text-muted">{item.part_number}</small></td><td className="text-right">{item.qty}</td><td className="text-right">₹{Number(item.unit_price).toLocaleString()}</td><td className="text-right">₹{Number(item.line_total).toLocaleString()}</td></tr>)}</tbody></table></div>
           <div className="report-summary"><div className="report-line"><span>Subtotal</span><span>₹{Number(viewingQuotation.subtotal ?? viewingQuotation.total).toLocaleString()}</span></div>{Number(viewingQuotation.discount_amount) > 0 && <div className="report-line"><span>Discount ({Number(viewingQuotation.discount_percent).toFixed(1)}%)</span><span className="text-danger">-₹{Number(viewingQuotation.discount_amount).toLocaleString()}</span></div>}<div className="report-line"><span>GST ({Number(viewingQuotation.gst_percent ?? 0).toFixed(1)}%)</span><span>₹{Number(viewingQuotation.gst_amount ?? 0).toLocaleString()}</span></div><div className="report-line report-strong"><span>Quotation Total</span><strong>₹{Number(viewingQuotation.total).toLocaleString()}</strong></div></div>
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={printCurrentPage}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingQuotation(null)}>Close</button></div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/quotation/${viewingQuotation.id}`, '_blank')}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingQuotation(null)}>Close</button></div>
       </div></div>}
 
       {showQuotationModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="quotation-modal-title"><form onSubmit={saveQuote}>
@@ -1236,7 +1288,7 @@ export default function SalesPage() {
             <div className="report-line"><span>Balance</span><strong className="text-danger">₹{money(Number(viewingInvoice.total) - Number(viewingInvoice.paid))}</strong></div>
           </div>
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setViewingInvoice(null)}>Close</button></div>
+        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/invoice/${viewingInvoice.id}`, '_blank')}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingInvoice(null)}>Close</button></div>
       </div></div>}
 
       {deleteCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="delete-invoice-title">
@@ -1555,30 +1607,6 @@ export default function SalesPage() {
         </div></div>
       )}
 
-      {/* The finished invoice, opened straight after saving and available again from any row.
-          Purely a view of what is already stored — it saves nothing and changes nothing. */}
-      {documentInvoice && (
-        <InvoiceDocument
-          invoiceId={documentInvoice.invoiceId}
-          date={documentInvoice.date}
-          status={documentInvoice.status}
-          company={documentInvoice.company}
-          customer={documentInvoice.customer}
-          lines={documentInvoice.lines}
-          subtotal={documentInvoice.subtotal}
-          discountPercent={documentInvoice.discountPercent}
-          discountAmount={documentInvoice.discountAmount}
-          taxableValue={documentInvoice.taxableValue}
-          gstPercent={documentInvoice.gstPercent}
-          gstAmount={documentInvoice.gstAmount}
-          isInterState={documentInvoice.isInterState}
-          total={documentInvoice.total}
-          paid={documentInvoice.paid}
-          onClose={() => setDocumentInvoice(null)}
-          onPrint={printCurrentPage}
-        />
-      )}
-
       {showAddCustomer && (
         <AddCustomerModal
           onClose={() => setShowAddCustomer(false)}
@@ -1586,6 +1614,26 @@ export default function SalesPage() {
           onCreated={(newCustomer) => { setCustomer(newCustomer.name); setShowAddCustomer(false); }}
         />
       )}
+
+      {showPaymentModal && (
+        <ReceivePaymentModal
+          customerId={paymentModalCustomerId}
+          onClose={() => setShowPaymentModal(false)}
+          onRecorded={(result) => {
+            setShowPaymentModal(false);
+            setFeedback(`₹${result.appliedTotal.toLocaleString('en-IN')} received from ${result.customerName} (${result.paymentId}).`);
+          }}
+        />
+      )}
+
+      {deletePaymentCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="delete-payment-title">
+        <div className="modal-header"><h3 id="delete-payment-title" className="modal-title">Reverse this payment?</h3></div>
+        <div className="modal-body flex flex-col gap-3">
+          {deletePaymentError && <div className="alert alert-danger" role="alert">{deletePaymentError}</div>}
+          <p>This will put every invoice <strong>{deletePaymentCandidate.id}</strong> was applied to back to its balance before this payment, and add ₹{Number(deletePaymentCandidate.amount).toLocaleString()} back to {deletePaymentCandidate.customer}&apos;s outstanding balance. Use this for a payment entered wrong — not for a genuine refund.</p>
+        </div>
+        <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setDeletePaymentCandidate(null)} disabled={deletingPayment}>Cancel</button><button className="btn btn-danger" onClick={confirmDeletePayment} disabled={deletingPayment}>{deletingPayment ? 'Reversing…' : 'Reverse Payment'}</button></div>
+      </div></div>}
     </div>
   );
 }

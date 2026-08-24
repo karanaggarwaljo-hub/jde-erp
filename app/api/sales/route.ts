@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireOwner } from '@/lib/auth/dal';
+import { isBusinessRuleError } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -84,6 +85,12 @@ export async function POST(request: Request) {
     return Response.json(data, { status: 201 });
   } catch (error) {
     console.error('POST /api/sales (return) failed:', error);
+    // A rule the database enforced on purpose is something the owner can act on, so it is
+    // answered as a 4xx carrying the real sentence. Only genuine faults become a 500, which the
+    // browser deliberately shows as "the ERP is temporarily unavailable".
+    if (isBusinessRuleError(error)) {
+      return Response.json({ error: errorMessage(error, 'This return could not be recorded.') }, { status: 422 });
+    }
     return Response.json({ error: errorMessage(error, 'The sales return was not saved.') }, { status: 500 });
   }
 }

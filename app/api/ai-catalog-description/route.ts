@@ -51,6 +51,8 @@ export async function POST(request: Request) {
       prompt: contents,
       schema: DESCRIPTION_JSON_SCHEMA,
       schemaName: 'catalog_description',
+      // Left on the quality path deliberately: this copy is published to real customers, and the
+      // hedge already caps how long a slow provider can hold it up.
     });
 
     return Response.json(data);

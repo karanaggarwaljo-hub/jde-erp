@@ -40,6 +40,8 @@ export async function POST(request: Request) {
       prompt: contents,
       schema: SUGGESTION_JSON_SCHEMA,
       schemaName: 'part_details',
+      // Someone is waiting on a field to fill in — lead with the fastest provider.
+      priority: 'speed',
     });
 
     return Response.json(data);
