@@ -29,8 +29,8 @@ export type SaveSalesInvoiceInput = {
   discountAmount: number;
 };
 
-async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+async function sendJson<T>(method: 'POST' | 'DELETE', url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const text = await res.text();
   let parsed: unknown;
   if (text) {
@@ -49,6 +49,14 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
   return parsed as T;
 }
 
+function postJson<T>(url: string, body: unknown): Promise<T> {
+  return sendJson<T>('POST', url, body);
+}
+
+function deleteJson<T>(url: string, body: unknown): Promise<T> {
+  return sendJson<T>('DELETE', url, body);
+}
+
 /** Atomically creates or edits a sales invoice — header, line items, FIFO stock
  *  consumption/restoration, and customer balance — as one database transaction, instead of
  *  6-10 separate browser-initiated calls that could leave things half-done on failure. */
@@ -60,4 +68,29 @@ export function saveSalesInvoice(input: SaveSalesInvoiceInput) {
  *  removes the invoice and its items — as one database transaction. */
 export function deleteSalesInvoice(invoiceId: string, customerId: string | null, outstanding: number) {
   return postJson<{ ok: true }>('/api/sales/delete-invoice', { invoiceId, customerId, outstanding });
+}
+
+export type PaymentAllocationInput = { invoiceId: string; amount: number };
+
+export type ReceiveCustomerPaymentInput = {
+  companyId: string;
+  customerId: string;
+  date: string;
+  amount: number;
+  note: string;
+  allocations: PaymentAllocationInput[];
+};
+
+/** Atomically records a customer payment and applies it across the invoices the owner chose —
+ *  the payment, its allocations, each invoice's paid/status, and the customer balance all land
+ *  together, so a customer who bought across several days on credit can pay the running total
+ *  in one visit with a real receipt for it, instead of each invoice being hand-edited. */
+export function receiveCustomerPayment(input: ReceiveCustomerPaymentInput) {
+  return postJson<{ payment_id: string; applied_total: number }>('/api/sales/payments', input);
+}
+
+/** Atomically reverses a recorded payment — restores every invoice it touched to its prior paid
+ *  amount and status and corrects the customer balance — for a payment entered wrong. */
+export function deleteCustomerPayment(companyId: string, paymentId: string) {
+  return deleteJson<{ ok: true }>('/api/sales/payments', { companyId, paymentId });
 }

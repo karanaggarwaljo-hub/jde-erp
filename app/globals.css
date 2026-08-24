@@ -1674,3 +1674,101 @@ Modal
   .part-form { grid-template-columns: 1fr; }
   .part-form-summary { position: static; }
 }
+
+/* ===================================================
+   Printable Sales Invoice (app/(dashboard)/sales/invoice/[id]/page.tsx)
+   =================================================== */
+
+/* Hidden only when printing (see @media print below) — on screen this toolbar and any other
+   element carrying the class renders normally. */
+.no-print { }
+
+.invoice-sheet {
+  max-width: 800px;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sh-2);
+  padding: 40px;
+}
+
+.invoice-letterhead {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid var(--line-2);
+}
+
+.invoice-company-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.invoice-heading { text-align: right; flex: none; }
+
+.invoice-heading-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.invoice-bill-to {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 20px;
+}
+
+.invoice-items-table { margin-bottom: 4px; }
+
+/* Balance Due is the one figure a customer reading a printed invoice actually needs to find —
+   the same tinted-panel-plus-coloured-text pattern as .alert-danger / .badge-danger, so it reads
+   as "this needs attention" without inventing a new visual language for it. */
+.invoice-balance-due {
+  background: var(--rose-tint, var(--color-danger-bg));
+  border: 1px solid var(--rose-line, rgba(185, 28, 60, 0.24));
+  border-bottom: 1px solid var(--rose-line, rgba(185, 28, 60, 0.24)) !important;
+  border-radius: var(--radius-md);
+  padding: 10px 14px !important;
+}
+
+@media print {
+  /* Chrome around the document — never useful on paper. */
+  .erp-sidebar,
+  .erp-topbar,
+  .no-print {
+    display: none !important;
+  }
+
+  .erp-main { margin-left: 0 !important; }
+  .erp-content { padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+
+  /* This app has no dark theme today (no data-theme / prefers-color-scheme rules exist in this
+     file), but a printed tax invoice must never inherit a tinted or dark background regardless —
+     force plain white paper with black ink no matter what theming is added later. */
+  html, body {
+    background: #FFFFFF !important;
+    color: #000000 !important;
+  }
+
+  .invoice-sheet {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+
+  .invoice-items-table tr,
+  .report-summary .report-line {
+    break-inside: avoid;
+  }
+}

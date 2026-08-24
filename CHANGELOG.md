@@ -2,6 +2,32 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-24 — Printable invoices, and recording a customer's payment across several purchases
+
+Two things Sales couldn't do until now.
+
+**A real invoice document.** Every invoice's "Print" button used to just print whatever was on
+screen — the whole dashboard, sidebar and all — not the invoice itself. Clicking Print (on an
+invoice row, or from View Invoice) now opens a proper formatted invoice: your business name,
+address and GSTIN at the top, the customer's details, every line item, the GST breakdown, and the
+balance due — with a Print / Save as PDF button, ready to hand to a customer or email as a PDF.
+
+**Recording a payment that covers several purchases at once.** If a customer buys on credit across
+a few separate days and then pays the running total in one visit, that's now one action: **Receive
+Payment**, on Sales and on Customers. Pick the customer, enter what they paid, and choose which of
+their open invoices it covers — a "Fill oldest first" button gives you a starting point, but you
+stay in control of exactly where the money goes. Every rupee has to land on a real invoice; nothing
+is left as an unexplained credit.
+
+This replaces how the Customers page used to "record" a payment — it used to just rewrite invoice
+and balance numbers directly, with nothing recording that a payment had actually happened, and no
+protection if a step failed partway through. A payment is now its own record, with a receipt number,
+and Sales has a new **Customer Ledger** tab showing one customer's invoices and payments together in
+order, with a running balance — which is the direct answer to "did they ever pay me back for all
+three of those." A payment entered wrong can be reversed, which puts its invoices back exactly as
+they were; a payment already recorded against an invoice now blocks that invoice from being deleted
+until the payment itself is dealt with first, so the two can never end up disagreeing with each other.
+
 ## 2026-08-23 — Fixed: sales returns could never be recorded
 
 Every attempt to record a sales return failed with "The ERP is temporarily unavailable". It wasn't a
