@@ -2,6 +2,22 @@ import { GoogleGenAI, createPartFromBase64, createUserContent } from '@google/ge
 import { AiProviderError, classifyError } from '../errors';
 import type { AiJsonRequest, AiProvider, AiProviderResult } from '../types';
 
+/** Pinned deliberately, and NOT to `gemini-flash-latest`.
+ *
+ *  `gemini-flash-latest` is an alias that always points at Google's newest flash model. That
+ *  makes it the worst possible default for a production business app for two separate reasons,
+ *  both of which have now actually taken the AI features down:
+ *
+ *  1. The newest model carries the *smallest* free-tier allowance — as little as 20 requests a
+ *     day, after which every call is refused for quota.
+ *  2. Being the newest, it is also the most contended: it returns 503 UNAVAILABLE ("experiencing
+ *     high demand") under load while pinned versions of the same family answer normally.
+ *
+ *  A moving alias also means the app's behaviour can change with no deploy and no commit, which
+ *  is not something a business should discover through a broken screen. GEMINI_MODEL still
+ *  overrides this for anyone who wants to move it. */
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.6-flash';
+
 /** The primary provider — best answer quality, and the only one here that reads PDFs. */
 export const geminiProvider: AiProvider = {
   name: 'gemini',
@@ -12,7 +28,7 @@ export const geminiProvider: AiProvider = {
   supports: () => true,
 
   async generateJson(request: AiJsonRequest, signal: AbortSignal): Promise<AiProviderResult> {
-    const model = process.env.GEMINI_MODEL || 'gemini-flash-latest';
+    const model = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
 
     const contents = request.attachments?.length
