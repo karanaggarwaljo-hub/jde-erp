@@ -227,6 +227,20 @@ produces Search Console's "Sitemap is HTML" error. Both files fall back to
 `app/api/public/catalog/route.ts`) when `NEXT_PUBLIC_SITE_URL` isn't set, so a missing env var can't
 silently produce a sitemap full of `localhost` URLs.
 
+### Stock integrity
+
+`products.current_stock` is a denormalized figure — the real, audited stock is the sum of a
+product's own `jde_stock_layers.qty_remaining` rows (its actual purchase batches). Every code path
+that should touch stock (`jde_consume_stock_fifo`, `jde_add_stock_layer`,
+`jde_restore_stock_layers_for_invoice_item`) keeps both in step atomically; nothing in the current
+app calls `jde_adjust_product_stock` (the one function that only touches `current_stock`) for
+products. If the two ever disagree, it's data damage from something outside those paths — a prior
+version of the code, or a direct database edit — not something the app can cause on its own today.
+
+```bash
+npx tsx scripts/stock-integrity-check.ts
+```
+
 ### Backups
 
 A JSON snapshot of every table is saved to `data/backups/` once per day automatically while the app is running (and on-demand from Settings → Data Backups). Snapshots older than 7 days are pruned automatically. This is a local safety net in addition to whatever backup/PITR your Supabase plan provides — it never touches your live data.

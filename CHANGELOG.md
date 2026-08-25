@@ -2,6 +2,26 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-25 — Fixed: wrong stock numbers showing in Inventory, and a gap in editing a sale
+
+Reported: recording or editing a sale sometimes didn't seem to record, and the stock numbers shown
+afterward looked wrong. What was actually happening: 5 parts (across both companies) had their
+displayed stock quietly drift away from the real, audited stock on record — two badly (one showed
+1 in stock when 19 were really there; another showed 0 when 7 were really there). The sale itself
+was recording correctly; it was the Stock Level column that had gone stale, from historical data,
+not anything happening right now. All 5 corrected to match the real stock on record, and every
+other part checked against its actual purchase history — nothing else was wrong.
+
+While tracking this down, found and fixed a real gap: editing an existing sale checked nothing
+about which company that invoice actually belonged to. Same class of issue as the ones closed in
+yesterday's security audit, in the one function every sale actually goes through — missed there,
+caught here. Fixed the same way, and checked (with real data, undone immediately after) that a
+correct edit still works exactly as before and a wrong-company one is now refused.
+
+Added `scripts/stock-integrity-check.ts`, which checks every part's displayed stock against its
+real purchase-batch history and lists anything that doesn't match — so if this ever happens again,
+it's a one-command check instead of a manual investigation.
+
 ## 2026-08-25 — Security audit: closed a public data-exposure hole and a company data-isolation gap
 
 A full security and functional review of the app. Two things stand out — everything else here is
