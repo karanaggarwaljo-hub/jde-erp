@@ -2,6 +2,10 @@ import { buildReorderDigest } from '@/lib/ai/digest';
 import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 
 export const dynamic = 'force-dynamic';
+// The AI layer may legitimately spend ~25s on a slow provider before its own fallback
+// resolves; without this the platform could cut the function off first and turn a
+// recoverable slow call into an unexplained failure.
+export const maxDuration = 60;
 
 const FORECAST_JSON_SCHEMA = {
   type: 'object',
@@ -38,7 +42,10 @@ const FORECAST_JSON_SCHEMA = {
 
 const SYSTEM_PROMPT =
   'You are an inventory planner for an auto spare parts trading ERP (Jai Durga Enterprises). ' +
-  'You are given a JSON digest of active products with current stock, minimum stock thresholds, and cost. ' +
+  'You are given a JSON digest of products with current stock, minimum stock thresholds, and cost. ' +
+  'The product list has already been narrowed to those needing attention — read the "scope" field, and note that ' +
+  '"active_product_count" is the size of the WHOLE catalogue while "products" is only the shortlist. Never describe the ' +
+  'business as having only as many products as are listed, and never treat an omitted product as discontinued or missing. ' +
   'Recommend which products to reorder and how much. ' +
   'has_sales_velocity_data is always false in this digest — base recommendations only on current_stock vs min_stock and set confidence to "low" ' +
   '— do not invent a sales trend or a specific days-until-stockout figure you cannot derive from the digest. ' +

@@ -98,11 +98,38 @@ export async function buildBusinessDigest() {
 
 export type BusinessDigest = Awaited<ReturnType<typeof buildBusinessDigest>>;
 
+/** How close a part is to its own reorder level: 0 = nothing left, 1 = exactly at the reorder
+ *  level, above 1 = comfortably stocked. A part with no reorder level set has no scale to be
+ *  measured against, so it only counts as urgent if it has actually run out. */
+function stockRatio(p: Product): number {
+  const reorder = Number(p.min_stock);
+  if (!(reorder > 0)) return Number(p.current_stock) <= 0 ? 0 : Number.POSITIVE_INFINITY;
+  return Number(p.current_stock) / reorder;
+}
+
+/** Include a margin above the reorder level so "about to run out" is visible, not just
+ *  "already has". */
+const REORDER_RATIO_CUTOFF = 1.5;
+
+/** Well above the 8 items the model may return, so the shortlist never decides the answer for
+ *  it — but bounded, because one company here holds 675 parts and 231 of them are out of stock. */
+const MAX_CANDIDATES = 40;
+
 export async function buildReorderDigest() {
   const companyId = await getActiveCompanyId();
   const products = (await listRows('products', companyId)) as unknown as Product[];
 
-  const items = products.map((p) => ({
+  // Deliberately not every product. The model may recommend at most 8 and is told to judge on
+  // current stock against reorder level alone, so a comfortably-stocked part cannot change the
+  // answer — but sending all of them made the request too large to answer at all: Groq rejects
+  // outright above 8k tokens/minute on the free tier (a 242-part catalogue measured 9,738), and
+  // Gemini ran past the request budget and was cut off. Both AI features failed at once because
+  // of it. Sending only what could actually be recommended is what makes this answerable.
+  const candidates = products
+    .filter((p) => stockRatio(p) <= REORDER_RATIO_CUTOFF)
+    .sort((a, b) => stockRatio(a) - stockRatio(b) || Number(a.current_stock) - Number(b.current_stock));
+
+  const items = candidates.slice(0, MAX_CANDIDATES).map((p) => ({
     part_number: p.part_number,
     name: p.name,
     brand: p.brand,
@@ -115,7 +142,15 @@ export async function buildReorderDigest() {
   return {
     generated_at: new Date().toISOString(),
     has_sales_velocity_data: false,
-    active_product_count: items.length,
+    // Counted from the full catalogue, not from the shortlist — a trimmed list must never read
+    // as a small business. See the scope note, which goes to the model verbatim.
+    active_product_count: products.length,
+    scope:
+      `Only products that are out of stock, or within ${REORDER_RATIO_CUTOFF}x of their reorder level, are listed below. ` +
+      'Every other product in the catalogue is comfortably stocked and was deliberately left out.',
+    needs_attention_count: candidates.length,
+    omitted_well_stocked_count: products.length - candidates.length,
+    omitted_for_size_count: Math.max(0, candidates.length - items.length),
     products: items,
   };
 }

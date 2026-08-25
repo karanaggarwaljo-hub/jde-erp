@@ -3,6 +3,10 @@ import { DEFAULT_GEMINI_MODEL } from '@/lib/ai/providers/gemini';
 import { friendlyAiErrorMessage } from '@/lib/ai/friendly-error';
 
 export const dynamic = 'force-dynamic';
+// The AI layer may legitimately spend ~25s on a slow provider before its own fallback
+// resolves; without this the platform could cut the function off first and turn a
+// recoverable slow call into an unexplained failure.
+export const maxDuration = 60;
 
 type Candidate = { kind: 'image' | 'web'; url: string; sourceUrl?: string; title: string; domain: string };
 
