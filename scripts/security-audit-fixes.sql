@@ -287,7 +287,12 @@ begin
   end loop;
   delete from public.jde_invoice_items ii where ii.invoice_id = p_invoice_id and ii.company_id = p_company_id;
 
-  if p_customer_id is not null then
+  -- A parked draft (added the same day as this fix, in a separate PR) never adjusted the
+  -- customer's balance at save time — saveDraft in app/(dashboard)/sales/page.tsx saves with
+  -- newOutstanding: 0 — so discarding one must not reverse a debt that was never recorded.
+  -- Checked from the invoice's own status column, not a client-supplied flag: nothing sent from
+  -- the browser can talk this into skipping or applying the reversal wrongly.
+  if p_customer_id is not null and v_invoice.status is distinct from 'draft' then
     v_outstanding := greatest(coalesce(v_invoice.total, 0) - coalesce(v_invoice.paid, 0), 0);
     perform public.jde_adjust_customer_balance(p_customer_id, -v_outstanding);
   end if;
@@ -297,3 +302,12 @@ end $function$;
 
 revoke all on function public.jde_delete_sales_invoice(text, text, text) from public, anon, authenticated;
 grant execute on function public.jde_delete_sales_invoice(text, text, text) to service_role;
+
+-- ============================================================================================
+-- 3. Follow-up, applied while resolving a merge conflict with a same-day "Save as Draft" PR:
+--    the rewrite above (§2) computes the reversal from total-paid unconditionally, which is
+--    wrong for a draft — draft invoices carry a real total but never touched the customer's
+--    balance in the first place. Folded into the create-or-replace above rather than kept as a
+--    separate statement, since it's the same function; this section exists only to record that
+--    the status check was a distinct, later fix, not part of the original security pass.
+-- ============================================================================================
