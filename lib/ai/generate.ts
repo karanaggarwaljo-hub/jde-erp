@@ -23,11 +23,19 @@ const DEFAULT_FAST_ORDER = 'groq,gemini';
 
 /** Keep the primary provider on a short leash so a slow provider does not make the user wait
  * before the already-configured fallback gets a chance. Attachments genuinely take longer to
- * read, so they receive a larger (but still bounded) budget. */
+ * read, so they receive a larger (but still bounded) budget.
+ *
+ * Measured, not guessed: the reasoning models this app leads with spend real time thinking
+ * before emitting structured JSON — a reorder forecast over an 18-item shortlist took 15.9s,
+ * i.e. it was being aborted by the old 14s budget and reported to the owner as "the AI service
+ * could not be reached", with nothing wrong at either end. This is deliberately generous
+ * because the hedge below means nobody actually waits it out: the fallback starts alongside
+ * after a few seconds and usually answers first. The long budget only decides whether a lone
+ * surviving provider is allowed to finish, which is exactly when we want it to. */
 const timeoutMs = (request: AiJsonRequest): number => {
   const configured = Number(process.env.AI_TIMEOUT_MS);
   if (Number.isFinite(configured) && configured > 0) return configured;
-  return request.attachments?.length ? 30_000 : 14_000;
+  return request.attachments?.length ? 45_000 : 25_000;
 };
 
 /** How long to let the leading provider work alone before starting the next one *alongside* it

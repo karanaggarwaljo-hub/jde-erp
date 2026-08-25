@@ -2,6 +2,46 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-26 — Fixed (properly): the AI Stock Reorder Recommendation was sending your whole catalogue
+
+The earlier fix today got the message honest and the model pinned, but the feature still failed —
+so this went back to the live server logs and found the actual reason, which was something else
+entirely.
+
+**Every time you asked for a reorder recommendation, the app sent all 242 of your parts to the AI.**
+Both AI services refused it, for two different reasons: the backup service rejected the request
+outright as too large (it allows 8,000 units of text a minute; this was 9,738), and Google's took
+longer than the app was willing to wait and got cut off. Neither failure had anything to do with
+your data or your keys.
+
+None of that bulk could ever change the answer. The recommendation only ever names up to 8 parts,
+and it decides purely by comparing stock on hand against each part's reorder level — so a part
+sitting comfortably in stock cannot possibly be recommended, no matter how many of them get sent.
+The app now sends only the parts that could genuinely need reordering: anything out of stock, or
+within 1.5x of its reorder level. For your active company that is 18 parts instead of 242 — a 93%
+smaller request. It still tells the AI the true size of the full catalogue and how many parts were
+left out as well-stocked, so a short list can never be mistaken for a small business.
+
+Checked against real data, end to end: the backup service now answers in 1.7 seconds using 1,202
+units of text, comfortably inside its limit, and returns a real recommendation ("Hydraulic Pump
+HYD-P01 — stock 1, order 1, high urgency").
+
+**Also fixed while in there:**
+
+- **The app was cutting the AI off too early.** Google's model genuinely needs about 16 seconds to
+  think through a reorder list; the app gave up at 14 and reported "the AI service could not be
+  reached" with nothing actually wrong. Raised to 25 seconds. You will not notice the wait — the
+  backup service starts alongside after a few seconds and normally answers first; the longer
+  allowance only matters on the occasions when it is the only one left.
+- **The card claimed something it doesn't do.** It said recommendations were "based on current
+  stock levels and 60-day sales velocity". The sales-velocity part was never true — the feature has
+  never had that data and the code says so explicitly. It now says what it actually uses.
+
+**Separately, and not fixed here:** the hourly backup is failing on every run on the live site
+(it tries to write to a folder that doesn't exist on a hosted server). Your data is safe — Supabase
+is the real store — but the extra safety net has not been running since the site went online. Worth
+its own piece of work.
+
 ## 2026-08-26 — Fixed: all the AI features failing at once, and an error message that lied
 
 Reported: AI Summary, AI Stock Reorder Recommendation and AI Business Insights all showed

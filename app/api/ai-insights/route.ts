@@ -2,6 +2,10 @@ import { buildBusinessDigest } from '@/lib/ai/digest';
 import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 
 export const dynamic = 'force-dynamic';
+// The AI layer may legitimately spend ~25s on a slow provider before its own fallback
+// resolves; without this the platform could cut the function off first and turn a
+// recoverable slow call into an unexplained failure.
+export const maxDuration = 60;
 
 const INSIGHTS_JSON_SCHEMA = {
   type: 'object',

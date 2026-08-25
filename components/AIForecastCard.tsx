@@ -61,7 +61,7 @@ export default function AIForecastCard() {
             {forecast && <span className={`badge ${confidenceBadge[forecast.confidence]}`}>{forecast.confidence} confidence</span>}
           </div>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-            {generatedAt ? `Generated ${generatedAt.toLocaleTimeString()}` : 'Based on current stock levels and 60-day sales velocity'}
+            {generatedAt ? `Generated ${generatedAt.toLocaleTimeString()}` : 'Based on current stock levels and each part’s reorder level'}
           </p>
 
           {loading && !forecast && (
