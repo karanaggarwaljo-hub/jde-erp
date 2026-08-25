@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { DEFAULT_GEMINI_MODEL } from '@/lib/ai/providers/gemini';
 import { friendlyAiErrorMessage } from '@/lib/ai/friendly-error';
 
 export const dynamic = 'force-dynamic';
@@ -24,7 +25,7 @@ export async function POST(request: Request) {
   try {
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-flash-latest',
+      model: process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL,
       contents:
         `Find reference product photos and catalog/spec pages for this spare part, for VISUAL GUIDANCE ONLY — ` +
         `these will never be downloaded, reused, or published, only linked to a human reviewer as reference: ${query}. ` +

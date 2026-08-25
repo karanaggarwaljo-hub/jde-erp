@@ -126,10 +126,12 @@ Beyond that:
 - A call abandoned because another provider won is not counted as a failure and never puts a
   healthy provider into cooldown.
 
-Worth knowing about the Gemini side specifically: `gemini-flash-latest` is an alias that follows
-Google's newest flash model, and the newest model carries the *smallest* free-tier allowance — as
-little as 20 requests a day. Pinning `GEMINI_MODEL` to the previous generation gives far more free
-headroom; see `.env.example`.
+Worth knowing about the Gemini side specifically: the default model is **pinned** (currently
+`gemini-3.6-flash`), deliberately not Google's `gemini-flash-latest` alias. That alias always
+follows Google's newest flash model, which carries the *smallest* free-tier allowance (as little as
+20 requests a day) and is also the most contended — it answers 503 "experiencing high demand" under
+load while a pinned version of the same family answers normally. Both of those have taken the AI
+features down in production. `GEMINI_MODEL` still overrides the pin; see `.env.example`.
 
 Not everything can fail over. Gemini remains the only provider here that reads PDFs, does Google
 Search grounding (Website Catalog → Reference Search) or generates images, so those three keep their

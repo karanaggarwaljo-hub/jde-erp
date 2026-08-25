@@ -2,6 +2,34 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-26 — Fixed: all the AI features failing at once, and an error message that lied
+
+Reported: AI Summary, AI Stock Reorder Recommendation and AI Business Insights all showed
+"The ERP is temporarily unavailable. Your action was not saved" at the same time. Two separate
+problems, neither of them a fault in the ERP itself.
+
+**Why they failed.** The app asked Google for `gemini-flash-latest`, which is not a model but a
+shortcut meaning "whatever your newest one is". Google's newest model is also its busiest, and it
+was turning everyone away with "experiencing high demand". Checked directly: that shortcut was
+refusing every request, while a specific named version of the same Google model answered normally
+in the same second. The app now asks for the specific version by name. That shortcut was also the
+reason for the earlier round of AI failures — it carries the smallest free daily allowance of any
+Google model — so this closes both, and means the app's behaviour can no longer change on its own
+without anything being deployed.
+
+**Why the message was wrong.** Whenever a request failed, the screen replaced the real explanation
+with one blanket sentence, including the words "your action was not saved". For a summary or a
+recommendation that is simply untrue — nothing was being saved, you were only reading. So the
+message raised alarm about something that never happened while hiding the one detail that would
+have explained the failure. Now, when a service the ERP depends on is genuinely unavailable or at
+its usage limit, you get told that in plain words instead. Unexpected faults still get one calm
+sentence, but it no longer claims anything about what was or wasn't saved.
+
+**Still worth doing, and it needs your Vercel login, not mine:** a backup AI service (Groq) is
+already built in and its key already works, but that key was only ever added to the development
+machine, never to the live site — which is why nothing covered for Google when it went down. Adding
+`GROQ_API_KEY` in Vercel's environment variables means a repeat of today is invisible to you.
+
 ## 2026-08-25 — Fixed: wrong stock numbers showing in Inventory, and a gap in editing a sale
 
 Reported: recording or editing a sale sometimes didn't seem to record, and the stock numbers shown
