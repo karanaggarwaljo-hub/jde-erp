@@ -673,3 +673,76 @@ export async function uploadCatalogImage(catalogId: string, base64: string, mime
   const { data } = getClient().storage.from(CATALOG_IMAGE_BUCKET).getPublicUrl(path);
   return data.publicUrl;
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * AI result cache
+ *
+ * Deliberately NOT registered in lib/db/schema.ts's TABLES map. That map drives the generic
+ * /api/local/[table] CRUD routes the browser talks to; this table is server-internal bookkeeping
+ * and has no business being reachable from a page.
+ * ------------------------------------------------------------------------------------------- */
+
+export type AiCacheRow = {
+  payload: unknown;
+  fingerprint: string;
+  generated_at: string;
+  day_ist: string;
+  runs_on_day: number;
+};
+
+/** The business day in Asia/Kolkata, as YYYY-MM-DD. The daily allowance resets on the owner's
+ *  own day, not on UTC midnight — which in India falls at 5:30am, mid-morning. */
+export function businessDayIst(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
+export async function readAiCache(companyId: string, feature: string, variant = ''): Promise<AiCacheRow | undefined> {
+  const { data, error } = await getClient()
+    .from('jde_ai_cache')
+    .select('payload, fingerprint, generated_at, day_ist, runs_on_day')
+    .eq('company_id', companyId)
+    .eq('feature', feature)
+    .eq('variant', variant)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as AiCacheRow | null) ?? undefined;
+}
+
+/** Records a freshly generated result and counts it against today's allowance. Called only after
+ *  a generation actually succeeded, so a failed or unreachable AI never burns an attempt. */
+export async function writeAiCache(
+  companyId: string,
+  feature: string,
+  variant: string,
+  fingerprint: string,
+  payload: unknown
+): Promise<AiCacheRow> {
+  const today = businessDayIst();
+  const existing = await readAiCache(companyId, feature, variant);
+  const runsOnDay = existing && existing.day_ist === today ? existing.runs_on_day + 1 : 1;
+
+  const { data, error } = await getClient()
+    .from('jde_ai_cache')
+    .upsert(
+      {
+        company_id: companyId,
+        feature,
+        variant,
+        fingerprint,
+        payload,
+        generated_at: new Date().toISOString(),
+        day_ist: today,
+        runs_on_day: runsOnDay,
+      },
+      { onConflict: 'company_id,feature,variant' }
+    )
+    .select('payload, fingerprint, generated_at, day_ist, runs_on_day')
+    .single();
+  if (error) throw new Error(error.message);
+  return data as AiCacheRow;
+}

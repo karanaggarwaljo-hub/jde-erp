@@ -1,3 +1,4 @@
+import { fingerprint, planAiRun, recordAiRun, replayMeta } from '@/lib/ai/cache';
 import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 
 export const dynamic = 'force-dynamic';
@@ -31,14 +32,28 @@ const REPORT_LABELS: Record<string, string> = {
   aging: 'Receivables/payables aging',
 };
 
+const FEATURE = 'report-summary';
+
 export async function POST(request: Request) {
-  const { reportType, data } = await request.json();
+  const { reportType, data, refresh } = await request.json();
   const label = REPORT_LABELS[reportType];
   if (!label) {
     return Response.json({ error: `Unknown reportType: ${reportType}` }, { status: 400 });
   }
   if (typeof data !== 'object' || data === null) {
     return Response.json({ error: 'data is required' }, { status: 400 });
+  }
+
+  // Each report tab keeps its own stored summary and its own daily allowance — reportType is a
+  // validated key from REPORT_LABELS above, never free text off the request.
+  // The fingerprint is what lets a replayed summary be checked against the figures currently on
+  // screen, so prose is never shown beside numbers it was not written about.
+  const inputFingerprint = fingerprint(data);
+  const plan = await planAiRun(FEATURE, reportType, { force: refresh === true, fingerprint: inputFingerprint });
+
+  if (!plan.shouldGenerate && plan.cached) {
+    const meta = replayMeta(plan.cached, inputFingerprint);
+    return Response.json({ ...(plan.cached.payload as object), cache: meta });
   }
 
   try {
@@ -49,9 +64,14 @@ export async function POST(request: Request) {
       schemaName: 'report_summary',
     });
 
-    return Response.json(summary);
+    const cache = await recordAiRun(plan, FEATURE, reportType, summary, inputFingerprint);
+    return Response.json({ ...(summary as object), cache });
   } catch (error) {
     console.error('ai-report-summary route failed:', error);
+    if (plan.cached) {
+      const meta = { ...replayMeta(plan.cached, inputFingerprint), refresh_failed: true };
+      return Response.json({ ...(plan.cached.payload as object), cache: meta });
+    }
     return aiErrorResponse(error, 'Unknown error generating summary.');
   }
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles, RefreshCw, ArrowRight, PackageSearch } from 'lucide-react';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { AiCacheNote, describeGenerated, type CacheMeta } from './AiCacheNote';
 
 type ForecastItem = {
   part_number: string;
@@ -29,16 +30,18 @@ export default function AIForecastCard() {
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [generatedAt, setGeneratedAt] = useState<Date | null>(null);
+  const [meta, setMeta] = useState<CacheMeta | null>(null);
 
-  const fetchForecast = async () => {
+  // `manual` marks a press of Refresh, which is allowed to spend one of the day's two AI runs.
+  // An automatic load never does — it shows the stored answer unless one is genuinely due.
+  const fetchForecast = async (manual = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/ai-forecast');
-      const body = (await parseJsonOrThrow(res, 'Failed to generate forecast.')) as { forecast: Forecast };
+      const res = await fetch(`/api/ai-forecast${manual ? '?refresh=1' : ''}`);
+      const body = (await parseJsonOrThrow(res, 'Failed to generate forecast.')) as { forecast: Forecast; cache?: CacheMeta };
       setForecast(body.forecast);
-      setGeneratedAt(new Date());
+      setMeta(body.cache ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate forecast.');
     } finally {
@@ -47,7 +50,7 @@ export default function AIForecastCard() {
   };
 
   useEffect(() => {
-    const timer = setTimeout(fetchForecast, 0);
+    const timer = setTimeout(() => fetchForecast(false), 0);
     return () => clearTimeout(timer);
   }, []);
 
@@ -61,7 +64,7 @@ export default function AIForecastCard() {
             {forecast && <span className={`badge ${confidenceBadge[forecast.confidence]}`}>{forecast.confidence} confidence</span>}
           </div>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-            {generatedAt ? `Generated ${generatedAt.toLocaleTimeString()}` : 'Based on current stock levels and each part’s reorder level'}
+            {describeGenerated(meta) ?? 'Based on current stock levels and each part’s reorder level'}
           </p>
 
           {loading && !forecast && (
@@ -99,11 +102,13 @@ export default function AIForecastCard() {
             </>
           )}
 
+          <AiCacheNote meta={meta} />
+
           <div className="flex gap-2 mt-4">
             <button className="btn btn-primary btn-sm" onClick={() => router.push('/purchases')}>
               Review Purchase Orders <ArrowRight size={14} />
             </button>
-            <button className="btn btn-ghost btn-sm" onClick={fetchForecast} disabled={loading}>
+            <button className="btn btn-ghost btn-sm" onClick={() => fetchForecast(true)} disabled={loading}>
               <RefreshCw size={14} className={loading ? 'spin' : ''} /> {loading ? 'Analyzing…' : 'Refresh'}
             </button>
           </div>

@@ -1,3 +1,4 @@
+import { planAiRun, recordAiRun, replayMeta } from '@/lib/ai/cache';
 import { buildBusinessDigest } from '@/lib/ai/digest';
 import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 
@@ -77,7 +78,17 @@ const SYSTEM_PROMPT =
   'risks, and concrete recommended actions. If a section of the data is empty or the history window is short, say so plainly ' +
   'in data_confidence and avoid inventing numbers that are not derivable from the digest. Currency is INR (₹).';
 
-export async function GET() {
+const FEATURE = 'insights';
+
+export async function GET(request: Request) {
+  const force = new URL(request.url).searchParams.get('refresh') === '1';
+  const plan = await planAiRun(FEATURE, '', { force });
+
+  // Replaying skips the digest too, which is seven table reads on this route.
+  if (!plan.shouldGenerate && plan.cached) {
+    return Response.json({ insights: plan.cached.payload, cache: replayMeta(plan.cached) });
+  }
+
   try {
     const digest = await buildBusinessDigest();
     const { data, provider } = await generateJson({
@@ -87,9 +98,13 @@ export async function GET() {
       schemaName: 'business_insights',
     });
 
-    return Response.json({ insights: data, digest, provider });
+    const cache = await recordAiRun(plan, FEATURE, '', data);
+    return Response.json({ insights: data, digest, provider, cache });
   } catch (error) {
     console.error('ai-insights route failed:', error);
+    if (plan.cached) {
+      return Response.json({ insights: plan.cached.payload, cache: { ...replayMeta(plan.cached), refresh_failed: true } });
+    }
     return aiErrorResponse(error, 'Unknown error generating insights.');
   }
 }

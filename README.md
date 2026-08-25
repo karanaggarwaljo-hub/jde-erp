@@ -133,6 +133,39 @@ follows Google's newest flash model, which carries the *smallest* free-tier allo
 load while a pinned version of the same family answers normally. Both of those have taken the AI
 features down in production. `GEMINI_MODEL` still overrides the pin; see `.env.example`.
 
+### How often the AI actually runs
+
+The three expensive AI panels — Business Insights, Stock Reorder Recommendation and the report
+summaries — do **not** regenerate on every page load. Each one is allowed `DAILY_ALLOWANCE`
+(currently 2) real provider calls per company per day; every other request replays the stored
+answer out of `jde_ai_cache`. Report summaries count per report tab, since each tab is a different
+question. See `lib/ai/cache.ts`.
+
+Why: the free tiers here are small (Gemini's newest models allow as few as 20 requests a day, Groq
+caps tokens per minute), and before this, idle browsing consumed the same allowance the owner needed
+when they actually wanted an answer — five report tabs meant five generations just to look around.
+
+Rules worth knowing before changing it:
+
+- An automatic page load never spends a run unless nothing is stored yet, or the stored answer is
+  older than `REFRESH_AFTER_HOURS` (12), which spaces the day's two runs out.
+- Pressing **Refresh** spends a run deliberately — but cannot exceed the daily allowance.
+- A failed generation costs nothing: the counter only advances on success, and the last good answer
+  is shown with a note rather than being replaced by an error.
+- Every replayed answer carries the time it was really produced. The panels display that, never the
+  browser's own clock — otherwise a stored answer would appear to have been generated just now.
+- Report summaries additionally store a fingerprint of the figures they describe. If the numbers
+  move, the summary is not shown as though it described the new ones.
+
+Verify the whole thing against the real database, without spending any AI calls:
+
+```bash
+npx tsx scripts/ai-cache-check.ts
+```
+
+It runs the real cache code under a reserved feature key, asserts the allowance actually holds
+(including that a forced refresh cannot exceed it), and deletes everything it created.
+
 Not everything can fail over. Gemini remains the only provider here that reads PDFs, does Google
 Search grounding (Website Catalog → Reference Search) or generates images, so those three keep their
 existing behaviour of failing safely with a message. Invoice scans of *images* do fall back to Groq.
