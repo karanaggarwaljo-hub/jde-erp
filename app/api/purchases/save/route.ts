@@ -1,4 +1,5 @@
 import { dbErrorMessage, isBusinessRuleError, savePurchase } from '@/lib/db';
+import { checkCompanyAccess } from '@/lib/auth/dal';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +10,8 @@ export async function POST(request: Request) {
   if (typeof companyId !== 'string' || !companyId) {
     return Response.json({ error: 'companyId is required' }, { status: 400 });
   }
+  const access = await checkCompanyAccess(companyId);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
   if (!Array.isArray(items)) {
     return Response.json({ error: 'items must be an array' }, { status: 400 });
   }

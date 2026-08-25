@@ -678,18 +678,21 @@ export default function SalesPage() {
   };
 
   const confirmDeleteInvoice = async () => {
-    if (!deleteCandidate) return;
+    if (!deleteCandidate || !activeCompany) return;
     setDeleteError('');
     setDeletingInvoice(true);
     try {
       const custRow = customers.find((c) => c.name === deleteCandidate.customer);
       const discardingDraft = isDraft(deleteCandidate);
-      // A draft never added anything to the customer's balance, so there is nothing to reverse —
-      // passing its total here would credit the customer for a debt that was never recorded.
-      const due = discardingDraft ? 0 : Number(deleteCandidate.total) - Number(deleteCandidate.paid);
       // Atomic on the database side (jde_delete_sales_invoice): restores FIFO stock for every
-      // line item and reverses the customer balance before removing the invoice itself.
-      await deleteSalesInvoice(deleteCandidate.id, custRow?.id ?? null, due);
+      // line item and reverses the customer balance before removing the invoice itself. The
+      // amount reversed is computed by the database from the invoice's own total/paid — not
+      // sent from here — and the database also checks the invoice's own status itself before
+      // reversing anything at all: parking a draft never touched the customer's balance (it
+      // saves with newOutstanding: 0), so deleting one must not reverse a debt that was never
+      // recorded. That check lives server-side rather than as a client-passed flag, so nothing
+      // sent from here can talk the database into skipping or applying it wrongly.
+      await deleteSalesInvoice(activeCompany.id, deleteCandidate.id, custRow?.id ?? null);
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
       setFeedback(discardingDraft
         ? `${deleteCandidate.id} discarded — the reserved stock is back in inventory.`

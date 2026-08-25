@@ -38,6 +38,10 @@ export default function SuppliersPage() {
   const [showModal, setShowModal] = useState(false);
   const [paymentSupplier, setPaymentSupplier] = useState<Supplier | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
+  const [savingSupplier, setSavingSupplier] = useState(false);
+  const [supplierError, setSupplierError] = useState('');
   const [reminderSupplier, setReminderSupplier] = useState<Supplier | null>(null);
   const [feedback, setFeedback] = useState('');
   const [form, setForm] = useState({ name: '', category: categoryOptions[0], phone: '', email: '', gstin: '', terms: 30 });
@@ -67,37 +71,62 @@ export default function SuppliersPage() {
 
   const saveSupplier = async (event: FormEvent) => {
     event.preventDefault();
-    await create({ ...form, balance: 0 });
-    setShowModal(false);
-    setFeedback(`${form.name} added to the supplier directory.`);
-    setForm({ name: '', category: categoryOptions[0], phone: '', email: '', gstin: '', terms: 30 });
+    if (savingSupplier) return;
+    setSupplierError('');
+    setSavingSupplier(true);
+    try {
+      await create({ ...form, balance: 0 });
+      setShowModal(false);
+      setFeedback(`${form.name} added to the supplier directory.`);
+      setForm({ name: '', category: categoryOptions[0], phone: '', email: '', gstin: '', terms: 30 });
+    } catch (error) {
+      setSupplierError(error instanceof Error ? error.message : 'Failed to add this supplier.');
+    } finally {
+      setSavingSupplier(false);
+    }
   };
 
   const openPayment = (supplier: Supplier) => {
     setPaymentSupplier(supplier);
     setPaymentAmount(supplier.balance);
+    setPaymentError('');
   };
 
   const recordPayment = async (event: FormEvent) => {
     event.preventDefault();
-    if (!paymentSupplier) return;
+    // Guards against a double-click double-applying this payment: each PO update and the
+    // balance adjustment below are separate server calls, not one atomic transaction, so a
+    // second concurrent submit would subtract the paid amount from the payable balance twice
+    // while only crediting the purchase orders once.
+    if (!paymentSupplier || savingPayment) return;
+    setPaymentError('');
+    setSavingPayment(true);
     const paid = Math.min(Math.max(paymentAmount, 0), paymentSupplier.balance);
 
-    let remaining = paid;
-    const outstandingPOs = purchaseOrders
-      .filter((po) => po.supplier === paymentSupplier.name && po.status === 'received' && Number(po.total) > Number(po.paid))
-      .sort((a, b) => a.date.localeCompare(b.date));
-    for (const po of outstandingPOs) {
-      if (remaining <= 0) break;
-      const due = Number(po.total) - Number(po.paid);
-      const apply = Math.min(due, remaining);
-      await updatePurchaseOrder(po.id, { paid: Number(po.paid) + apply });
-      remaining -= apply;
-    }
+    try {
+      let remaining = paid;
+      const outstandingPOs = purchaseOrders
+        .filter((po) => po.supplier === paymentSupplier.name && po.status === 'received' && Number(po.total) > Number(po.paid))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      for (const po of outstandingPOs) {
+        if (remaining <= 0) break;
+        const due = Number(po.total) - Number(po.paid);
+        const apply = Math.min(due, remaining);
+        await updatePurchaseOrder(po.id, { paid: Number(po.paid) + apply });
+        remaining -= apply;
+      }
 
-    await adjust(paymentSupplier.id, -paid);
-    setFeedback(`₹${paid.toLocaleString()} payment recorded for ${paymentSupplier.name}.`);
-    setPaymentSupplier(null);
+      await adjust(paymentSupplier.id, -paid);
+      setFeedback(`₹${paid.toLocaleString()} payment recorded for ${paymentSupplier.name}.`);
+      setPaymentSupplier(null);
+    } catch (error) {
+      // A failure partway through the PO loop above can leave some purchase orders already
+      // marked paid while the payable balance was never reduced — surfaced here rather than
+      // hidden, so it's at least visible that something needs checking in Purchases.
+      setPaymentError(error instanceof Error ? error.message : 'Failed to record this payment — check this supplier\'s purchase orders before retrying.');
+    } finally {
+      setSavingPayment(false);
+    }
   };
 
   // How many purchase orders this vendor still has open. Counted with exactly the same test the
@@ -348,13 +377,16 @@ export default function SuppliersPage() {
         <div className="form-grid-2"><div className="form-group"><label className="form-label">Category</label><select className="form-input form-select" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{categoryOptions.map((c) => <option key={c}>{c}</option>)}</select></div><div className="form-group"><label className="form-label">Credit Terms (Days)</label><input type="number" min="0" className="form-input" value={form.terms} onChange={(event) => setForm({ ...form, terms: Number(event.target.value) })} /></div></div>
         <div className="form-grid-2"><div className="form-group"><label className="form-label">Phone</label><input className="form-input" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></div><div className="form-group"><label className="form-label">Email</label><input type="email" className="form-input" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></div></div>
         <div className="form-group"><label className="form-label">GSTIN</label><input className="form-input" value={form.gstin} onChange={(event) => setForm({ ...form, gstin: event.target.value })} /></div>
-      </div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button><button type="submit" className="btn btn-primary">Save Supplier</button></div>
+        {supplierError && <p className="form-error" role="alert">{supplierError}</p>}
+      </div><div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingSupplier} onClick={() => setShowModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={savingSupplier}>{savingSupplier ? 'Saving…' : 'Save Supplier'}</button></div>
     </form></div></div>}
 
     {paymentSupplier && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="payment-modal-title"><form onSubmit={recordPayment}>
-      <div className="modal-header"><h3 id="payment-modal-title" className="modal-title">Record Vendor Payment</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setPaymentSupplier(null)}>✕</button></div>
-      <div className="modal-body flex flex-col gap-4"><p>Outstanding balance for <strong>{paymentSupplier.name}</strong>: ₹{paymentSupplier.balance.toLocaleString()}</p><div className="form-group"><label className="form-label">Payment Amount (₹)</label><input type="number" min="1" max={paymentSupplier.balance} className="form-input" value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} /></div></div>
-      <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setPaymentSupplier(null)}>Cancel</button><button type="submit" className="btn btn-primary">Record Payment</button></div>
+      <div className="modal-header"><h3 id="payment-modal-title" className="modal-title">Record Vendor Payment</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingPayment} onClick={() => setPaymentSupplier(null)}>✕</button></div>
+      <div className="modal-body flex flex-col gap-4"><p>Outstanding balance for <strong>{paymentSupplier.name}</strong>: ₹{paymentSupplier.balance.toLocaleString()}</p><div className="form-group"><label className="form-label">Payment Amount (₹)</label><input type="number" min="1" max={paymentSupplier.balance} className="form-input" disabled={savingPayment} value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} /></div>
+        {paymentError && <p className="form-error" role="alert">{paymentError}</p>}
+      </div>
+      <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingPayment} onClick={() => setPaymentSupplier(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={savingPayment}>{savingPayment ? 'Recording…' : 'Record Payment'}</button></div>
     </form></div></div>}
 
     {reminderSupplier && (

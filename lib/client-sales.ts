@@ -66,8 +66,8 @@ export function saveSalesInvoice(input: SaveSalesInvoiceInput) {
 
 /** Atomically deletes a sales invoice — restores FIFO stock, reverses the customer balance, and
  *  removes the invoice and its items — as one database transaction. */
-export function deleteSalesInvoice(invoiceId: string, customerId: string | null, outstanding: number) {
-  return postJson<{ ok: true }>('/api/sales/delete-invoice', { invoiceId, customerId, outstanding });
+export function deleteSalesInvoice(companyId: string, invoiceId: string, customerId: string | null) {
+  return postJson<{ ok: true }>('/api/sales/delete-invoice', { companyId, invoiceId, customerId });
 }
 
 export type PaymentAllocationInput = { invoiceId: string; amount: number };

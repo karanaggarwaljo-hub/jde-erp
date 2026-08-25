@@ -2,6 +2,8 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import { TABLES, type TableName } from './schema';
 
+export type { TableName };
+
 /** Supabase/PostgREST errors are plain {message, details, hint, code} objects, not real Error
  *  instances — an `error instanceof Error` check silently swallows the real message. Duck-type
  *  instead so API routes can always return a real message to the client rather than a generic
@@ -159,6 +161,18 @@ export async function deleteRow(table: TableName, id: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Which company a specific row belongs to — the one thing a client-supplied id can't be trusted
+ *  to say about itself. Used to check a caller's own company against a row they're trying to
+ *  read/write by id, for the many endpoints (generic table PATCH/DELETE, stock adjust, FIFO)
+ *  that take only a row id and never carried a company_id of their own to check against. */
+export async function getRowCompanyId(table: TableName, id: string): Promise<string | undefined> {
+  const def = TABLES[table];
+  if (!def.companyScoped) return undefined;
+  const { data, error } = await getClient().from(supaTable(table)).select('company_id').eq(def.primaryKey, id).maybeSingle();
+  if (error) throw error;
+  return (data as { company_id: string } | null)?.company_id ?? undefined;
+}
+
 export type AdjustableTable = 'products' | 'customers' | 'suppliers';
 
 const ADJUST_RPC: Record<AdjustableTable, { fn: string; idParam: string; deltaParam: string }> = {
@@ -291,12 +305,15 @@ export async function saveSalesInvoice(input: SaveSalesInvoiceInput): Promise<Re
 /** Atomically deletes a sales invoice — restores FIFO stock for every line item, reverses the
  *  customer balance, then removes the items and the invoice — as one database transaction.
  *  jde_delete_sales_invoice itself refuses this once a payment has been recorded against the
- *  invoice (see scripts/customer-payments.sql) — delete/edit that payment first. */
-export async function deleteSalesInvoice(invoiceId: string, customerId: string | null, outstanding: number): Promise<void> {
+ *  invoice (see scripts/customer-payments.sql) — delete/edit that payment first. Deliberately
+ *  takes no `outstanding` amount: the function computes the real due amount from the invoice's
+ *  own stored total/paid itself, rather than trusting a number a caller supplies — a client-
+ *  controlled figure applied to a customer's balance was the actual, wrong prior design. */
+export async function deleteSalesInvoice(companyId: string, invoiceId: string, customerId: string | null): Promise<void> {
   const { error } = await getClient().rpc('jde_delete_sales_invoice', {
+    p_company_id: companyId,
     p_invoice_id: invoiceId,
     p_customer_id: customerId,
-    p_outstanding: outstanding,
   });
   if (error) throw error;
 }

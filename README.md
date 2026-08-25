@@ -25,7 +25,17 @@ An ERP web app for an auto spare parts trading business: inventory, sales, purch
 
 ## Multi-Company Data Isolation
 
-Every business table has a `company_id` column, and exactly one company is "active" at a time (Settings → Companies). Every page reads and writes only the active company's data. Switching companies switches the entire app's view instantly — nothing is ever mixed between companies.
+Every business table has a `company_id` column, and exactly one company is "active" at a time (Settings → Companies). Every page reads and writes only the active company's data. Switching companies switches the entire app's view instantly — nothing is ever mixed between companies in the UI.
+
+That's the intended behaviour; what actually enforces it is `lib/auth/dal.ts`'s `checkCompanyAccess()` / `requireOwnCompanyRow()`, called from every company-scoped API route. An `owner` may act on any company — that's the deliberate design behind the company switcher, since `jde_users` has no per-owner company membership list to check against, so "owner" is the only thing that can mean "unrestricted" here. Anyone else is confined to their own `jde_users.company_id`, checked server-side against whatever the request claims — never just trusted from a `companyId` in the request body or a bare row id. A security review found this check missing across nearly the whole API surface (any active login, any role, could act on any company's data by supplying a different id) — every route now checks; see the 2026-08-25 changelog entry for what that covered.
+
+One caveat worth knowing: "the active company" (`jde_companies.is_active`) is a single flag shared by the whole database, not a per-browser-session value — so it assumes one person operates the app at a time, which matches how it's used today. It is not something concurrent multi-user use should rely on; a future multi-user pass would need session-scoped active-company state, not a shared table flag.
+
+`scripts/security-audit-fixes.sql` is the database side of the 2026-08-25 fix (already applied). `scripts/company-access-check.ts` exercises `getRowCompanyId()` — the data-layer piece `requireOwnCompanyRow()` relies on — against real rows in every affected table:
+
+```bash
+npx tsx scripts/company-access-check.ts
+```
 
 ## Authentication
 

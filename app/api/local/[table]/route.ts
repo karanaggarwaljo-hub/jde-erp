@@ -1,4 +1,5 @@
-import { dbErrorMessage, insertRows, isKnownTable, listRows, insertRow } from '@/lib/db';
+import { dbErrorMessage, getActiveCompanyId, insertRows, isCompanyScoped, isKnownTable, listRows, insertRow } from '@/lib/db';
+import { checkCompanyAccess } from '@/lib/auth/dal';
 
 export const dynamic = 'force-dynamic';
 
@@ -7,8 +8,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ tabl
   if (!isKnownTable(table)) {
     return Response.json({ error: `Unknown table: ${table}` }, { status: 404 });
   }
+  const companyId = new URL(request.url).searchParams.get('company_id') ?? undefined;
+  // Company-scoped tables must be scoped: an omitted company_id used to fall through to
+  // listRows returning every company's rows unfiltered. Not just missing a filter — a caller
+  // could also simply supply a *different* company's id, which is what the access check below
+  // actually stops (a present-but-empty companyId is still rejected as missing on purpose).
+  if (isCompanyScoped(table)) {
+    if (!companyId) return Response.json({ error: 'company_id is required.' }, { status: 400 });
+    const access = await checkCompanyAccess(companyId);
+    if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
+  }
   try {
-    const companyId = new URL(request.url).searchParams.get('company_id') ?? undefined;
     return Response.json(await listRows(table, companyId));
   } catch (error) {
     console.error(`GET /api/local/${table} failed:`, error);
@@ -32,6 +42,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ tab
   }
   try {
     const body = await request.json();
+
+    // Resolved and access-checked once, then FORCED onto whatever gets written below — never
+    // just "checked and trusted." A client-supplied company_id that happens to pass the check
+    // is fine to use; one that's absent falls back to the active company; either way, the value
+    // actually written is always this verified one, not whatever shape the request body took.
+    let verifiedCompanyId: string | undefined;
+    if (isCompanyScoped(table)) {
+      const claimed = typeof body?.company_id === 'string' && body.company_id ? body.company_id : undefined;
+      const companyId = claimed ?? (await getActiveCompanyId());
+      if (!companyId) return Response.json({ error: 'company_id is required.' }, { status: 400 });
+      const access = await checkCompanyAccess(companyId);
+      if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
+      verifiedCompanyId = companyId;
+    }
+
     if (new URL(request.url).searchParams.get('bulk') === '1') {
       // Keep bulk writes deliberately narrow: this is the inventory importer, not a generic
       // mass-write escape hatch for every ERP table.
@@ -45,10 +70,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ tab
       if (rows.length > 1_000) {
         return Response.json({ error: 'Import up to 1,000 parts at a time.' }, { status: 413 });
       }
-      const created = await insertRows('products', rows as Record<string, unknown>[]);
+      const scopedRows = (rows as Record<string, unknown>[]).map((row) => ({ ...row, company_id: verifiedCompanyId }));
+      const created = await insertRows('products', scopedRows);
       return Response.json({ imported: created.length }, { status: 201 });
     }
-    const row = await insertRow(table, body);
+
+    const row = await insertRow(table, verifiedCompanyId ? { ...body, company_id: verifiedCompanyId } : body);
     return Response.json(row, { status: 201 });
   } catch (error) {
     console.error(`POST /api/local/${table} failed:`, error);
