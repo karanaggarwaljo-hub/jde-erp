@@ -1,4 +1,5 @@
 import { dbErrorMessage, createExpense } from '@/lib/db';
+import { checkCompanyAccess } from '@/lib/auth/dal';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,13 +10,20 @@ export async function POST(request: Request) {
   if (typeof companyId !== 'string' || !companyId) {
     return Response.json({ error: 'companyId is required' }, { status: 400 });
   }
+  const access = await checkCompanyAccess(companyId);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
+
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return Response.json({ error: 'amount must be a positive number' }, { status: 400 });
+  }
 
   try {
     const expense = await createExpense({
       companyId,
       category: String(category ?? ''),
       description: String(description ?? ''),
-      amount: Number(amount) || 0,
+      amount: numericAmount,
       date: String(date ?? ''),
       paidBy: String(paidBy ?? ''),
       mode: String(mode ?? ''),

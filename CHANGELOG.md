@@ -2,6 +2,49 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-25 — Security audit: closed a public data-exposure hole and a company data-isolation gap
+
+A full security and functional review of the app. Two things stand out — everything else here is
+smaller.
+
+**A live, unauthenticated hole in the Website Catalog switch.** Anyone on the internet — no login
+needed — could send one request directly to the database and change which company's catalogue your
+public website shows, or knock it offline. Confirmed exploitable before the fix, and fixed the same
+way: that ability now only exists for the ERP itself, not for outside visitors.
+
+**Company data wasn't actually being kept apart.** This ERP holds three companies' data in one
+place, and staff accounts are meant to only ever see their own company's — but very little of the
+app actually checked that. A logged-in salesperson, warehouse, or accountant account (any role
+below owner) could read, edit, or delete another company's products, customers, invoices, or stock
+by supplying that company's id instead of their own — or, in a few places, just by asking for a
+record by its number, with no company check at all. Right now only one person (the owner) has a
+login, so nothing has actually been exposed yet — but this needed fixing before any staff member is
+invited, not after. Every place this was found now checks the logged-in person's own company first;
+the owner can still move between all three companies, exactly as the company switcher already lets
+them do.
+
+Alongside that: deleting an invoice used to trust a number computed in the browser for how much to
+reverse off the customer's balance, rather than checking the invoice's real amount itself — fixed to
+compute it from the invoice, same principle as the sales-return fix a few days ago.
+
+**Also found and fixed, from a full read of the client-side pages:**
+
+- Recording a supplier payment had no protection against a double-click — two clicks could subtract
+  the paid amount from the payable balance twice while only one payment actually happened. Now
+  guarded, and a failure partway through is shown instead of silently leaving things half-updated.
+- Marking a purchase order "Received" had the same double-click gap, risking stock being added
+  twice for one delivery. Now guarded.
+- Deleting an inventory part showed nothing at all if the delete failed — the confirmation box just
+  sat there with no explanation. Now shows the real reason and can be retried or cancelled cleanly.
+- Cost Price, MRP, and Sale Price in Inventory could be saved as negative numbers; Expense amounts
+  could be saved as negative or zero. Both now blocked, matching every other price field in the app.
+
+**Also found, deliberately not touched yet:** four leftover test rows in one internal table
+(invoice line items pointing at invoice numbers that don't exist) — harmless, invisible to the app,
+but real cleanup worth doing at some point. And the flow for editing a sales invoice while switching
+which company you're working in mid-edit could, in an unusual sequence, apply a balance change to
+the wrong customer — flagged for a closer look rather than rushed into this pass.
+
 ## 2026-08-24 — Fixed: Google Search Console "Sitemap is HTML" error
 
 The website had no sitemap at all — the app never had that page — so when Google requested

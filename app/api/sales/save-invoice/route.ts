@@ -1,4 +1,5 @@
 import { dbErrorMessage, saveSalesInvoice } from '@/lib/db';
+import { checkCompanyAccess } from '@/lib/auth/dal';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,8 @@ export async function POST(request: Request) {
   if (typeof companyId !== 'string' || !companyId) {
     return Response.json({ error: 'companyId is required' }, { status: 400 });
   }
+  const access = await checkCompanyAccess(companyId);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
   // Only required when editing an existing invoice — a new invoice's id is generated inside the
   // database transaction itself (globally unique across every company, not something the caller
   // can safely guess), so invoiceId is ignored entirely when isEdit is false.

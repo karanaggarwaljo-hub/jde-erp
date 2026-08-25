@@ -558,15 +558,16 @@ export default function SalesPage() {
   };
 
   const confirmDeleteInvoice = async () => {
-    if (!deleteCandidate) return;
+    if (!deleteCandidate || !activeCompany) return;
     setDeleteError('');
     setDeletingInvoice(true);
     try {
       const custRow = customers.find((c) => c.name === deleteCandidate.customer);
-      const due = Number(deleteCandidate.total) - Number(deleteCandidate.paid);
       // Atomic on the database side (jde_delete_sales_invoice): restores FIFO stock for every
-      // line item and reverses the customer balance before removing the invoice itself.
-      await deleteSalesInvoice(deleteCandidate.id, custRow?.id ?? null, due);
+      // line item and reverses the customer balance before removing the invoice itself. The
+      // amount reversed is computed by the database from the invoice's own total/paid — not
+      // sent from here — so there is nothing for this call to get wrong.
+      await deleteSalesInvoice(activeCompany.id, deleteCandidate.id, custRow?.id ?? null);
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
       setFeedback(`${deleteCandidate.id} deleted — stock and customer balance reversed.`);
       setDeleteCandidate(null);

@@ -146,6 +146,8 @@ export default function InventoryPage() {
   const [suggesting, setSuggesting] = useState(false);
   const [suggestFailed, setSuggestFailed] = useState(false);
   const [savingProduct, setSavingProduct] = useState(false);
+  const [deletingProduct, setDeletingProduct] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [saveError, setSaveError] = useState('');
   // How many parts this one trip through the dialog has already saved — drives the
   // running count and the footer wording, and resets whenever the dialog is reopened.
@@ -436,10 +438,18 @@ export default function InventoryPage() {
   };
 
   const confirmDelete = async () => {
-    if (!deleteCandidate) return;
-    await remove(deleteCandidate.id);
-    setFeedback(`${deleteCandidate.part_number} removed from inventory.`);
-    setDeleteCandidate(null);
+    if (!deleteCandidate || deletingProduct) return;
+    setDeleteError('');
+    setDeletingProduct(true);
+    try {
+      await remove(deleteCandidate.id);
+      setFeedback(`${deleteCandidate.part_number} removed from inventory.`);
+      setDeleteCandidate(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : `Failed to remove ${deleteCandidate.part_number}.`);
+    } finally {
+      setDeletingProduct(false);
+    }
   };
 
   const handleFileImport = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -691,7 +701,7 @@ export default function InventoryPage() {
                       <button className="btn btn-ghost btn-sm" aria-label={`Edit ${p.name}`} onClick={() => handleEdit(p)}>
                         <Edit size={14} />
                       </button>
-                      <button className="btn btn-ghost btn-sm" aria-label={`Delete ${p.name}`} style={{ color: 'var(--color-danger)' }} onClick={() => setDeleteCandidate(p)}>
+                      <button className="btn btn-ghost btn-sm" aria-label={`Delete ${p.name}`} style={{ color: 'var(--color-danger)' }} onClick={() => { setDeleteError(''); setDeleteCandidate(p); }}>
                         <Trash2 size={14} />
                       </button>
                     </div>
@@ -847,15 +857,15 @@ export default function InventoryPage() {
                   <div className="form-grid-3">
                     <div className="form-group">
                       <label className="form-label">Cost Price (₹)</label>
-                      <input type="number" className="form-input" value={formData.cost_price} onChange={e => setFormData({ ...formData, cost_price: e.target.value })} />
+                      <input type="number" min="0" className="form-input" value={formData.cost_price} onChange={e => setFormData({ ...formData, cost_price: e.target.value })} />
                     </div>
                     <div className="form-group">
                       <label className="form-label">MRP (₹)</label>
-                      <input type="number" className="form-input" value={formData.mrp} onChange={e => setFormData({ ...formData, mrp: e.target.value })} />
+                      <input type="number" min="0" className="form-input" value={formData.mrp} onChange={e => setFormData({ ...formData, mrp: e.target.value })} />
                     </div>
                     <div className="form-group">
                       <label className="form-label">Sale Price (₹) *</label>
-                      <input type="number" className="form-input" required value={formData.sale_price} onChange={e => setFormData({ ...formData, sale_price: e.target.value })} />
+                      <input type="number" min="0" className="form-input" required value={formData.sale_price} onChange={e => setFormData({ ...formData, sale_price: e.target.value })} />
                     </div>
                   </div>
                 </div>
@@ -992,10 +1002,11 @@ export default function InventoryPage() {
             <div className="modal-header"><h3 id="delete-part-title" className="modal-title">Delete inventory part?</h3></div>
             <div className="modal-body">
               <p>This will remove <strong>{deleteCandidate.part_number} — {deleteCandidate.name}</strong> from the current inventory list.</p>
+              {deleteError && <p className="form-error" role="alert">{deleteError}</p>}
             </div>
             <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setDeleteCandidate(null)}>Cancel</button>
-              <button className="btn btn-danger" onClick={confirmDelete}>Delete Part</button>
+              <button className="btn btn-secondary" disabled={deletingProduct} onClick={() => setDeleteCandidate(null)}>Cancel</button>
+              <button className="btn btn-danger" disabled={deletingProduct} onClick={confirmDelete}>{deletingProduct ? 'Deleting…' : 'Delete Part'}</button>
             </div>
           </div>
         </div>

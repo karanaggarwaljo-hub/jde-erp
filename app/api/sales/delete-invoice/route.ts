@@ -1,17 +1,23 @@
 import { dbErrorMessage, isBusinessRuleError, deleteSalesInvoice } from '@/lib/db';
+import { checkCompanyAccess } from '@/lib/auth/dal';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { invoiceId, customerId, outstanding } = body ?? {};
+  const { companyId, invoiceId, customerId } = body ?? {};
 
+  if (typeof companyId !== 'string' || !companyId) {
+    return Response.json({ error: 'companyId is required' }, { status: 400 });
+  }
+  const access = await checkCompanyAccess(companyId);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
   if (typeof invoiceId !== 'string' || !invoiceId) {
     return Response.json({ error: 'invoiceId is required' }, { status: 400 });
   }
 
   try {
-    await deleteSalesInvoice(invoiceId, customerId ?? null, Number(outstanding) || 0);
+    await deleteSalesInvoice(companyId, invoiceId, customerId ?? null);
     return Response.json({ ok: true });
   } catch (error) {
     console.error('POST /api/sales/delete-invoice failed:', error);

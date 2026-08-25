@@ -1,4 +1,5 @@
 import { dbErrorMessage, isBusinessRuleError, receiveCustomerPayment, deleteCustomerPayment, type PaymentAllocationInput } from '@/lib/db';
+import { checkCompanyAccess } from '@/lib/auth/dal';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,8 @@ export async function POST(request: Request) {
   const { companyId, customerId, date, amount, note, allocations } = body ?? {};
 
   if (typeof companyId !== 'string' || !companyId) return Response.json({ error: 'companyId is required' }, { status: 400 });
+  const access = await checkCompanyAccess(companyId);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
   if (typeof customerId !== 'string' || !customerId) return Response.json({ error: 'Choose a customer.' }, { status: 400 });
   if (typeof date !== 'string' || !date) return Response.json({ error: 'A payment date is required.' }, { status: 400 });
   if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
@@ -60,6 +63,8 @@ export async function DELETE(request: Request) {
   const paymentId = typeof body?.paymentId === 'string' ? body.paymentId : '';
 
   if (!companyId || !paymentId) return Response.json({ error: 'companyId and paymentId are required.' }, { status: 400 });
+  const access = await checkCompanyAccess(companyId);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
 
   try {
     await deleteCustomerPayment(companyId, paymentId);

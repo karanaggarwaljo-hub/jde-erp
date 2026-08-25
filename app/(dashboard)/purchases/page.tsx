@@ -172,6 +172,10 @@ export default function PurchasesPage() {
   const [feedback, setFeedback] = useState('');
   const [purchaseError, setPurchaseError] = useState('');
   const [savingPurchase, setSavingPurchase] = useState(false);
+  // Which PO's "Mark Received" is currently in flight — guards against a double-click opening
+  // two FIFO stock batches for the same purchase order. Only the clicked order's own button
+  // needs to disable, so this is one id rather than a page-wide saving flag.
+  const [receivingPoId, setReceivingPoId] = useState<string | null>(null);
   const [supplierName, setSupplierName] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(todayIso());
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('unpaid');
@@ -425,9 +429,10 @@ export default function PurchasesPage() {
 
   const markReceived = async (poId: string) => {
     const order = purchaseOrders.find((po) => po.id === poId);
-    if (!order || !activeCompany) return;
+    if (!order || !activeCompany || receivingPoId) return;
     setFeedback('');
     setImportError('');
+    setReceivingPoId(poId);
     try {
       // This is a pre-existing pending order created before per-purchase stock tracking existed —
       // its amount is presumed already reflected in the supplier's balance, so only stock catches
@@ -447,6 +452,8 @@ export default function PurchasesPage() {
       setFeedback(`${poId} marked received and added to stock.`);
     } catch (error) {
       setImportError(error instanceof Error ? error.message : `Failed to mark ${poId} received.`);
+    } finally {
+      setReceivingPoId(null);
     }
   };
 
@@ -866,7 +873,7 @@ export default function PurchasesPage() {
                 </span>
               </td>
               <td className="text-center">{po.status !== 'received'
-                ? <button className="btn btn-secondary btn-sm" onClick={() => markReceived(po.id)}><PackageCheck size={14} /> Mark Received</button>
+                ? <button className="btn btn-secondary btn-sm" disabled={receivingPoId === po.id} onClick={() => markReceived(po.id)}><PackageCheck size={14} /> {receivingPoId === po.id ? 'Marking…' : 'Mark Received'}</button>
                 : <button className="btn btn-secondary btn-sm" onClick={() => openReturnModal(po)} title="Return some or all received items to this supplier"><Undo2 size={14} /> Return Items</button>}</td>
             </tr>;
           })}

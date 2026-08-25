@@ -1,6 +1,6 @@
 import { dbErrorMessage, isBusinessRuleError, receivePurchaseStock } from '@/lib/db';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
-import { getCurrentUser } from '@/lib/auth/dal';
+import { getCurrentUser, checkCompanyAccess } from '@/lib/auth/dal';
 
 export const dynamic = 'force-dynamic';
 
@@ -110,6 +110,8 @@ export async function POST(request: Request) {
   if (!Array.isArray(items)) {
     return Response.json({ error: 'items must be an array' }, { status: 400 });
   }
+  const access = await checkCompanyAccess(companyId);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
 
   try {
     const po = await receivePurchaseStock({
