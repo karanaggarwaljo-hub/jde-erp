@@ -1,3 +1,4 @@
+import { planAiRun, recordAiRun, replayMeta } from '@/lib/ai/cache';
 import { buildReorderDigest } from '@/lib/ai/digest';
 import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 
@@ -51,7 +52,18 @@ const SYSTEM_PROMPT =
   '— do not invent a sales trend or a specific days-until-stockout figure you cannot derive from the digest. ' +
   'Prioritize products at or below their minimum stock. Currency is INR (₹).';
 
-export async function GET() {
+const FEATURE = 'forecast';
+
+export async function GET(request: Request) {
+  const force = new URL(request.url).searchParams.get('refresh') === '1';
+  const plan = await planAiRun(FEATURE, '', { force });
+
+  // Replay costs nothing and skips building the digest entirely — on most page loads this route
+  // now touches neither an AI provider nor the products table.
+  if (!plan.shouldGenerate && plan.cached) {
+    return Response.json({ forecast: plan.cached.payload, cache: replayMeta(plan.cached) });
+  }
+
   try {
     const digest = await buildReorderDigest();
     const { data, provider } = await generateJson({
@@ -61,9 +73,15 @@ export async function GET() {
       schemaName: 'reorder_forecast',
     });
 
-    return Response.json({ forecast: data, digest, provider });
+    const cache = await recordAiRun(plan, FEATURE, '', data);
+    return Response.json({ forecast: data, digest, provider, cache });
   } catch (error) {
     console.error('ai-forecast route failed:', error);
+    // An outage should not blank out an answer we already have. Show the stored one and say
+    // plainly that refreshing it failed, rather than replacing it with a red error.
+    if (plan.cached) {
+      return Response.json({ forecast: plan.cached.payload, cache: { ...replayMeta(plan.cached), refresh_failed: true } });
+    }
     return aiErrorResponse(error, 'Unknown error generating forecast.');
   }
 }

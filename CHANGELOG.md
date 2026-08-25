@@ -2,6 +2,47 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-26 — AI features now run twice a day instead of every time you open a page
+
+Requested: the big AI results should be produced twice a day, not more.
+
+Until now, every one of them regenerated from scratch each time you looked at it. Opening the
+dashboard generated Business Insights and the Stock Reorder Recommendation again. Opening Reports
+and clicking through the five tabs generated five separate summaries. Going back to a tab you had
+already looked at generated it a sixth time. None of that produced anything new — it was the same
+question about the same figures — but each one spent part of a small daily free allowance, so by
+the time you actually wanted an answer, it could already be used up.
+
+**Each AI panel now gets 2 real runs a day, per company.** Everything else shows the saved result,
+instantly and at no cost. The report summaries count separately per report tab, because the P&L and
+the GST summary are genuinely different questions.
+
+How it behaves day to day:
+
+- **Opening a page never uses up a run.** It shows the last saved answer. A new one is produced
+  automatically only if nothing has been saved yet, or the saved one is more than 12 hours old —
+  which naturally spaces the two runs across morning and evening.
+- **The Refresh button still works and is still yours to press.** It deliberately spends one of the
+  two. Once both are used, it tells you plainly that the next update is available tomorrow, instead
+  of appearing to do nothing.
+- **Every panel now shows when its answer was actually produced** ("Generated 9:04 AM", or
+  "Generated yesterday, 7:30 PM"). Previously the time shown was simply whenever your browser had
+  loaded the page, which was harmless when everything regenerated constantly and would have become
+  untrue the moment results were saved.
+- **A failed attempt costs you nothing.** The count only goes up when an answer is actually
+  produced. And if the AI can't be reached, you now keep seeing your last good result with a short
+  note saying it couldn't be refreshed — rather than the whole panel turning into a red error.
+- **A saved report summary is never shown next to figures it wasn't written about.** Each summary
+  remembers the numbers it described; if those have since changed, you are told so instead of being
+  shown wording that no longer matches what's on screen.
+
+Everything is stored per company, so the three companies never share results or allowances.
+
+Checked against the real database with a new one-command test (`npx tsx scripts/ai-cache-check.ts`)
+covering all of the above — including that a forced refresh genuinely cannot exceed the daily limit,
+that the allowance resets on the next Indian calendar day rather than at UTC midnight, and that one
+company's results are invisible to another. All 22 checks pass.
+
 ## 2026-08-26 — Fixed (properly): the AI Stock Reorder Recommendation was sending your whole catalogue
 
 The earlier fix today got the message honest and the model pinned, but the feature still failed —
