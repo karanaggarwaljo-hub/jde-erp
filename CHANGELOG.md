@@ -2,6 +2,44 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-26 — Fixed: Dashboard and Inventory showed two different stock values
+
+Reported: Inventory said your stock was worth ₹8,77,964 and the Dashboard said ₹9,05,934 — same
+242 parts, same moment, two different answers.
+
+Both were right about the quantity and disagreed about the price. Inventory valued each part at
+what its oldest unsold purchase batch actually cost; the Dashboard multiplied by the Cost Price
+field typed into the part's record. They only match while those two agree — and on your data, two
+parts had drifted far enough to put ₹27,970 between the same figure on two screens.
+
+**Digging into which two, though, turned up something worth knowing.** Both of them —
+`JCB-H49` (jcb hydraulic oil 20l, 3 in stock) and `SER-E37` (servo engine oil 5l, 8 in stock) —
+have a purchase batch recorded at **₹0**, both entered on 30 July. So Inventory wasn't being more
+accurate; it was treating ₹27,970 of oil sitting on your shelf as worth nothing. A zero there does
+not mean the stock was free — it means nobody recorded what it cost when it was entered.
+
+So the fix is two things:
+
+1. **One shared definition of what stock is worth**, used by both screens, so they can never drift
+   apart again. It values each part at its oldest unsold purchase batch, which is the real recorded
+   purchase history, and falls back to the Cost Price field when there is no usable batch.
+2. **A batch recorded at ₹0 now counts as "price not recorded", not as "free".** Those parts fall
+   back to their Cost Price instead of being valued at nothing.
+
+Both screens now show **₹9,05,436**. That is ₹498 below the Dashboard's old figure, and that ₹498
+is correct: one part was genuinely bought at a different price than the Cost Price typed into its
+record, and the real purchase price is the one that counts.
+
+**Worth doing yourself:** those two oil entries still have no recorded purchase cost. Open each in
+Inventory, edit it, and re-enter the Cost Price — that writes the correct cost back onto the
+purchase batch, not just the part record.
+
+**Also fixed on the Dashboard:** every rupee figure was grouped the international way (905,934)
+rather than the Indian way (9,05,436) used everywhere else in the app. That was because the code
+never said which country's formatting to use, so it followed the browser. All eleven money figures
+on that screen — the KPI tiles, the attention items, the activity timeline and the chart tooltips —
+now group like the rest of the app.
+
 ## 2026-08-26 — AI features now run twice a day instead of every time you open a page
 
 Requested: the big AI results should be produced twice a day, not more.
