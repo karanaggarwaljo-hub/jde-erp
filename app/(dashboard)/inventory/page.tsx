@@ -25,6 +25,7 @@ import { useCompany } from '@/components/CompanyProvider';
 import { parseInventoryFile } from '@/lib/client-import';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { fifoCostLookup } from '@/lib/stock-value';
 
 type Product = {
   id: string;
@@ -124,15 +125,9 @@ export default function InventoryPage() {
   // Cost price shown per product = the oldest FIFO batch that still has stock left (i.e. what the
   // next sale will actually cost), falling back to the static cost_price field when a product has
   // no batches at all (e.g. it's never been purchased through the FIFO-tracked flow).
-  const oldestOpenLayerByProduct = new Map<string, StockLayer>();
-  for (const layer of stockLayers) {
-    if (Number(layer.qty_remaining) <= 0) continue;
-    const current = oldestOpenLayerByProduct.get(layer.product_id);
-    if (!current || new Date(layer.created_at).getTime() < new Date(current.created_at).getTime()) {
-      oldestOpenLayerByProduct.set(layer.product_id, layer);
-    }
-  }
-  const fifoCostFor = (product: Product) => Number(oldestOpenLayerByProduct.get(product.id)?.unit_cost ?? product.cost_price);
+  // Shared with the Dashboard's Inventory Value KPI — the two used to compute this separately and
+  // disagreed by ₹27,970 on real data. See lib/stock-value.ts.
+  const fifoCostFor = fifoCostLookup(stockLayers);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [stockFilter, setStockFilter] = useState<StockFilter>('all');
