@@ -245,7 +245,14 @@ npx tsx scripts/stock-integrity-check.ts
 
 ### Backups
 
-A JSON snapshot of every table is saved to `data/backups/` once per day automatically while the app is running (and on-demand from Settings → Data Backups). Snapshots older than 7 days are pruned automatically. This is a local safety net in addition to whatever backup/PITR your Supabase plan provides — it never touches your live data.
+A JSON snapshot of every table is saved to the private `jde-backups` Supabase Storage bucket once per day (and on-demand from Settings → Data Backups, where each snapshot can also be downloaded). Snapshots older than 7 days are pruned automatically. This is a secondary safety net in addition to whatever backup/PITR your Supabase plan provides — it never touches your live data.
+
+The daily run is triggered by **Vercel Cron**, configured in `vercel.json`, which calls `/api/cron/backup` once a day. That route is unauthenticated at the session layer (a cron request has no browser session), so it requires a `CRON_SECRET` bearer token instead:
+
+- Set `CRON_SECRET` to any long random string in the Vercel project's Environment Variables, then redeploy. Vercel automatically sends it as `Authorization: Bearer <CRON_SECRET>` on every cron invocation.
+- If `CRON_SECRET` is unset the route refuses everyone, including the cron — it fails closed rather than leaving a full database read open.
+
+Running outside Vercel (local `npm run dev`, or a self-hosted server) means no cron trigger: use **Backup Now** in Settings → Data Backups, or call `/api/cron/backup` from any scheduler with the same bearer header.
 
 ## License & Ownership
 

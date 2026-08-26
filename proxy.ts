@@ -17,7 +17,11 @@ export const config = {
 // hitting either gets redirected to /login like any other page — which is what actually produced
 // Search Console's "Sitemap is HTML" error, not merely the routes being absent before app/sitemap.ts
 // and app/robots.ts existed.
-const PUBLIC_EXACT = new Set(['/login', '/forgot-password', '/auth/callback', '/api/auth/login', '/api/auth/logout', '/api/auth/forgot-password', '/api/catalog-rfq', '/api/catalog-event', '/api/public/catalog', '/sitemap.xml', '/robots.txt']);
+// /api/cron/backup is here because a Vercel Cron request carries no session cookie — there is no
+// browser and no logged-in person behind it, so the gate below would always reject it. It is not
+// actually open: the route itself requires a Bearer CRON_SECRET and refuses everyone when that
+// secret is unset. Anything else added to this list must carry its own check the same way.
+const PUBLIC_EXACT = new Set(['/login', '/forgot-password', '/auth/callback', '/api/auth/login', '/api/auth/logout', '/api/auth/forgot-password', '/api/catalog-rfq', '/api/catalog-event', '/api/public/catalog', '/api/cron/backup', '/sitemap.xml', '/robots.txt']);
 const PUBLIC_PREFIXES = ['/catalog'];
 
 
@@ -35,10 +39,14 @@ function matchesAny(pathname: string, exact: Set<string>, prefixes: string[] = [
 // The one screen/actions that can delete a whole company or change other people's access.
 // /api/companies/active is deliberately excluded even though it shares the /api/companies
 // prefix — CompanyProvider calls it on mount for every dashboard page, for every role.
+//
+// /api/backup covers listing, creating and downloading snapshots. The Settings screen it is
+// reached from was already owner-only, but the routes behind it were not, so any active staff
+// login could pull a JSON copy of every company's data straight from the API.
 function isOwnerOnlyPath(pathname: string): boolean {
   if (pathname === '/api/companies/active') return false;
   if (pathname.startsWith('/api/companies/')) return true;
-  return matchesAny(pathname, new Set(), ['/settings', '/api/auth/invite', '/api/local/users', '/api/local/companies']);
+  return matchesAny(pathname, new Set(), ['/settings', '/api/auth/invite', '/api/local/users', '/api/local/companies', '/api/backup']);
 }
 
 

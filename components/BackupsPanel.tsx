@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { DatabaseBackup } from 'lucide-react';
+import { DatabaseBackup, Download } from 'lucide-react';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type Backup = { filename: string; size_bytes: number; created_at: string };
@@ -57,9 +57,9 @@ export default function BackupsPanel() {
     <div className="card">
       <div className="card-header">
         <div>
-          <h3 className="card-title">Local Data Backups</h3>
+          <h3 className="card-title">Data Backups</h3>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            A JSON snapshot of your Supabase data is saved to this computer automatically once per day while the app is running. Backups older than 7 days are deleted automatically — your live data is never touched.
+            A JSON snapshot of every table is saved to secure cloud storage automatically once a day, whether or not anyone is using the app. Backups older than 7 days are deleted automatically — your live data is never touched. Use Download to keep your own copy.
           </p>
         </div>
         <button className="btn btn-primary btn-sm" onClick={backupNow} disabled={creating}>
@@ -80,17 +80,28 @@ export default function BackupsPanel() {
       ) : (
         <div className="table-wrap">
           <table className="erp-table">
-            <thead><tr><th>Backup File</th><th>Created</th><th className="text-right">Size</th></tr></thead>
+            <thead><tr><th>Backup File</th><th>Created</th><th className="text-right">Size</th><th className="text-right">Download</th></tr></thead>
             <tbody>
               {backups.map((backup) => (
                 <tr key={backup.filename}>
                   <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{backup.filename}</td>
                   <td className="text-muted">{new Date(backup.created_at).toLocaleString()}</td>
                   <td className="text-right">{formatSize(backup.size_bytes)}</td>
+                  <td className="text-right">
+                    {/* Plain link, not a fetch: the route answers with a redirect to a one-minute
+                        signed URL that carries its own attachment header, so the browser saves
+                        the file without ever navigating away from Settings. */}
+                    <a
+                      className="btn btn-secondary btn-sm"
+                      href={`/api/backup/download/${encodeURIComponent(backup.filename)}`}
+                    >
+                      <Download size={14} /> Download
+                    </a>
+                  </td>
                 </tr>
               ))}
               {backups.length === 0 && (
-                <tr><td colSpan={3}><div className="empty-state"><DatabaseBackup size={24} /><p className="empty-state-title">No backups yet</p><p className="empty-state-desc">One will be created automatically today, or click &quot;Backup Now&quot;.</p></div></td></tr>
+                <tr><td colSpan={4}><div className="empty-state"><DatabaseBackup size={24} /><p className="empty-state-title">No backups yet</p><p className="empty-state-desc">One will be created automatically tonight, or click &quot;Backup Now&quot;.</p></div></td></tr>
               )}
             </tbody>
           </table>
