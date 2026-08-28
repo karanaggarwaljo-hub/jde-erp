@@ -8,6 +8,7 @@ An ERP web app for an auto spare parts trading business: inventory, sales, purch
 - **Database**: Supabase (managed Postgres). All data access happens server-side through Next.js API routes using a service-role key — the browser never talks to Supabase directly.
 - **Auth**: Supabase Auth (email/password, via `@supabase/ssr`) gates the whole app in `proxy.ts`. A valid login isn't enough on its own — it must also match an active row in `jde_users` (role: owner/manager/salesman/accountant/warehouse), which is how staff are actually granted access. See "Authentication" below.
 - **AI**: Google Gemini (`@google/genai`) powers the Business Insights and Stock Reorder Forecast features on `/analytics`. These degrade gracefully (a plain error message, not a crash) if no API key is configured or the free-tier quota is exhausted.
+- **Adaptive-platform integration**: a bearer-authenticated, company-allowlisted, read-only API projects audited inventory and purchasing data without exposing the ERP's generic table routes. See [docs/adaptive-platform-integration.md](docs/adaptive-platform-integration.md).
 
 ## Modules
 
@@ -71,6 +72,8 @@ Every page and API route requires a real, signed-in staff account — enforced c
    - `NEXT_PUBLIC_SUPABASE_URL` — your Supabase project URL.
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — from Supabase dashboard → Project Settings → API → the `anon public` (or newer `publishable`) key. Safe to expose to the browser — it's what your own sign-in page uses.
    - `SUPABASE_SERVICE_ROLE_KEY` — from Supabase dashboard → Project Settings → API → `service_role` secret. **Never commit this or expose it to the browser.**
+   - `SUPABASE_SECRET_KEY` — preferred newer replacement for `SUPABASE_SERVICE_ROLE_KEY` when available; it is also server-only.
+   - `ERP_INTEGRATION_TOKEN` and `ERP_INTEGRATION_ALLOWED_COMPANY_IDS` — required only when connecting the Adaptive Skill Platform. Keep the token server-side and explicitly list the company IDs it may read.
    - `GEMINI_API_KEY` — optional, only needed for the AI features. Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
    - `GROQ_API_KEY` — optional but recommended. The backup AI provider: when Gemini is rate-limited or overloaded, the AI features automatically retry on Groq instead of failing. Free, no card, from [console.groq.com](https://console.groq.com) → API Keys. See "AI provider fallback" below.
 

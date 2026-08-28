@@ -26,6 +26,12 @@ const PUBLIC_PREFIXES = ['/catalog'];
 const SESSION_ONLY_EXACT = new Set(['/accept-invite', '/api/auth/accept-invite']);
 
 
+// Machine-to-machine endpoints authenticate themselves with a dedicated, company-scoped bearer
+// token inside their Route Handlers. They must bypass the browser's Supabase-cookie gate, but are
+// not public: a missing/invalid integration token is rejected before any database read occurs.
+const SERVICE_AUTH_PREFIXES = ['/api/integration/v1'];
+
+
 function matchesAny(pathname: string, exact: Set<string>, prefixes: string[] = []): boolean {
   if (exact.has(pathname)) return true;
   return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -48,6 +54,11 @@ export async function proxy(request: NextRequest) {
 
   if (matchesAny(pathname, PUBLIC_EXACT, PUBLIC_PREFIXES)) {
     return NextResponse.next();
+  }
+
+
+  if (matchesAny(pathname, new Set(), SERVICE_AUTH_PREFIXES)) {
+    return NextResponse.next({ request });
   }
 
 
