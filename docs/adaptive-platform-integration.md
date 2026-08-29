@@ -29,7 +29,6 @@ Set these as server-side deployment secrets or environment values; never commit 
 
 ```text
 ERP_INTEGRATION_TOKEN=<at-least-32-random-characters>
-ERP_INTEGRATION_ALLOWED_COMPANY_IDS=<comma-separated-jde_companies-ids>
 ERP_INTEGRATION_WAREHOUSE_ID=default
 ERP_INTEGRATION_UNIT_OF_MEASURE=EA
 ```
@@ -41,9 +40,12 @@ switched to the new token. Generate a token with Node.js, for example:
 node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
 ```
 
-The same current token is configured as `ERP_ADAPTER_TOKEN` in the Adaptive Skill Platform. The
-allowed-company list is mandatory: a valid token still receives `403` for any company outside that
-list. Missing/short secrets or a missing allowlist disable the API with `503`.
+The same current token is configured as `ERP_ADAPTER_TOKEN` in the Adaptive Skill Platform.
+`jde_companies` is the live company registry: after the ERP successfully creates a company, its ID
+can be used by the platform immediately without changing an environment variable or redeploying.
+Every inventory and purchasing query still matches that company ID together with the requested
+product ID, so records from different companies cannot be mixed. Missing or short secrets disable
+the API with `503`.
 
 ## Data projection
 
@@ -67,6 +69,9 @@ instead of sending a value that may be wrong.
 
 - The ERP currently has no warehouse table. All stock is exposed through the one configured
   virtual warehouse ID; callers cannot invent a second warehouse.
+- The integration token is intentionally deployment-wide. Protect and rotate it as a server-only
+  secret; tenant isolation is enforced by the authenticated platform principal and the ERP's
+  company-scoped database queries.
 - The ERP currently has no separate reservation quantity. Draft invoices already reduce
   `current_stock`, so reserved remains zero and available equals audited on-hand stock.
 - Historical manual stock decreases were not stored as standalone event rows by the existing ERP.
