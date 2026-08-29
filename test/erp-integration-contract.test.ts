@@ -12,7 +12,6 @@ import { mapPurchaseOrderStatus } from '../lib/integration/erp-read-service';
 const token = 'integration-test-token-with-more-than-32-characters';
 const environment: ErpIntegrationEnvironment = {
   ERP_INTEGRATION_TOKEN: token,
-  ERP_INTEGRATION_ALLOWED_COMPANY_IDS: 'company-1,company-2',
   ERP_INTEGRATION_WAREHOUSE_ID: 'default',
   ERP_INTEGRATION_UNIT_OF_MEASURE: 'EA',
 };
@@ -48,22 +47,19 @@ test('rejects an invalid bearer token without exposing configuration', () => {
   );
 });
 
-test('fails closed when token or company allowlist configuration is incomplete', () => {
+test('fails closed when token configuration is incomplete', () => {
   assert.throws(
     () => parseErpIntegrationRequest(request(), { ...environment, ERP_INTEGRATION_TOKEN: 'short' }),
     (error: unknown) => error instanceof ErpIntegrationError && error.status === 503,
   );
-  assert.throws(
-    () => parseErpIntegrationRequest(request(), { ...environment, ERP_INTEGRATION_ALLOWED_COMPANY_IDS: '' }),
-    (error: unknown) => error instanceof ErpIntegrationError && error.status === 503,
-  );
 });
 
-test('rejects companies outside the credential allowlist and unsupported warehouses', () => {
-  assert.throws(
-    () => parseErpIntegrationRequest(request({ company: 'company-3' }), environment),
-    (error: unknown) => error instanceof ErpIntegrationError && error.status === 403,
-  );
+test('accepts newly created company identifiers without deployment configuration changes', () => {
+  const parsed = parseErpIntegrationRequest(request({ company: 'company-created-after-deploy' }), environment);
+  assert.equal(parsed.organizationId, 'company-created-after-deploy');
+});
+
+test('rejects unsupported warehouses', () => {
   assert.throws(
     () => parseErpIntegrationRequest(request({ warehouse: 'warehouse-2' }), environment),
     (error: unknown) => error instanceof ErpIntegrationError && error.status === 400,

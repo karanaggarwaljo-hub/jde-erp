@@ -29,7 +29,9 @@ export class ErpIntegrationError extends Error {
 /**
  * Authenticates one server-to-server request and parses the common, bounded query contract.
  * Configuration failures are deliberately different from caller failures so a deployment with
- * no secret or no tenant allowlist never falls back to accepting every request.
+ * no secret never falls back to accepting unauthenticated requests. Company isolation happens in
+ * every read query by matching both organizationId and productId. Because the company registry is
+ * not copied into deployment configuration, a new jde_companies row is usable immediately.
  */
 export function parseErpIntegrationRequest(
   request: Request,
@@ -46,11 +48,6 @@ export function parseErpIntegrationRequest(
   const authenticated = bearer !== undefined && configuredTokens.some((token) => constantTimeEqual(bearer, token));
   if (!authenticated) throw new ErpIntegrationError(401, 'Authentication required.');
 
-  const allowedCompanyIds = commaSeparated(environment.ERP_INTEGRATION_ALLOWED_COMPANY_IDS);
-  if (allowedCompanyIds.length === 0 || allowedCompanyIds.some((value) => !IDENTIFIER.test(value))) {
-    throw new ErpIntegrationError(503, 'ERP integration company access is not configured.');
-  }
-
   const configuredWarehouseId = environment.ERP_INTEGRATION_WAREHOUSE_ID?.trim() || 'default';
   const unitOfMeasure = environment.ERP_INTEGRATION_UNIT_OF_MEASURE?.trim() || 'EA';
   if (!IDENTIFIER.test(configuredWarehouseId) || !/^[A-Za-z0-9._/-]{1,32}$/u.test(unitOfMeasure)) {
@@ -64,9 +61,6 @@ export function parseErpIntegrationRequest(
   const correlationId = request.headers.get('x-correlation-id') ?? '';
   if (!IDENTIFIER.test(correlationId)) {
     throw new ErpIntegrationError(400, 'X-Correlation-ID is required and must be a valid identifier.');
-  }
-  if (!allowedCompanyIds.includes(organizationId)) {
-    throw new ErpIntegrationError(403, 'This credential cannot access the requested company.');
   }
   if (warehouseId !== configuredWarehouseId) {
     throw new ErpIntegrationError(400, `This ERP exposes inventory through warehouse ${configuredWarehouseId}.`);
@@ -127,10 +121,6 @@ function requiredDate(parameters: URLSearchParams, name: string): Date {
     throw new ErpIntegrationError(400, `${name} must be an ISO-8601 timestamp.`);
   }
   return parsed;
-}
-
-function commaSeparated(value: string | undefined): string[] {
-  return [...new Set((value ?? '').split(',').map((item) => item.trim()).filter(Boolean))];
 }
 
 function constantTimeEqual(actual: string, expected: string): boolean {
