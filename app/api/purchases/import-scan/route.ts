@@ -3,6 +3,10 @@ import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 import { AiUnavailableError } from '@/lib/ai/errors';
 
 export const dynamic = 'force-dynamic';
+// Reading a document is the slowest AI call in the app — the layer allows a provider 45s for an
+// attachment before failing over. Without this the platform's own default could cut the function
+// off first, turning a slow-but-working scan into an unexplained failure.
+export const maxDuration = 60;
 
 const NULLABLE_STRING = { anyOf: [{ type: 'string' }, { type: 'null' }] };
 

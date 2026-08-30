@@ -2,6 +2,43 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-26 — Fixed: scanning a photo of a supplier invoice did nothing
+
+Reported: the details are not being read out of the picture.
+
+The photo never reached the ERP. A photo from a phone camera is usually 3-10MB, and the way it has
+to be packed up to send makes it about a third bigger again — roughly 5MB for an ordinary invoice
+photo. The hosting platform refuses any request over 4.5MB and throws it away **before** your ERP
+ever sees it. So there was nothing in the server logs to find, because nothing ever arrived. That
+4.5MB ceiling belongs to the platform and can't be raised, so the photo has to be made smaller in
+your browser before it is sent.
+
+Confirmed directly against the live site: a 1MB request gets through; a 6MB one is refused outright.
+And a realistic invoice photo measured 3.67MB, becoming 4.89MB once packed — just over the line,
+which is exactly why it failed every time rather than sometimes.
+
+**Photos are now shrunk in your browser before being sent** — down to 2200 pixels on the longest
+side. The same realistic photo drops from 4.89MB to 1.04MB, comfortably inside the limit. 2200 is
+deliberately larger than the 1600 used for catalogue product photos: part numbers and HSN codes are
+the smallest print on an invoice and are exactly what has to stay readable.
+
+The reading itself was never broken. Tested end to end against a scanned invoice, both AI services
+read it perfectly — supplier name, GSTIN, invoice date, expected delivery, and every line item with
+its part number, quantity, price and HSN code.
+
+Two related things fixed at the same time:
+
+- **PDFs can't be shrunk this way** (there is no picture to resize). A PDF over 4MB now tells you
+  so, and suggests saving it smaller or photographing the invoice instead — rather than failing
+  with nothing useful on screen.
+- **Scanning is the slowest AI job in the app**, and that page had no time limit set, so the
+  platform could cut a working scan short. It now gets the time the scan is actually allowed to
+  take.
+
+Duplicate detection is unaffected: the fingerprint that stops the same invoice being recorded twice
+is still taken from your original file, before any shrinking, so the same document is still
+recognised as the same document.
+
 ## 2026-08-26 — Fixed: Dashboard and Inventory showed two different stock values
 
 Reported: Inventory said your stock was worth ₹8,77,964 and the Dashboard said ₹9,05,934 — same

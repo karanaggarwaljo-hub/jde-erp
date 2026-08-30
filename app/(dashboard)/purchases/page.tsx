@@ -27,6 +27,7 @@ import { savePurchase, receivePurchaseStock } from '@/lib/client-purchases';
 import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-purchase-returns';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
 
 type PurchaseTab = 'purchases' | 'invoices';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
@@ -481,15 +482,39 @@ export default function PurchasesPage() {
         }
         setImportPreview({ fileName: file.name, lines: imported, supplier: guessSupplierFromText(file.name) ?? '', supplierGstin: '', fileHash: null });
       } else if (isScannableFile(file)) {
-        const base64 = await fileToBase64(file);
         // Content-based, not filename-based, so the exact same invoice can't be scanned or
         // recorded twice even under a renamed/re-saved copy — checked server-side before this
         // spends an AI call, and again (as a hard guarantee) when the purchase is actually saved.
+        // Hashed from the ORIGINAL file, before any resizing, so the identity of the document
+        // does not change just because the browser shrank the copy it uploads.
         const fileHash = await hashFile(file);
+
+        // A photo straight off a phone is 3-10MB, which becomes 4-13MB once base64-encoded into
+        // this JSON body — past the platform's ~4.5MB request ceiling. Such a request is rejected
+        // before it ever reaches the ERP, which is why this failed with nothing in the server
+        // logs to explain it. Shrinking it in the browser is the only fix available; the limit is
+        // not ours to raise. Confirmed against production: a 1MB body is accepted, a 6MB one is
+        // refused outright.
+        let base64: string;
+        let mimeType: string;
+        if (file.type === 'application/pdf') {
+          // A PDF can't be redrawn through a canvas the way an image can, so there is nothing to
+          // shrink — say so plainly instead of letting it fail with an unexplained error.
+          if (file.size > 4_000_000) {
+            throw new Error(
+              'This PDF is too large to scan (over 4MB). Save or export it at a smaller size, or take a photo of the invoice and scan that instead.'
+            );
+          }
+          base64 = await fileToBase64(file);
+          mimeType = file.type;
+        } else {
+          ({ base64, mimeType } = await resizeImageForUpload(file, { maxDimension: DOCUMENT_SCAN_DIMENSION }));
+        }
+
         const res = await fetch('/api/purchases/import-scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64, mimeType: file.type, fileHash, companyId: activeCompany?.id }),
+          body: JSON.stringify({ base64, mimeType, fileHash, companyId: activeCompany?.id }),
         });
         const data = (await parseJsonOrThrow(res, 'Failed to scan document.')) as { items?: unknown; supplier_name?: string; supplier_gstin?: string };
 
