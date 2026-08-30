@@ -132,3 +132,22 @@ export function countOutcomes(matches: CostMatch[]): CostPlanCounts {
   for (const match of matches) counts[match.outcome] += 1;
   return counts;
 }
+
+/** Does this incoming row already exist in the inventory?
+ *
+ *  Used by the "add as new parts" side of the importer to flag rows that would create a second
+ *  copy of something already stocked. Same keys and the same tolerance as the cost matcher above,
+ *  so the two halves of one dialog can never disagree about whether a part is already there. */
+export function findExistingProduct(
+  products: CostMatchProduct[],
+  candidate: { partNumber?: string; name?: string }
+): CostMatchProduct | undefined {
+  const partKey = codeKey(candidate.partNumber ?? '');
+  if (partKey) {
+    const byPart = products.find((p) => codeKey(p.part_number ?? '') === partKey);
+    if (byPart) return byPart;
+  }
+  const label = nameKey(candidate.name ?? '');
+  if (label) return products.find((p) => nameKey(p.name ?? '') === label);
+  return undefined;
+}
