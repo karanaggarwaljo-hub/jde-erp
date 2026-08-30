@@ -2,6 +2,40 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-26 — Customers are now graded Diamond / Gold / Silver, with behaviour flags
+
+The Customers page now shows a segment against each customer, so you can tell at a glance who is
+worth protecting and who is quietly costing you margin.
+
+**The grades are cut from profit, not sales value** — and those two disagree. On real data in this
+app, one customer brought in less revenue than the walk-in trade but nearly **twice the profit**.
+Ranking by sales value would have pointed you at exactly the wrong customer to look after. This
+works because every sale here is already traced back to the exact stock batch it came from, so the
+true cost of each sale is known rather than guessed.
+
+- 💎 **Diamond** — between them, the customers who earn the first half of all your profit
+- 🥇 **Gold** — the next chunk, up to 80%
+- 🥈 **Silver** — the remainder
+- **New** — not enough history to grade honestly yet
+
+Separately from the grade, any customer can carry flags, because your best customer can also be
+your worst payer — and that is exactly the combination worth seeing rather than hiding behind one
+label:
+
+- **Defaulter** — has a bill unpaid past 45 days
+- **Bargainer** — takes bigger discounts, or earns you thinner margin, than your house average
+- **Dormant** — used to buy, nothing in 90 days
+
+Every badge has a **"Why?"** link showing the actual numbers behind it — sales count, revenue,
+profit, margin, average discount, last purchase date — plus what to do about it (protect them,
+offer bundles instead of discounts, tighten credit, win them back). There is also a segment filter,
+so "show me every Bargainer" is one click when you want to send that group an offer.
+
+**Honest note on what you'll see today:** grading needs at least 2 recorded sales per customer, and
+your active company has no sales recorded yet — so everyone will read "New" until you start
+invoicing. That is deliberate. A grade invented from a single sale would send you to the wrong
+customer with the wrong offer.
+
 ## 2026-08-26 — Fixed: scanning a photo of a supplier invoice did nothing
 
 Reported: the details are not being read out of the picture.

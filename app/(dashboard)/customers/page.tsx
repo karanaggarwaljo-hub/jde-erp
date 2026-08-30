@@ -6,6 +6,17 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
 import AddCustomerModal from '@/components/AddCustomerModal';
 import ReceivePaymentModal from '@/components/ReceivePaymentModal';
+import {
+  buildCustomerInsights,
+  TIER_LABELS,
+  FLAG_LABELS,
+  TIER_ACTIONS,
+  FLAG_ACTIONS,
+  INSIGHT_RULES,
+  type CustomerInsight,
+  type CustomerTier,
+  type CustomerFlag,
+} from '@/lib/customer-insights';
 
 type Customer = {
   id: string;
@@ -19,9 +30,13 @@ type Customer = {
   balance: number;
 };
 
-type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string };
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; discount_amount: number };
+type InvoiceItem = { id: string; invoice_id: string; line_total: number };
+type StockConsumption = { invoice_item_id: string; qty: number; unit_cost: number };
 
 type LedgerFilter = 'all' | 'balance' | 'settled';
+/** Tiers and flags share one control: they answer the same question — "show me this group". */
+type SegmentFilter = 'any' | CustomerTier | CustomerFlag;
 
 const PAGE_SIZE = 12;
 
@@ -30,6 +45,15 @@ const TYPE_DOT: Record<string, string | undefined> = {
   wholesale: 'var(--chart-amber)',
   dealer: 'var(--chart-blue)',
   retail: 'var(--ink-3)',
+};
+
+// Same rule as TYPE_DOT — existing tokens only. Diamond and Gold deliberately borrow the two
+// "good" hues already used for positive numbers elsewhere, so the ranking reads without a legend.
+const TIER_DOT: Record<CustomerTier, string> = {
+  diamond: 'var(--chart-teal)',
+  gold: 'var(--chart-amber)',
+  silver: 'var(--ink-3)',
+  new: 'var(--ink-3)',
 };
 
 type CollectionQueueItem = {
@@ -42,12 +66,34 @@ type CollectionQueueItem = {
 export default function CustomersPage() {
   const { rows: customers, loading, create } = useCompanyTable<Customer>('customers');
   const { rows: invoices, loading: invoicesLoading } = useCompanyTable<Invoice>('invoices');
+  // Needed to work out what each sale actually earned: line totals against the real FIFO cost
+  // drawn for them. Without these two, the tiers could only rank revenue, which on this app's own
+  // data points at the wrong customer (see lib/customer-insights.ts).
+  const { rows: invoiceItems } = useCompanyTable<InvoiceItem>('invoice_items');
+  const { rows: stockConsumptions } = useCompanyTable<StockConsumption>('stock_consumptions');
   const [showModal, setShowModal] = useState(false);
   const [payingCustomerId, setPayingCustomerId] = useState<string | null>(null);
   const [reminderCustomer, setReminderCustomer] = useState<Customer | null>(null);
   const [feedback, setFeedback] = useState('');
   const [filter, setFilter] = useState<LedgerFilter>('all');
   const [page, setPage] = useState(1);
+  /** Which customer's tier reasoning is expanded — the numbers behind the badge, on demand. */
+  const [openInsightId, setOpenInsightId] = useState<string | null>(null);
+  const [segment, setSegment] = useState<SegmentFilter>('any');
+
+  // Recomputed from the loaded rows rather than stored: a grade that went stale against the
+  // sales it was derived from would be worse than no grade at all.
+  const insightsByCustomerId = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const rows = buildCustomerInsights({
+      customers,
+      invoices,
+      items: invoiceItems,
+      consumptions: stockConsumptions,
+      today,
+    });
+    return new Map<string, CustomerInsight>(rows.map((row) => [row.customerId, row]));
+  }, [customers, invoices, invoiceItems, stockConsumptions]);
 
   // This is intentionally a review queue, not an automatic reminder sender. As a solo owner,
   // it puts the oldest/largest receivables in one place while keeping the final message and
@@ -116,7 +162,16 @@ export default function CustomersPage() {
     setPage(1);
   };
 
-  const filtered = filter === 'balance' ? owing : filter === 'settled' ? settled : customers;
+  const byBalance = filter === 'balance' ? owing : filter === 'settled' ? settled : customers;
+  // Narrowing to one segment is the point of grading at all — it's how "send the Bargainers a
+  // bundle offer" becomes a list you can actually work from rather than a label you just read.
+  const filtered = segment === 'any'
+    ? byBalance
+    : byBalance.filter((customer) => {
+        const insight = insightsByCustomerId.get(customer.id);
+        if (!insight) return false;
+        return insight.tier === segment || insight.flags.some((flag) => flag === segment);
+      });
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const firstIndex = (currentPage - 1) * PAGE_SIZE;
@@ -231,6 +286,22 @@ export default function CustomersPage() {
                 Settled <span className="tab-count">{settled.length}</span>
               </button>
             </div>
+            <select
+              className="form-input form-select"
+              style={{ maxWidth: '190px' }}
+              aria-label="Filter by segment"
+              value={segment}
+              onChange={(event) => { setSegment(event.target.value as SegmentFilter); setPage(1); }}
+            >
+              <option value="any">All segments</option>
+              <option value="diamond">💎 {TIER_LABELS.diamond}</option>
+              <option value="gold">🥇 {TIER_LABELS.gold}</option>
+              <option value="silver">🥈 {TIER_LABELS.silver}</option>
+              <option value="new">{TIER_LABELS.new}</option>
+              <option value="defaulter">{FLAG_LABELS.defaulter}</option>
+              <option value="bargainer">{FLAG_LABELS.bargainer}</option>
+              <option value="dormant">{FLAG_LABELS.dormant}</option>
+            </select>
           </div>
         </div>
 
@@ -246,7 +317,9 @@ export default function CustomersPage() {
           <div className="empty-state">
             <div className="empty-state-title">Nothing in this view</div>
             <p className="empty-state-desc">
-              {filter === 'balance' ? 'No customer is carrying a balance right now.' : 'Every customer on file is carrying a balance.'}
+              {segment !== 'any'
+                ? `No customer is in this segment yet. Grades need at least ${INSIGHT_RULES.minOrdersToGrade} recorded sales before anyone can be placed in one.`
+                : filter === 'balance' ? 'No customer is carrying a balance right now.' : 'Every customer on file is carrying a balance.'}
             </p>
           </div>
         ) : (
@@ -256,6 +329,7 @@ export default function CustomersPage() {
                 <thead>
                   <tr>
                     <th>Customer</th>
+                    <th>Segment</th>
                     <th>Contact</th>
                     <th>GSTIN</th>
                     <th>Type</th>
@@ -269,14 +343,44 @@ export default function CustomersPage() {
                     const balance = balanceOf(customer);
                     const openInvoices = unpaidInvoiceCount.get(customer.name) ?? 0;
                     const typeKey = (customer.type || '').toLowerCase();
+                    const insight = insightsByCustomerId.get(customer.id);
+                    const insightOpen = openInsightId === customer.id;
                     return (
-                      <tr key={customer.id}>
+                      <Fragment key={customer.id}>
+                      <tr>
                         <td>
                           <div className="font-semibold">{customer.name}</div>
                           <div className="text-muted text-sm flex items-center gap-2" style={{ maxWidth: '260px', marginTop: '2px' }}>
                             <MapPin size={12} />
                             <span className="truncate">{customer.address || 'No address on file'}</span>
                           </div>
+                        </td>
+                        <td style={{ minWidth: '190px' }}>
+                          {insight ? (
+                            <>
+                              <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+                                <span className="brand-chip" style={{ '--brand-chip-color': TIER_DOT[insight.tier] } as React.CSSProperties}>
+                                  {TIER_LABELS[insight.tier]}
+                                </span>
+                                {insight.flags.map((flag) => (
+                                  <span key={flag} className={`badge ${flag === 'defaulter' ? 'badge-danger' : 'badge-warning'}`}>
+                                    {FLAG_LABELS[flag]}
+                                  </span>
+                                ))}
+                              </div>
+                              {/* The grade is only trustworthy if the reasoning behind it can be
+                                  read — so every badge can be opened to the actual figures. */}
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                style={{ padding: 0, fontSize: '11px', marginTop: '2px' }}
+                                aria-expanded={insightOpen}
+                                onClick={() => setOpenInsightId(insightOpen ? null : customer.id)}
+                              >
+                                {insightOpen ? 'Hide why' : 'Why?'}
+                              </button>
+                            </>
+                          ) : <span className="text-muted text-sm">—</span>}
                         </td>
                         <td>
                           <div className="directory-details">
@@ -318,6 +422,30 @@ export default function CustomersPage() {
                           </div>
                         </td>
                       </tr>
+                      {insightOpen && insight && (
+                        <tr>
+                          <td colSpan={8} style={{ background: 'var(--surface-2)' }}>
+                            <div style={{ padding: '4px 2px 8px' }}>
+                              <div className="flex items-center gap-4" style={{ flexWrap: 'wrap', marginBottom: '6px' }}>
+                                <span className="text-sm"><span className="text-muted">Sales:</span> <strong>{insight.orderCount}</strong></span>
+                                <span className="text-sm"><span className="text-muted">Revenue:</span> <strong>₹{Math.round(insight.revenue).toLocaleString('en-IN')}</strong></span>
+                                {/* Profit, not revenue, is what the tier is actually cut from. */}
+                                <span className="text-sm"><span className="text-muted">Profit:</span> <strong>₹{Math.round(insight.grossProfit).toLocaleString('en-IN')}</strong>{insight.marginPercent !== null && <> ({insight.marginPercent}%)</>}</span>
+                                <span className="text-sm"><span className="text-muted">Avg discount:</span> <strong>{insight.avgDiscountPercent}%</strong></span>
+                                {insight.lastPurchaseDate && <span className="text-sm"><span className="text-muted">Last bought:</span> <strong>{insight.lastPurchaseDate}</strong></span>}
+                              </div>
+                              {insight.reasons.map((reason) => (
+                                <div key={reason} className="text-muted text-sm">• {reason}</div>
+                              ))}
+                              <div className="text-sm" style={{ marginTop: '6px' }}>
+                                <strong>What to do:</strong> {TIER_ACTIONS[insight.tier]}
+                                {insight.flags.map((flag) => <span key={flag}> {FLAG_ACTIONS[flag]}</span>)}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     );
                   })}
                 </tbody>
