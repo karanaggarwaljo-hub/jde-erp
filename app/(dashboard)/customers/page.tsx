@@ -1,9 +1,10 @@
 'use client';
 
 import { Fragment, useMemo, useState } from 'react';
-import { Plus, Phone, Mail, MapPin, Sparkles, IndianRupee, Users, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Phone, Mail, MapPin, Sparkles, Tag, IndianRupee, Users, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
+import SegmentOfferModal from '@/components/SegmentOfferModal';
 import AddCustomerModal from '@/components/AddCustomerModal';
 import ReceivePaymentModal from '@/components/ReceivePaymentModal';
 import {
@@ -74,6 +75,7 @@ export default function CustomersPage() {
   const [showModal, setShowModal] = useState(false);
   const [payingCustomerId, setPayingCustomerId] = useState<string | null>(null);
   const [reminderCustomer, setReminderCustomer] = useState<Customer | null>(null);
+  const [offerCustomerId, setOfferCustomerId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState('');
   const [filter, setFilter] = useState<LedgerFilter>('all');
   const [page, setPage] = useState(1);
@@ -419,6 +421,9 @@ export default function CustomersPage() {
                           <div className="flex items-center gap-2">
                             <button className="btn btn-secondary btn-sm" disabled={!customer.balance} onClick={() => openPayment(customer)}>Received</button>
                             <button className="btn btn-ghost btn-sm" aria-label={`Draft payment reminder for ${customer.name}`} title="Draft a payment reminder" disabled={!customer.balance} onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /></button>
+                            {/* Available whatever the grade — a New customer is often exactly who
+                                you want to make an opening offer to. */}
+                            <button className="btn btn-ghost btn-sm" aria-label={`Draft an offer for ${customer.name}`} title="Draft an offer" disabled={!insight} onClick={() => setOfferCustomerId(customer.id)}><Tag size={14} /></button>
                           </div>
                         </td>
                       </tr>
@@ -500,6 +505,15 @@ export default function CustomersPage() {
           balance={reminderCustomer.balance}
           context={overdueContext(reminderCustomer.name)}
           onClose={() => setReminderCustomer(null)}
+        />
+      )}
+
+      {/* Reads the insight live rather than capturing it when the button was clicked, so the
+          grade in the dialog can never disagree with the badge in the row behind it. */}
+      {offerCustomerId && insightsByCustomerId.get(offerCustomerId) && (
+        <SegmentOfferModal
+          insight={insightsByCustomerId.get(offerCustomerId)!}
+          onClose={() => setOfferCustomerId(null)}
         />
       )}
     </div>

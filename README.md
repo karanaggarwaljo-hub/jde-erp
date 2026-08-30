@@ -294,6 +294,14 @@ npx tsx scripts/customer-insights-check.ts
 
 The live half of that script prints the real grades per company, which is the quickest way to sanity-check the rules against the actual business.
 
+**Drafting an offer** (`app/api/ai-draft-offer`, `components/SegmentOfferModal.tsx`) deliberately splits the commercial decision from the wording: the owner types the terms, the model only words them for that customer. A model inventing "15% off this week" would be writing a commitment the owner is bound to honour once it is sent — so the prompt forbids stating any percentage, price, product, quantity or deadline not present in the given terms, and a vague offer must stay vague rather than being filled out with invented specifics. The internal grade is never repeated back to the customer either; it only selects the angle. The segment guidance shown above the input comes from the hardcoded `TIER_ACTIONS`/`FLAG_ACTIONS`, not from a model, so advice on what kind of offer suits a group is stable and reviewable.
+
+```bash
+npx tsx scripts/offer-draft-check.ts
+```
+
+That one calls a real provider, so it costs a few requests and its output is not deterministic — the assertions are about what must never appear (an invented number, the tier word) rather than exact wording.
+
 ### Stock integrity
 
 `products.current_stock` is a denormalized figure — the real, audited stock is the sum of a
