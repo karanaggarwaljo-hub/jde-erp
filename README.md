@@ -265,6 +265,35 @@ produces Search Console's "Sitemap is HTML" error. Both files fall back to
 `app/api/public/catalog/route.ts`) when `NEXT_PUBLIC_SITE_URL` isn't set, so a missing env var can't
 silently produce a sitemap full of `localhost` URLs.
 
+### Customer segmentation
+
+`lib/customer-insights.ts` grades customers Diamond / Gold / Silver (or New) and attaches
+Defaulter / Bargainer / Dormant flags. Pure and dependency-free for the same reason as
+`lib/import-matching.ts` — it decides who gets an offer and whose credit gets tightened, so it is
+exercised directly by `scripts/customer-insights-check.ts` rather than only through the UI.
+
+Two design points worth keeping:
+
+- **Tiers are cut from cumulative gross profit, not revenue** (classic ABC analysis, three bands).
+  Diamond is "the customers who between them earn the first 50% of your profit" — a statement about
+  the business, rather than a rupee threshold that ages badly. Profit is real, not estimated: line
+  totals minus the actual FIFO cost drawn for them via `jde_stock_consumptions`. On this app's own
+  data revenue and profit rank customers in *opposite* orders, which is the whole justification.
+- **Tier and flags are independent.** A Diamond customer can also be a Defaulter — that combination
+  ("buys the most, pays the worst") is the single most useful thing on the screen and a single flat
+  label would hide it.
+
+Grades are recomputed from live rows on every render rather than stored, so a grade can never go
+stale against the sales it was derived from. Anything below `INSIGHT_RULES.minOrdersToGrade` sales
+returns `new` with a reason, never a guessed tier. All thresholds live in `INSIGHT_RULES` — they are
+defensible starting points, not values tuned against real trading history, which does not exist yet.
+
+```bash
+npx tsx scripts/customer-insights-check.ts
+```
+
+The live half of that script prints the real grades per company, which is the quickest way to sanity-check the rules against the actual business.
+
 ### Stock integrity
 
 `products.current_stock` is a denormalized figure — the real, audited stock is the sum of a
