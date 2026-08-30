@@ -311,3 +311,15 @@ grant execute on function public.jde_delete_sales_invoice(text, text, text) to s
 --    separate statement, since it's the same function; this section exists only to record that
 --    the status check was a distinct, later fix, not part of the original security pass.
 -- ============================================================================================
+
+-- ============================================================================================
+-- 4. Production deployment hardening, 2026-08-29.
+-- ============================================================================================
+--
+-- Supabase's advisor found the starter-template auth trigger function exposed through the Data
+-- API to anon and authenticated callers. Calling a RETURNS trigger function outside a trigger
+-- context fails, so this was not a practical write path, but it had no reason to be callable.
+-- Pinning an empty search_path is safe because the function already qualifies profiles with the
+-- public schema. The auth.users trigger continues to invoke the function normally.
+alter function public.handle_new_user() set search_path = '';
+revoke all on function public.handle_new_user() from public, anon, authenticated;
