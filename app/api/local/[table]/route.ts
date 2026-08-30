@@ -1,5 +1,11 @@
 import { dbErrorMessage, getActiveCompanyId, insertRows, isCompanyScoped, isKnownTable, listRows, insertRow } from '@/lib/db';
-import { checkCompanyAccess } from '@/lib/auth/dal';
+import { checkCompanyAccess, getCurrentUser } from '@/lib/auth/dal';
+import { createClient } from '@/lib/supabase/server';
+import { after } from 'next/server';
+import {
+  dispatchPendingCompanyEvents,
+  type CompanyEventInitiator,
+} from '@/lib/integration/adaptive-platform-company-events';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,6 +49,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ tab
   try {
     const body = await request.json();
 
+    let companyInitiator: CompanyEventInitiator | undefined;
+    if (table === 'companies') {
+      const staff = await getCurrentUser();
+      if (!staff) return Response.json({ error: 'Authentication required.' }, { status: 401 });
+      if (staff.role !== 'owner') {
+        return Response.json({ error: 'Only the owner can create a company.' }, { status: 403 });
+      }
+      const supabase = await createClient();
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError || !user) return Response.json({ error: 'Authentication required.' }, { status: 401 });
+      const issuerBase = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!issuerBase) throw new Error('NEXT_PUBLIC_SUPABASE_URL is not configured.');
+      companyInitiator = {
+        issuer: `${issuerBase.replace(/\/$/u, '')}/auth/v1`,
+        subject: user.id,
+        displayName: staff.name ?? staff.email,
+      };
+    }
+
     // Resolved and access-checked once, then FORCED onto whatever gets written below — never
     // just "checked and trusted." A client-supplied company_id that happens to pass the check
     // is fine to use; one that's absent falls back to the active company; either way, the value
@@ -76,6 +101,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ tab
     }
 
     const row = await insertRow(table, verifiedCompanyId ? { ...body, company_id: verifiedCompanyId } : body);
+    if (table === 'companies' && typeof row.id === 'string') {
+      const aggregateId = row.id;
+      const initiator = companyInitiator;
+      after(async () => {
+        try {
+          await dispatchPendingCompanyEvents({ aggregateId, ...(initiator === undefined ? {} : { initiator }) });
+        } catch (error: unknown) {
+          // The database outbox keeps this retryable; company creation itself has already committed.
+          console.error('Immediate adaptive-platform company onboarding failed:', error);
+        }
+      });
+    }
     return Response.json(row, { status: 201 });
   } catch (error) {
     console.error(`POST /api/local/${table} failed:`, error);

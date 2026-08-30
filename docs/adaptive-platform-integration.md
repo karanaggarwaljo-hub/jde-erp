@@ -31,6 +31,9 @@ Set these as server-side deployment secrets or environment values; never commit 
 ERP_INTEGRATION_TOKEN=<at-least-32-random-characters>
 ERP_INTEGRATION_WAREHOUSE_ID=default
 ERP_INTEGRATION_UNIT_OF_MEASURE=EA
+ADAPTIVE_PLATFORM_BASE_URL=https://adaptive-platform.example.com
+ERP_COMPANY_EVENT_SECRET=<same-32+-character-secret-on-both-services>
+CRON_SECRET=<random-32+-character-vercel-cron-secret>
 ```
 
 `ERP_INTEGRATION_PREVIOUS_TOKEN` is optional during rotation. Remove it after the platform has
@@ -46,6 +49,13 @@ can be used by the platform immediately without changing an environment variable
 Every inventory and purchasing query still matches that company ID together with the requested
 product ID, so records from different companies cannot be mixed. Missing or short secrets disable
 the API with `503`.
+
+Company creation also writes `jde_adaptive_platform_outbox` in the same database transaction. A
+post-response task immediately delivers the signed event to
+`POST /v1/internal/erp/company-events`; the platform idempotently creates the organization and
+initiating owner identity. Failed deliveries remain queued with exponential backoff, leases, a
+ten-attempt dead-letter state, and a daily Vercel reconciliation job. Apply
+`scripts/adaptive-platform-company-outbox.sql` once before enabling these environment values.
 
 ## Data projection
 
