@@ -147,6 +147,9 @@ export default function InventoryPage() {
   const [costSheet, setCostSheet] = useState<{ fileName: string; sheet: SheetForCostUpdate } | null>(null);
   const [costColumn, setCostColumn] = useState('');
   const [idColumn, setIdColumn] = useState('');
+  // Row numbers the owner has unticked. Storing exclusions rather than selections means a row
+  // that appears after changing a column is included by default instead of silently skipped.
+  const [excludedRows, setExcludedRows] = useState<Set<number>>(new Set());
   const [applyingCosts, setApplyingCosts] = useState(false);
   const [costProgress, setCostProgress] = useState(0);
   const [suggesting, setSuggesting] = useState(false);
@@ -471,6 +474,7 @@ export default function InventoryPage() {
       // worked out pre-selected, and the owner corrects it if the suggestion is wrong.
       setCostColumn(sheet.suggestedCostColumn ?? '');
       setIdColumn(sheet.suggestedIdColumn ?? sheet.columns[0] ?? '');
+      setExcludedRows(new Set());
       setCostSheet({ fileName: file.name, sheet });
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to read the file.');
@@ -1081,7 +1085,18 @@ export default function InventoryPage() {
         const parsed = costColumn && idColumn ? extractCostRows(sheet, costColumn, idColumn) : null;
         const matches = parsed ? planCostUpdates(parsed.rows, products) : [];
         const counts = countOutcomes(matches);
-        const pending = matches.filter((m) => m.outcome === 'update' && m.product);
+        const updatable = matches.filter((m) => m.outcome === 'update' && m.product);
+        const pending = updatable.filter((m) => !excludedRows.has(m.row.rowNumber));
+        const allTicked = updatable.length > 0 && pending.length === updatable.length;
+        const toggleRow = (rowNumber: number) =>
+          setExcludedRows((previous) => {
+            const next = new Set(previous);
+            if (next.has(rowNumber)) next.delete(rowNumber);
+            else next.add(rowNumber);
+            return next;
+          });
+        const toggleAll = () =>
+          setExcludedRows(allTicked ? new Set(updatable.map((m) => m.row.rowNumber)) : new Set());
         // Anything that will not be applied is listed first: the point of this screen is to show
         // what the file failed to do, not to bury it under a long list of successes.
         const ordered = [...matches].sort((a, b) => {
@@ -1100,7 +1115,7 @@ export default function InventoryPage() {
                 <div className="flex gap-4 flex-wrap" style={{ marginBottom: '12px' }}>
                   <div className="form-group" style={{ margin: 0, minWidth: '230px' }}>
                     <label className="form-label" htmlFor="cost-col">Which column holds the cost?</label>
-                    <select id="cost-col" className="form-select" value={costColumn} onChange={(e) => setCostColumn(e.target.value)}>
+                    <select id="cost-col" className="form-select" value={costColumn} onChange={(e) => { setCostColumn(e.target.value); setExcludedRows(new Set()); }}>
                       <option value="">— choose a column —</option>
                       {sheet.columns.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
@@ -1112,7 +1127,7 @@ export default function InventoryPage() {
                   </div>
                   <div className="form-group" style={{ margin: 0, minWidth: '230px' }}>
                     <label className="form-label" htmlFor="id-col">Which column names the part?</label>
-                    <select id="id-col" className="form-select" value={idColumn} onChange={(e) => setIdColumn(e.target.value)}>
+                    <select id="id-col" className="form-select" value={idColumn} onChange={(e) => { setIdColumn(e.target.value); setExcludedRows(new Set()); }}>
                       <option value="">— choose a column —</option>
                       {sheet.columns.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
@@ -1128,7 +1143,7 @@ export default function InventoryPage() {
                 ) : (
                   <>
                     <p style={{ fontSize: '13px', margin: '10px 0' }}>
-                      <strong>{counts.update}</strong> to update · {counts.unchanged} already correct · {counts.not_found} not found
+                      <strong>{pending.length} of {counts.update}</strong> selected to update · {counts.unchanged} already correct · {counts.not_found} not found
                       {counts.conflict > 0 && <> · <span style={{ color: 'var(--color-warning)' }}>{counts.conflict} unclear</span></>}
                       {skipped > 0 && <span style={{ color: 'var(--text-muted)' }}> · {skipped} row(s) skipped as unreadable</span>}
                     </p>
@@ -1145,11 +1160,34 @@ export default function InventoryPage() {
                     <div style={{ maxHeight: '300px', overflowY: 'auto', overflowX: 'auto' }}>
                       <table className="table">
                         <thead>
-                          <tr><th>Row</th><th>Part</th><th>Cost now</th><th>New cost</th><th>What happens</th></tr>
+                          <tr>
+                            <th style={{ width: '34px' }}>
+                              <input
+                                type="checkbox"
+                                aria-label={allTicked ? 'Clear all' : 'Select all'}
+                                checked={allTicked}
+                                disabled={updatable.length === 0}
+                                // Partly-ticked has to be set on the node; there is no attribute for it.
+                                ref={(el) => { if (el) el.indeterminate = pending.length > 0 && !allTicked; }}
+                                onChange={toggleAll}
+                              />
+                            </th>
+                            <th>Row</th><th>Part</th><th>Cost now</th><th>New cost</th><th>What happens</th>
+                          </tr>
                         </thead>
                         <tbody>
                           {ordered.map((m) => (
-                            <tr key={m.row.rowNumber}>
+                            <tr key={m.row.rowNumber} style={m.outcome === 'update' && excludedRows.has(m.row.rowNumber) ? { opacity: 0.45 } : undefined}>
+                              <td>
+                                {m.outcome === 'update' && (
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Update ${m.product?.part_number || m.product?.name || `row ${m.row.rowNumber}`}`}
+                                    checked={!excludedRows.has(m.row.rowNumber)}
+                                    onChange={() => toggleRow(m.row.rowNumber)}
+                                  />
+                                )}
+                              </td>
                               <td style={{ color: 'var(--text-muted)' }}>{m.row.rowNumber}</td>
                               <td>{m.product ? `${m.product.part_number || '—'} · ${m.product.name}` : (m.row.partNumber || m.row.name || m.row.oemNumber)}</td>
                               <td style={{ fontVariantNumeric: 'tabular-nums' }}>{m.product ? `₹${money(Number(m.product.cost_price))}` : '—'}</td>
@@ -1175,7 +1213,9 @@ export default function InventoryPage() {
                   {applyingCosts
                     ? `Updating ${costProgress} of ${pending.length}…`
                     : pending.length === 0
-                      ? 'Nothing to update'
+                      // "Nothing to update" would be wrong when there are updates and the owner
+                      // has simply unticked them all — say which of the two it is.
+                      ? (updatable.length === 0 ? 'Nothing to update' : 'Nothing selected')
                       : `Apply ${pending.length} cost update(s)`}
                 </button>
               </div>

@@ -29,6 +29,13 @@ listed first, because that is the part worth reading:
   part. Left alone rather than guessed at.
 - **Already correct** — matched, but the cost in the file is the one already stored.
 
+**And you choose which ones to apply.** Every row that would change has a tick box, all ticked to
+begin with, plus a tick-all box in the header to clear them and pick out just the few you want. The
+button counts what is actually selected ("Apply 12 cost update(s)"), unticked rows dim so you can
+see at a glance what is being left out, and nothing you haven't ticked is touched. Rows that can't
+be applied — not found, unclear, already correct — have no tick box at all, so there is never a
+box that does nothing.
+
 If most rows don't match, it now says so directly and asks whether you're on the right company —
 because the usual cause is a price list belonging to a different company, not a bad file.
 
