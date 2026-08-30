@@ -237,6 +237,8 @@ export default function SalesPage() {
   const editingDraft = Boolean(editingInvoice && editingInvoice.status === DRAFT_STATUS);
   const editingOldOutstanding = editingInvoice && !editingDraft ? Number(editingInvoice.total) - Number(editingInvoice.paid) : 0;
   const newOutstanding = total - paidAmount;
+  /** Anything left owing has to be owed by someone nameable — see the check in saveInvoice. */
+  const creditSaleNeedsCustomer = total > 0 && paidAmount < total && !selectedCustomer;
 
   // Place of supply comes from the company's own GSTIN — the first two digits are the statutory
   // state code. No GSTIN on the company means no place of supply to state, so the whole clause
@@ -591,6 +593,18 @@ export default function SalesPage() {
 
     const items = invoiceItemPayload(lines);
     const status = paidAmount >= total && total > 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
+
+    // A sale that isn't fully paid is money owed — and money owed by "Walk-in Customer" can never
+    // be chased, shows against no ledger, and lands in no customer's history. A cash sale that
+    // settles on the spot is legitimately anonymous and stays fast; credit is not.
+    // Deliberately the same flag the field hint and the save button read, so the rule can only
+    // ever be stated in one place.
+    if (creditSaleNeedsCustomer) {
+      setInvoiceError(
+        'This sale is not fully paid, so it needs a named customer — an unpaid walk-in sale cannot be chased or tracked. Pick a customer above, or use + New to add one.'
+      );
+      return;
+    }
 
     setInvoiceError('');
     setSavingInvoice(true);
@@ -1364,6 +1378,10 @@ export default function SalesPage() {
                         <span className="text-muted text-sm truncate" style={{ maxWidth: '260px' }}>{selectedCustomer.address}</span>
                       )}
                     </div>
+                  ) : creditSaleNeedsCustomer ? (
+                    // Said here, next to the field that fixes it, rather than only on save —
+                    // being told at the end that the whole form is invalid is the worse version.
+                    <span className="text-warning text-sm">Not fully paid — this sale needs a named customer before it can be saved.</span>
                   ) : (
                     <span className="text-muted text-sm">Walk-in sale — billed to the counter, no customer account.</span>
                   )}
@@ -1596,7 +1614,7 @@ export default function SalesPage() {
                   {savingDraft ? 'Parking…' : 'Save as Draft'}
                 </button>
               )}
-              <button type="submit" className="btn btn-primary" disabled={!total || savingInvoice || savingDraft}>
+              <button type="submit" className="btn btn-primary" disabled={!total || savingInvoice || savingDraft || creditSaleNeedsCustomer}>
                 {savingInvoice
                   ? 'Saving…'
                   : editingInvoice
