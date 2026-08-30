@@ -393,6 +393,12 @@ export const SCANNABLE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'i
  * Separate from parseInventoryFile on purpose. That one builds whole products to CREATE; this one
  * reads exactly two things per row — which part, and what it now costs — to UPDATE parts that
  * already exist. Nothing else in a supplier price list should be allowed to overwrite inventory.
+ *
+ * The column is CHOSEN, not guessed. A real inventory statement used here heads its cost column
+ * "unite price" — a typo no alias list will ever hold — while also carrying "ordering cost" and
+ * "holding cost", which are stock-control formula inputs that merely contain the word. Guessing
+ * wrong overwrites every price in the business, so this proposes a column and the owner confirms
+ * it against sample values before anything is written.
  * ------------------------------------------------------------------------------------------- */
 
 export type CostUpdateRow = {
@@ -406,18 +412,27 @@ export type CostUpdateRow = {
 
 export type CostUpdateParse = {
   rows: CostUpdateRow[];
-  /** The column heading the costs were read from, so the UI can state it and be corrected. */
-  costColumn: string;
   skippedNoCost: number;
   skippedNoIdentifier: number;
+};
+
+export type SheetForCostUpdate = {
+  /** Data rows keyed by header, read once so changing a column choice costs nothing. */
+  rows: Array<Record<string, unknown>>;
+  /** Headers worth offering: real, non-blank columns only. */
+  columns: string[];
+  /** Best guess at the cost column, or undefined when nothing is convincing. */
+  suggestedCostColumn?: string;
+  /** Best guess at the column naming which part each row is. */
+  suggestedIdColumn?: string;
 };
 
 /** Reads "₹1,250.50", "1250", " 1,250 " — and refuses anything else.
  *
  *  Returns null rather than 0 for junk. This matters more here than anywhere else in the file:
- *  this number is written directly over a real cost price, and a silent 0 would both destroy the
+ *  the number is written directly over a real cost price, and a silent 0 would both destroy the
  *  figure and, because a zero-cost batch counts as "price not recorded", quietly distort the
- *  stock valuation. A row we cannot read is reported and skipped, never guessed. */
+ *  stock valuation. A row that cannot be read is reported and skipped, never guessed. */
 function parseCost(raw: unknown): number | null {
   if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? raw : null;
   const text = String(raw ?? '').trim();
@@ -430,7 +445,76 @@ function parseCost(raw: unknown): number | null {
   return Number.isFinite(value) && value > 0 ? value : null;
 }
 
-export async function parseCostUpdateFile(file: File): Promise<CostUpdateParse> {
+/** Columns XLSX invents for blank spreadsheet columns, plus anything with no heading at all.
+ *  A real statement can trail a dozen of these; they are noise in a column picker. */
+function isJunkColumn(header: string): boolean {
+  return !header.trim() || /^__EMPTY(_\d+)?$/.test(header.trim());
+}
+
+/** Headings carrying a price word that are never what a part costs to buy.
+ *
+ *  "ordering cost" and "holding cost" are stock-control formula inputs — the cost of placing an
+ *  order, and of keeping one unit on the shelf for a year. Both appear on the real sheet this was
+ *  built against, and both would otherwise look like strong candidates. */
+const NOT_A_PURCHASE_COST = ['ordering cost', 'holding cost', 'carrying cost', 'shipping cost', 'freight', 'total cost'];
+
+/** Ranked candidates. Explicit purchase-cost wording first; then the generic unit-price family,
+ *  which is usually the cost on a stock-valuation sheet but is guessy enough that it stays a
+ *  suggestion the owner confirms. */
+const COST_COLUMN_RANKS: readonly (readonly string[])[] = [
+  ['cost price', 'purchase price', 'purchase rate', 'net rate', 'net price', 'buying price', 'dealer price', 'landing cost'],
+  ['unit price', 'unit rate', 'unit cost', 'rate', 'price', 'cost'],
+];
+
+/** Matches a candidate against a heading tolerantly enough to survive a typo: every word of the
+ *  candidate must appear somewhere in the heading. That is what lets "unit price" recognise
+ *  "unite price", since "unite" contains "unit". */
+function headingMatches(heading: string, candidate: string): boolean {
+  const normalized = normalizeHeader(heading);
+  if (normalized.includes(candidate)) return true;
+  return candidate.split(' ').every((word) => normalized.includes(word));
+}
+
+function suggestCostColumn(columns: string[], rows: Array<Record<string, unknown>>): string | undefined {
+  const usable = columns.filter((column) => {
+    const normalized = normalizeHeader(column);
+    if (NOT_A_PURCHASE_COST.some((bad) => normalized.includes(bad))) return false;
+    if (looksLikeDerivedColumn(column)) return false; // "inventory value" is qty x price
+    // Must actually hold readable money somewhere, so an empty column can never be suggested —
+    // which is what keeps a blank "ordering cost" from winning on its name alone.
+    return rows.some((row) => parseCost(row[column]) !== null);
+  });
+
+  for (const rank of COST_COLUMN_RANKS) {
+    const found = usable.find((column) => rank.some((candidate) => headingMatches(column, candidate)));
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function suggestIdColumn(columns: string[]): string | undefined {
+  const ordered = [...PRODUCT_KEYS.part_number, ...PRODUCT_KEYS.oem_number, ...PRODUCT_KEYS.name];
+  for (const candidate of ordered) {
+    const found = columns.find((column) => normalizeHeader(column).includes(candidate));
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/** First few readable values from a column, so the owner can confirm a choice by looking at it
+ *  rather than trusting the heading. */
+export function sampleColumnValues(sheet: SheetForCostUpdate, column: string, limit = 3): string[] {
+  const values: string[] = [];
+  for (const row of sheet.rows) {
+    const raw = String(row[column] ?? '').trim();
+    if (!raw) continue;
+    values.push(raw);
+    if (values.length >= limit) break;
+  }
+  return values;
+}
+
+export async function readSheetForCostUpdate(file: File): Promise<SheetForCostUpdate> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: 'array' });
   const firstSheetName = workbook.SheetNames[0];
@@ -440,51 +524,58 @@ export async function parseCostUpdateFile(file: File): Promise<CostUpdateParse> 
   }
 
   const rows = sheetToRowsWithDetectedHeader(sheet);
-  const sampleRow = rows[0] ?? {};
-
-  // Deliberately no guessing. parseInventoryFile may infer which numeric column is a cost when the
-  // headers are unhelpful, because the worst case there is a bad row in a brand-new part. Here the
-  // worst case is overwriting the cost of every part in the business from the wrong column, so an
-  // unrecognised heading is an error the owner resolves by renaming it.
-  const costKey = findKey(sampleRow, PRODUCT_KEYS.cost_price);
-  if (!costKey) {
-    const found = Object.keys(sampleRow).filter(Boolean).join(', ') || '(none)';
-    throw new Error(
-      `Couldn't find a cost column in this file. Name the column one of: Cost Price, Cost, Purchase Price, ` +
-        `Purchase Rate, Net Rate, Net Price, Buying Price, Dealer Price or Landing Cost. Columns found: ${found}.`
-    );
+  if (rows.length === 0) {
+    throw new Error('This sheet has no data rows under its headings.');
   }
 
-  const partKey = findKey(sampleRow, PRODUCT_KEYS.part_number);
-  const oemKey = findKey(sampleRow, PRODUCT_KEYS.oem_number);
-  const nameKey = findKey(sampleRow, PRODUCT_KEYS.name);
-  if (!partKey && !oemKey && !nameKey) {
-    throw new Error(
-      'Couldn\u2019t find a column identifying which part each cost belongs to. Add a Part Number, OEM Number or Name column.'
-    );
+  // Union of keys across all rows, not just the first — a column left blank on row 1 still exists.
+  const seen = new Set<string>();
+  for (const row of rows) for (const key of Object.keys(row)) seen.add(key);
+  const columns = [...seen].filter((column) => !isJunkColumn(column));
+  if (columns.length === 0) {
+    throw new Error('Couldn’t read any column headings from this file.');
   }
+
+  return {
+    rows,
+    columns,
+    suggestedCostColumn: suggestCostColumn(columns, rows),
+    suggestedIdColumn: suggestIdColumn(columns),
+  };
+}
+
+/** Turns the chosen columns into rows ready for matching. Both column names are the owner's
+ *  confirmed choice, so nothing here second-guesses them.
+ *
+ *  The chosen identifier is offered as a part number first; planCostUpdates falls back to OEM
+ *  number and then to name on its own, so a sheet keyed by description still matches without the
+ *  owner having to know that. */
+export function extractCostRows(sheet: SheetForCostUpdate, costColumn: string, idColumn: string): CostUpdateParse {
+  const sample = sheet.rows[0] ?? {};
+  const nameKey = findKey(sample, PRODUCT_KEYS.name);
+  const oemKey = findKey(sample, PRODUCT_KEYS.oem_number);
 
   const text = (row: Record<string, unknown>, key: string | undefined) => (key ? String(row[key] ?? '').trim() : '');
 
-  const parsed: CostUpdateRow[] = [];
+  const rows: CostUpdateRow[] = [];
   let skippedNoCost = 0;
   let skippedNoIdentifier = 0;
 
-  rows.forEach((row, index) => {
-    const partNumber = text(row, partKey);
-    const oemNumber = text(row, oemKey);
+  sheet.rows.forEach((row, index) => {
+    const chosen = text(row, idColumn);
     const name = text(row, nameKey);
-    if (!partNumber && !oemNumber && !name) {
+    const oemNumber = text(row, oemKey);
+    if (!chosen && !name && !oemNumber) {
       skippedNoIdentifier += 1;
       return;
     }
-    const cost = parseCost(row[costKey]);
+    const cost = parseCost(row[costColumn]);
     if (cost === null) {
       skippedNoCost += 1;
       return;
     }
-    parsed.push({ rowNumber: index + 1, partNumber, oemNumber, name, cost });
+    rows.push({ rowNumber: index + 1, partNumber: chosen, oemNumber, name, cost });
   });
 
-  return { rows: parsed, costColumn: costKey, skippedNoCost, skippedNoIdentifier };
+  return { rows, skippedNoCost, skippedNoIdentifier };
 }

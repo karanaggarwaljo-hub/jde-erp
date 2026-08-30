@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { useCompany } from '@/components/CompanyProvider';
-import { parseInventoryFile, parseCostUpdateFile } from '@/lib/client-import';
+import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, type SheetForCostUpdate } from '@/lib/client-import';
 import { planCostUpdates, countOutcomes, type CostMatch } from '@/lib/cost-import';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
@@ -142,9 +142,11 @@ export default function InventoryPage() {
   const [importError, setImportError] = useState('');
   // Cost-sheet import. Nothing is written until the owner has seen this plan and pressed
   // Apply — a bulk price overwrite is not something to do on a file-picker click.
-  const [costPlan, setCostPlan] = useState<
-    { fileName: string; costColumn: string; matches: CostMatch[]; skippedNoCost: number; skippedNoIdentifier: number } | null
-  >(null);
+  // The sheet is read once; which column means what stays the owner's choice, so changing it
+  // re-plans instantly without touching the file again.
+  const [costSheet, setCostSheet] = useState<{ fileName: string; sheet: SheetForCostUpdate } | null>(null);
+  const [costColumn, setCostColumn] = useState('');
+  const [idColumn, setIdColumn] = useState('');
   const [applyingCosts, setApplyingCosts] = useState(false);
   const [costProgress, setCostProgress] = useState(0);
   const [suggesting, setSuggesting] = useState(false);
@@ -464,17 +466,12 @@ export default function InventoryPage() {
     setFeedback('');
     setImporting(true);
     try {
-      const parsed = await parseCostUpdateFile(file);
-      if (parsed.rows.length === 0) {
-        throw new Error('No usable rows found — every row was missing either a cost or a way to identify the part.');
-      }
-      setCostPlan({
-        fileName: file.name,
-        costColumn: parsed.costColumn,
-        matches: planCostUpdates(parsed.rows, products),
-        skippedNoCost: parsed.skippedNoCost,
-        skippedNoIdentifier: parsed.skippedNoIdentifier,
-      });
+      const sheet = await readSheetForCostUpdate(file);
+      // An unrecognised heading is no longer a dead end: the picker opens with whatever could be
+      // worked out pre-selected, and the owner corrects it if the suggestion is wrong.
+      setCostColumn(sheet.suggestedCostColumn ?? '');
+      setIdColumn(sheet.suggestedIdColumn ?? sheet.columns[0] ?? '');
+      setCostSheet({ fileName: file.name, sheet });
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to read the file.');
     } finally {
@@ -482,9 +479,8 @@ export default function InventoryPage() {
     }
   };
 
-  const applyCostPlan = async () => {
-    if (!costPlan) return;
-    const pending = costPlan.matches.filter((m) => m.outcome === 'update' && m.product);
+  const applyCostPlan = async (pending: CostMatch[]) => {
+    if (!costSheet) return;
     setApplyingCosts(true);
     setCostProgress(0);
     setImportError('');
@@ -500,8 +496,8 @@ export default function InventoryPage() {
         setCostProgress(done);
       }
       await Promise.all([reload(), reloadStockLayers()]);
-      setFeedback(`Updated the cost price of ${done} part(s) from ${costPlan.fileName}.`);
-      setCostPlan(null);
+      setFeedback(`Updated the cost price of ${done} part(s) from ${costSheet.fileName}.`);
+      setCostSheet(null);
     } catch (err) {
       // Say exactly how far it got — a half-applied run the owner knows the shape of is
       // recoverable; a silent one is not.
@@ -1078,64 +1074,109 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {costPlan && (() => {
-        const counts = countOutcomes(costPlan.matches);
+      {costSheet && (() => {
+        const sheet = costSheet.sheet;
+        // Re-derived on every render, so changing either dropdown immediately re-plans against
+        // the same already-read sheet — no re-upload, no stale preview.
+        const parsed = costColumn && idColumn ? extractCostRows(sheet, costColumn, idColumn) : null;
+        const matches = parsed ? planCostUpdates(parsed.rows, products) : [];
+        const counts = countOutcomes(matches);
+        const pending = matches.filter((m) => m.outcome === 'update' && m.product);
         // Anything that will not be applied is listed first: the point of this screen is to show
         // what the file failed to do, not to bury it under a long list of successes.
-        const ordered = [...costPlan.matches].sort((a, b) => {
+        const ordered = [...matches].sort((a, b) => {
           const rank = { conflict: 0, not_found: 1, update: 2, unchanged: 3 } as const;
           return rank[a.outcome] - rank[b.outcome] || a.row.rowNumber - b.row.rowNumber;
         });
-        const skipped = costPlan.skippedNoCost + costPlan.skippedNoIdentifier;
+        const skipped = parsed ? parsed.skippedNoCost + parsed.skippedNoIdentifier : 0;
+        const samples = costColumn ? sampleColumnValues(sheet, costColumn) : [];
         return (
           <div className="modal-overlay">
-            <div className="modal-box" style={{ maxWidth: '760px' }} role="dialog" aria-modal="true" aria-labelledby="cost-import-title">
+            <div className="modal-box" style={{ maxWidth: '820px' }} role="dialog" aria-modal="true" aria-labelledby="cost-import-title">
               <div className="modal-header">
-                <h3 id="cost-import-title" className="modal-title">Update cost prices from {costPlan.fileName}</h3>
+                <h3 id="cost-import-title" className="modal-title">Update cost prices from {costSheet.fileName}</h3>
               </div>
               <div className="modal-body">
-                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                  Costs read from the <strong>{costPlan.costColumn}</strong> column. Only the cost price changes — stock,
-                  selling price and every other detail are left exactly as they are.
-                </p>
-                <p style={{ fontSize: '13px', margin: '10px 0' }}>
-                  <strong>{counts.update}</strong> to update · {counts.unchanged} already correct · {counts.not_found} not found
-                  {counts.conflict > 0 && <> · <span style={{ color: 'var(--color-warning)' }}>{counts.conflict} unclear</span></>}
-                  {skipped > 0 && <span style={{ color: 'var(--text-muted)' }}> · {skipped} row(s) skipped as unreadable</span>}
-                </p>
-                <div style={{ maxHeight: '320px', overflowY: 'auto', overflowX: 'auto' }}>
-                  <table className="table">
-                    <thead>
-                      <tr><th>Row</th><th>Part</th><th>Cost now</th><th>New cost</th><th>What happens</th></tr>
-                    </thead>
-                    <tbody>
-                      {ordered.map((m) => (
-                        <tr key={m.row.rowNumber}>
-                          <td style={{ color: 'var(--text-muted)' }}>{m.row.rowNumber}</td>
-                          <td>{m.product ? `${m.product.part_number || '—'} · ${m.product.name}` : (m.row.partNumber || m.row.name || m.row.oemNumber)}</td>
-                          <td style={{ fontVariantNumeric: 'tabular-nums' }}>{m.product ? `₹${money(Number(m.product.cost_price))}` : '—'}</td>
-                          <td style={{ fontVariantNumeric: 'tabular-nums' }}>₹{money(m.row.cost)}</td>
-                          <td>
-                            {m.outcome === 'update' && <span className="badge badge-success">update</span>}
-                            {m.outcome === 'unchanged' && <span style={{ color: 'var(--text-muted)' }}>{m.reason ?? 'no change'}</span>}
-                            {m.outcome === 'not_found' && <span style={{ color: 'var(--text-muted)' }}>{m.reason}</span>}
-                            {m.outcome === 'conflict' && <span style={{ color: 'var(--color-warning)' }}>{m.reason}</span>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="flex gap-4 flex-wrap" style={{ marginBottom: '12px' }}>
+                  <div className="form-group" style={{ margin: 0, minWidth: '230px' }}>
+                    <label className="form-label" htmlFor="cost-col">Which column holds the cost?</label>
+                    <select id="cost-col" className="form-select" value={costColumn} onChange={(e) => setCostColumn(e.target.value)}>
+                      <option value="">— choose a column —</option>
+                      {sheet.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    {samples.length > 0 && (
+                      <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        First values: {samples.join(', ')}
+                      </p>
+                    )}
+                  </div>
+                  <div className="form-group" style={{ margin: 0, minWidth: '230px' }}>
+                    <label className="form-label" htmlFor="id-col">Which column names the part?</label>
+                    <select id="id-col" className="form-select" value={idColumn} onChange={(e) => setIdColumn(e.target.value)}>
+                      <option value="">— choose a column —</option>
+                      {sheet.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
                 </div>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  Only the cost price changes — stock, selling price and every other detail are left exactly as they are.
+                </p>
+                {!parsed ? (
+                  <p style={{ fontSize: '13px', color: 'var(--color-warning)', marginTop: '10px' }}>
+                    Choose both columns above to see what would change.
+                  </p>
+                ) : (
+                  <>
+                    <p style={{ fontSize: '13px', margin: '10px 0' }}>
+                      <strong>{counts.update}</strong> to update · {counts.unchanged} already correct · {counts.not_found} not found
+                      {counts.conflict > 0 && <> · <span style={{ color: 'var(--color-warning)' }}>{counts.conflict} unclear</span></>}
+                      {skipped > 0 && <span style={{ color: 'var(--text-muted)' }}> · {skipped} row(s) skipped as unreadable</span>}
+                    </p>
+                    {/* The likeliest cause of a wall of "not found" is not a bad file but the wrong
+                        company being active — this sheet's part codes simply belong elsewhere.
+                        Say that plainly instead of leaving 227 unexplained misses to decode. */}
+                    {matches.length > 0 && counts.not_found > matches.length / 2 && (
+                      <p className="alert alert-warning" style={{ fontSize: '13px', padding: '8px 12px' }}>
+                        Most rows don&apos;t match anything in <strong>{activeCompany?.name ?? 'this company'}</strong>. If this
+                        price list belongs to another company, switch to it first — or check that the
+                        &ldquo;{idColumn}&rdquo; column really holds your part codes.
+                      </p>
+                    )}
+                    <div style={{ maxHeight: '300px', overflowY: 'auto', overflowX: 'auto' }}>
+                      <table className="table">
+                        <thead>
+                          <tr><th>Row</th><th>Part</th><th>Cost now</th><th>New cost</th><th>What happens</th></tr>
+                        </thead>
+                        <tbody>
+                          {ordered.map((m) => (
+                            <tr key={m.row.rowNumber}>
+                              <td style={{ color: 'var(--text-muted)' }}>{m.row.rowNumber}</td>
+                              <td>{m.product ? `${m.product.part_number || '—'} · ${m.product.name}` : (m.row.partNumber || m.row.name || m.row.oemNumber)}</td>
+                              <td style={{ fontVariantNumeric: 'tabular-nums' }}>{m.product ? `₹${money(Number(m.product.cost_price))}` : '—'}</td>
+                              <td style={{ fontVariantNumeric: 'tabular-nums' }}>₹{money(m.row.cost)}</td>
+                              <td>
+                                {m.outcome === 'update' && <span className="badge badge-success">update</span>}
+                                {m.outcome === 'unchanged' && <span style={{ color: 'var(--text-muted)' }}>{m.reason ?? 'no change'}</span>}
+                                {m.outcome === 'not_found' && <span style={{ color: 'var(--text-muted)' }}>{m.reason}</span>}
+                                {m.outcome === 'conflict' && <span style={{ color: 'var(--color-warning)' }}>{m.reason}</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
                 {importError && <p className="form-error" role="alert">{importError}</p>}
               </div>
               <div className="modal-footer">
-                <button className="btn btn-secondary" disabled={applyingCosts} onClick={() => setCostPlan(null)}>Cancel</button>
-                <button className="btn btn-primary" disabled={applyingCosts || counts.update === 0} onClick={applyCostPlan}>
+                <button className="btn btn-secondary" disabled={applyingCosts} onClick={() => setCostSheet(null)}>Cancel</button>
+                <button className="btn btn-primary" disabled={applyingCosts || pending.length === 0} onClick={() => applyCostPlan(pending)}>
                   {applyingCosts
-                    ? `Updating ${costProgress} of ${counts.update}…`
-                    : counts.update === 0
+                    ? `Updating ${costProgress} of ${pending.length}…`
+                    : pending.length === 0
                       ? 'Nothing to update'
-                      : `Apply ${counts.update} cost update(s)`}
+                      : `Apply ${pending.length} cost update(s)`}
                 </button>
               </div>
             </div>
