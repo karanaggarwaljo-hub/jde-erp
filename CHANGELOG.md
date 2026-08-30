@@ -45,6 +45,80 @@ Checked with 18 automated tests covering the matching and the file reading, plus
 the real inventory using a realistically messy price list (title rows, inconsistent part-number
 casing, rupee formatting, a part not stocked, and an unreadable price) — every row classified
 correctly and nothing written.
+## 2026-08-26 — Draft an offer for a customer, worded to suit their segment
+
+There's now a tag button beside each customer on the Customers page. It opens a small dialog that
+shows their grade, reminds you what kind of offer suits that group, and drafts the message.
+
+**You decide the offer; the app only writes it.** You type the terms — "5% off on orders above
+₹20,000 through September", or "free delivery on the next order" — and it words them for that
+particular customer. This is deliberate: an offer is a promise you have to honour once you send it,
+so nothing you haven't written yourself will ever be promised. Give it something vague like "a small
+discount" and the message stays vague rather than inventing a number for you.
+
+**Your grades stay private.** The message never tells a customer they're Silver, or a Bargainer, or
+that they're classified at all. The grade only decides the angle — a top customer is thanked and
+offered priority, a discount-driven one is pointed at bundles rather than a deeper price cut, one
+who's gone quiet is invited back warmly without any "we haven't seen you since February".
+
+Every draft lands in an editable box for you to change before sending, and Copy puts it on your
+clipboard for WhatsApp.
+
+Works for any customer, including ungraded new ones — an opening offer to a new customer is often
+exactly the point.
+
+## 2026-08-26 — A sale on credit now has to name a customer
+
+Cash sales are unchanged — pick nothing, it bills to the counter, and it stays as fast as it was.
+
+But a sale that **isn't fully paid** now needs a named customer before it can be saved. Money owed by
+"Walk-in Customer" can never be chased, never appears on anyone's ledger, and never counts towards
+anyone's buying history. The existing **+ New** button beside the customer box adds one without
+leaving the sale, so it costs a few seconds on the sales that actually need it.
+
+You're told at the customer box the moment the sale becomes a credit sale, not after filling
+everything in — and the Save button stays disabled until it's sorted.
+
+This is also what makes the new customer grades work. Every unattributed credit sale was a customer
+insight lost permanently; from now on the ones that matter get recorded against someone.
+
+Worth knowing: six existing part-paid or unpaid walk-in invoices (about ₹18,925 of debt owed by
+nobody identifiable) are all in the **bkgkj** test company, none in your real one. If you ever edit
+one, it will now ask you to name the customer — which is the right fix for it anyway.
+
+## 2026-08-26 — Customers are now graded Diamond / Gold / Silver, with behaviour flags
+
+The Customers page now shows a segment against each customer, so you can tell at a glance who is
+worth protecting and who is quietly costing you margin.
+
+**The grades are cut from profit, not sales value** — and those two disagree. On real data in this
+app, one customer brought in less revenue than the walk-in trade but nearly **twice the profit**.
+Ranking by sales value would have pointed you at exactly the wrong customer to look after. This
+works because every sale here is already traced back to the exact stock batch it came from, so the
+true cost of each sale is known rather than guessed.
+
+- 💎 **Diamond** — between them, the customers who earn the first half of all your profit
+- 🥇 **Gold** — the next chunk, up to 80%
+- 🥈 **Silver** — the remainder
+- **New** — not enough history to grade honestly yet
+
+Separately from the grade, any customer can carry flags, because your best customer can also be
+your worst payer — and that is exactly the combination worth seeing rather than hiding behind one
+label:
+
+- **Defaulter** — has a bill unpaid past 45 days
+- **Bargainer** — takes bigger discounts, or earns you thinner margin, than your house average
+- **Dormant** — used to buy, nothing in 90 days
+
+Every badge has a **"Why?"** link showing the actual numbers behind it — sales count, revenue,
+profit, margin, average discount, last purchase date — plus what to do about it (protect them,
+offer bundles instead of discounts, tighten credit, win them back). There is also a segment filter,
+so "show me every Bargainer" is one click when you want to send that group an offer.
+
+**Honest note on what you'll see today:** grading needs at least 2 recorded sales per customer, and
+your active company has no sales recorded yet — so everyone will read "New" until you start
+invoicing. That is deliberate. A grade invented from a single sale would send you to the wrong
+customer with the wrong offer.
 
 ## 2026-08-26 — Fixed: scanning a photo of a supplier invoice did nothing
 
