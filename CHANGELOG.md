@@ -2,6 +2,28 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-26 — Draft an offer for a customer, worded to suit their segment
+
+There's now a tag button beside each customer on the Customers page. It opens a small dialog that
+shows their grade, reminds you what kind of offer suits that group, and drafts the message.
+
+**You decide the offer; the app only writes it.** You type the terms — "5% off on orders above
+₹20,000 through September", or "free delivery on the next order" — and it words them for that
+particular customer. This is deliberate: an offer is a promise you have to honour once you send it,
+so nothing you haven't written yourself will ever be promised. Give it something vague like "a small
+discount" and the message stays vague rather than inventing a number for you.
+
+**Your grades stay private.** The message never tells a customer they're Silver, or a Bargainer, or
+that they're classified at all. The grade only decides the angle — a top customer is thanked and
+offered priority, a discount-driven one is pointed at bundles rather than a deeper price cut, one
+who's gone quiet is invited back warmly without any "we haven't seen you since February".
+
+Every draft lands in an editable box for you to change before sending, and Copy puts it on your
+clipboard for WhatsApp.
+
+Works for any customer, including ungraded new ones — an opening offer to a new customer is often
+exactly the point.
+
 ## 2026-08-26 — A sale on credit now has to name a customer
 
 Cash sales are unchanged — pick nothing, it bills to the counter, and it stays as fast as it was.
