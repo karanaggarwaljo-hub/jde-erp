@@ -2,6 +2,50 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-30 — New: update cost prices in bulk from a supplier price list
+
+Asked for: a spreadsheet holds the cost of each product, and only that column should be used.
+
+Until now the Inventory import could only **add** parts, never update them — so uploading a price
+list would have created a second copy of every part rather than repricing the ones you have. There
+is now a separate **Update Costs from File** button next to Import, which does only one thing:
+change the cost price of parts you already have.
+
+**Nothing is saved until you have seen exactly what will change.** Pick the file and you get a
+preview listing every row — the part it matched, the cost now, the new cost, and what will happen.
+Anything the file couldn't do is listed first, because that is the part worth reading:
+
+- **Not found** — no such part in this company. Skipped; never created as a new part.
+- **Unclear** — the row matches more than one part, or two rows in your sheet give different costs
+  for the same part. Left alone rather than guessed at.
+- **Already correct** — matched, but the cost in the file is the one already stored.
+
+Only then do you press Apply, and only the rows marked "update" are written.
+
+Details that matter:
+
+- **Only the cost price changes.** Stock, selling price, MRP, location, name — all untouched.
+- **It also corrects the purchase-batch cost**, the same as editing a part by hand does. That is
+  what makes the corrected figure actually show up in the Stock Value, rather than the old cost
+  lingering behind the scenes — and it is how you would fix the two ₹0 oil entries in bulk.
+- **Your part numbers don't have to match exactly.** "JCB-H49", "jcb h49" and "JCBH49" are all
+  understood as the same part. If a row has no part number, it falls back to the OEM number, then
+  to the name.
+- **A price it can't read is never turned into ₹0.** Blank cells, "call for price", "N/A", and
+  zero or negative values are reported as skipped and left alone — writing a zero would both
+  destroy the real price and quietly distort your stock valuation.
+- **Rupee signs and commas are fine** — "₹1,250.50" reads as 1250.50.
+- **Title rows above your headings are fine** — it finds the real header row.
+- If the file has no column it recognises as a cost, it says so and lists the names it accepts,
+  rather than picking a column and overwriting every price with the wrong numbers.
+- If something fails partway through, you are told how many were updated before it stopped, and
+  re-uploading the same file safely retries the rest.
+
+Checked with 18 automated tests covering the matching and the file reading, plus a dry run against
+the real inventory using a realistically messy price list (title rows, inconsistent part-number
+casing, rupee formatting, a part not stocked, and an unreadable price) — every row classified
+correctly and nothing written.
+
 ## 2026-08-26 — Fixed: scanning a photo of a supplier invoice did nothing
 
 Reported: the details are not being read out of the picture.

@@ -386,3 +386,105 @@ export async function hashFile(file: File): Promise<string> {
 
 export const SPREADSHEET_EXTENSIONS = ['.csv', '.xls', '.xlsx'];
 export const SCANNABLE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
+
+/* ---------------------------------------------------------------------------------------------
+ * Cost-price-only import
+ *
+ * Separate from parseInventoryFile on purpose. That one builds whole products to CREATE; this one
+ * reads exactly two things per row — which part, and what it now costs — to UPDATE parts that
+ * already exist. Nothing else in a supplier price list should be allowed to overwrite inventory.
+ * ------------------------------------------------------------------------------------------- */
+
+export type CostUpdateRow = {
+  /** 1-based position among the data rows, so a problem row can be pointed at. */
+  rowNumber: number;
+  partNumber: string;
+  oemNumber: string;
+  name: string;
+  cost: number;
+};
+
+export type CostUpdateParse = {
+  rows: CostUpdateRow[];
+  /** The column heading the costs were read from, so the UI can state it and be corrected. */
+  costColumn: string;
+  skippedNoCost: number;
+  skippedNoIdentifier: number;
+};
+
+/** Reads "₹1,250.50", "1250", " 1,250 " — and refuses anything else.
+ *
+ *  Returns null rather than 0 for junk. This matters more here than anywhere else in the file:
+ *  this number is written directly over a real cost price, and a silent 0 would both destroy the
+ *  figure and, because a zero-cost batch counts as "price not recorded", quietly distort the
+ *  stock valuation. A row we cannot read is reported and skipped, never guessed. */
+function parseCost(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? raw : null;
+  const text = String(raw ?? '').trim();
+  if (!text) return null;
+  // Strip currency symbols, thousands separators and stray spaces, but nothing else — a value
+  // with letters in it ("call for price", "N/A") must not survive as a number.
+  const cleaned = text.replace(/[₹$€£,\s]/g, '');
+  if (!/^\d+(\.\d+)?$/.test(cleaned)) return null;
+  const value = Number(cleaned);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+export async function parseCostUpdateFile(file: File): Promise<CostUpdateParse> {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const firstSheetName = workbook.SheetNames[0];
+  const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : undefined;
+  if (!sheet) {
+    throw new Error('This file has no readable sheet — it may be empty, corrupted, or not a valid CSV/Excel file.');
+  }
+
+  const rows = sheetToRowsWithDetectedHeader(sheet);
+  const sampleRow = rows[0] ?? {};
+
+  // Deliberately no guessing. parseInventoryFile may infer which numeric column is a cost when the
+  // headers are unhelpful, because the worst case there is a bad row in a brand-new part. Here the
+  // worst case is overwriting the cost of every part in the business from the wrong column, so an
+  // unrecognised heading is an error the owner resolves by renaming it.
+  const costKey = findKey(sampleRow, PRODUCT_KEYS.cost_price);
+  if (!costKey) {
+    const found = Object.keys(sampleRow).filter(Boolean).join(', ') || '(none)';
+    throw new Error(
+      `Couldn't find a cost column in this file. Name the column one of: Cost Price, Cost, Purchase Price, ` +
+        `Purchase Rate, Net Rate, Net Price, Buying Price, Dealer Price or Landing Cost. Columns found: ${found}.`
+    );
+  }
+
+  const partKey = findKey(sampleRow, PRODUCT_KEYS.part_number);
+  const oemKey = findKey(sampleRow, PRODUCT_KEYS.oem_number);
+  const nameKey = findKey(sampleRow, PRODUCT_KEYS.name);
+  if (!partKey && !oemKey && !nameKey) {
+    throw new Error(
+      'Couldn\u2019t find a column identifying which part each cost belongs to. Add a Part Number, OEM Number or Name column.'
+    );
+  }
+
+  const text = (row: Record<string, unknown>, key: string | undefined) => (key ? String(row[key] ?? '').trim() : '');
+
+  const parsed: CostUpdateRow[] = [];
+  let skippedNoCost = 0;
+  let skippedNoIdentifier = 0;
+
+  rows.forEach((row, index) => {
+    const partNumber = text(row, partKey);
+    const oemNumber = text(row, oemKey);
+    const name = text(row, nameKey);
+    if (!partNumber && !oemNumber && !name) {
+      skippedNoIdentifier += 1;
+      return;
+    }
+    const cost = parseCost(row[costKey]);
+    if (cost === null) {
+      skippedNoCost += 1;
+      return;
+    }
+    parsed.push({ rowNumber: index + 1, partNumber, oemNumber, name, cost });
+  });
+
+  return { rows: parsed, costColumn: costKey, skippedNoCost, skippedNoIdentifier };
+}
