@@ -2,6 +2,33 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-30 — One Import button again, and it now previews everything before saving
+
+The cost-price update arrived as a second button sitting next to Import from File, which was one
+button too many — both take a spreadsheet, and having to know which one to press before seeing
+what is in the file is backwards. There is one **Import from File** button again.
+
+**It reads your file once and works out what you probably want.** If most rows are parts you
+already stock, it opens on "update cost prices". If most are unfamiliar, it opens on "add as new
+parts". Either way it is only a suggestion — there are two buttons at the top of the dialog and you
+can switch between them freely, with the preview following instantly. Nothing is written until you
+press Apply.
+
+Checked against your real inventory statement, which contains 229 rows: opened on your active
+company it proposes updating costs (226 of the 229 are parts you already have), and on the company
+that has almost none of them it proposes adding them as new parts instead.
+
+**Adding parts now gets the same preview and the same tick boxes.** This is the bigger change.
+Importing used to write everything in the file straight into your inventory the moment you picked
+it — no list, no confirmation, and no check for parts you already had. On the file above that would
+have created a second copy of 226 parts you already stock. Now you see every row before anything
+happens, and **any row matching a part you already have starts unticked**, with the existing part
+named next to it. You can still tick it deliberately if you really do want a second entry.
+
+Both jobs work the same way once you are in the dialog: a list of every row, what will happen to
+it, tick boxes to choose which ones, a tick-all box in the header, and a button that counts what is
+actually selected.
+
 ## 2026-08-30 — New: update cost prices in bulk from a spreadsheet
 
 Asked for: a spreadsheet holds the cost of each product, and only that column should be used.

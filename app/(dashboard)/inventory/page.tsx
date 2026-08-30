@@ -10,7 +10,6 @@ import {
   Trash2,
   AlertTriangle,
   Upload,
-  IndianRupee,
   Sparkles,
   Boxes,
   LayoutGrid,
@@ -23,8 +22,8 @@ import {
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { useCompany } from '@/components/CompanyProvider';
-import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, type SheetForCostUpdate } from '@/lib/client-import';
-import { planCostUpdates, countOutcomes, type CostMatch } from '@/lib/cost-import';
+import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, type SheetForCostUpdate, type ImportedProduct } from '@/lib/client-import';
+import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { fifoCostLookup } from '@/lib/stock-value';
@@ -144,7 +143,13 @@ export default function InventoryPage() {
   // Apply — a bulk price overwrite is not something to do on a file-picker click.
   // The sheet is read once; which column means what stays the owner's choice, so changing it
   // re-plans instantly without touching the file again.
-  const [costSheet, setCostSheet] = useState<{ fileName: string; sheet: SheetForCostUpdate } | null>(null);
+  const [costSheet, setCostSheet] = useState<
+    { fileName: string; sheet: SheetForCostUpdate; newParts: ImportedProduct[]; guessedFields: string[] } | null
+  >(null);
+  // One file can mean two different jobs. Which one is proposed from the file's own content —
+  // rows that match parts already stocked are a price list; rows that don't are a parts list.
+  const [importMode, setImportMode] = useState<'costs' | 'new'>('costs');
+  const [excludedNew, setExcludedNew] = useState<Set<number>>(new Set());
   const [costColumn, setCostColumn] = useState('');
   const [idColumn, setIdColumn] = useState('');
   // Row numbers the owner has unticked. Storing exclusions rather than selections means a row
@@ -461,7 +466,7 @@ export default function InventoryPage() {
     }
   };
 
-  const handleCostFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleFileImport = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
@@ -469,17 +474,71 @@ export default function InventoryPage() {
     setFeedback('');
     setImporting(true);
     try {
+      // Read the file once, both ways. Neither reading writes anything, and having both up front
+      // is what lets the dialog offer either job — and switch between them — without re-uploading.
       const sheet = await readSheetForCostUpdate(file);
-      // An unrecognised heading is no longer a dead end: the picker opens with whatever could be
-      // worked out pre-selected, and the owner corrects it if the suggestion is wrong.
-      setCostColumn(sheet.suggestedCostColumn ?? '');
-      setIdColumn(sheet.suggestedIdColumn ?? sheet.columns[0] ?? '');
+      const { products: newParts, guessedFields } = await parseInventoryFile(file).catch(() => ({
+        products: [] as ImportedProduct[],
+        guessedFields: [] as string[],
+      }));
+
+      const costColumnGuess = sheet.suggestedCostColumn ?? '';
+      const idColumnGuess = sheet.suggestedIdColumn ?? sheet.columns[0] ?? '';
+
+      // Propose the job that fits the file. A sheet whose rows are mostly parts already stocked is
+      // a price list; one whose rows are mostly unknown is a list of parts to add. Getting this
+      // wrong is harmless — it is a preview either way — but getting it right saves a step.
+      let mode: 'costs' | 'new' = 'new';
+      if (costColumnGuess && idColumnGuess) {
+        const rows = extractCostRows(sheet, costColumnGuess, idColumnGuess).rows;
+        const known = planCostUpdates(rows, products).filter((m) => m.product).length;
+        if (rows.length > 0 && known >= rows.length / 2) mode = 'costs';
+      }
+      if (newParts.length === 0) mode = 'costs';
+
+      setCostColumn(costColumnGuess);
+      setIdColumn(idColumnGuess);
       setExcludedRows(new Set());
-      setCostSheet({ fileName: file.name, sheet });
+      // Anything already stocked starts unticked in "add new parts" mode: re-adding it would
+      // create a second copy, which is the single most likely way to damage inventory here.
+      // It can still be ticked deliberately — the duplicate is named on the row.
+      setExcludedNew(
+        new Set(
+          newParts
+            .map((part, index) => (findExistingProduct(products, { partNumber: part.part_number, name: part.name }) ? index : -1))
+            .filter((index) => index >= 0)
+        )
+      );
+      setImportMode(mode);
+      setCostSheet({ fileName: file.name, sheet, newParts, guessedFields });
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to read the file.');
     } finally {
       setImporting(false);
+    }
+  };
+
+  const applyNewParts = async (chosen: ImportedProduct[]) => {
+    if (!costSheet) return;
+    setApplyingCosts(true);
+    setImportError('');
+    try {
+      const res = await fetch('/api/local/products?bulk=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: chosen.map((product) => ({ ...product, company_id: activeCompany?.id })) }),
+      });
+      await parseJsonOrThrow(res, 'Failed to import parts.');
+      await Promise.all([reload(), reloadStockLayers()]);
+      const guessNote = costSheet.guessedFields.length > 0
+        ? ` Your file's column titles didn't clearly label ${costSheet.guessedFields.join(', ')}, so those were guessed from the numbers — please spot-check a few rows.`
+        : '';
+      setFeedback(`Added ${chosen.length} new part(s) from ${costSheet.fileName}.${guessNote}`);
+      setCostSheet(null);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to import parts.');
+    } finally {
+      setApplyingCosts(false);
     }
   };
 
@@ -514,36 +573,6 @@ export default function InventoryPage() {
     }
   };
 
-  const handleFileImport = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    setImportError('');
-    setFeedback('');
-    setImporting(true);
-    try {
-      const { products: imported, guessedFields } = await parseInventoryFile(file);
-      if (imported.length === 0) {
-        throw new Error('Couldn’t find a part name/description column in this file. Recognized headers include things like "Name", "Item Name", "Description", or "Part Number" — check your column titles, or share them and we can adjust the import.');
-      }
-      const res = await fetch('/api/local/products?bulk=1', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: imported.map((product) => ({ ...product, company_id: activeCompany?.id })) }),
-      });
-      await parseJsonOrThrow(res, 'Failed to import parts.');
-      await reload();
-      const guessNote = guessedFields.length > 0
-        ? ` Your file's column titles didn't clearly label ${guessedFields.join(', ')}, so those were guessed from the numbers — please spot-check a few rows.`
-        : '';
-      setFeedback(`Imported ${imported.length} part(s) from ${file.name}.${guessNote}`);
-    } catch (err) {
-      setImportError(err instanceof Error ? err.message : 'Failed to read the file.');
-    } finally {
-      setImporting(false);
-    }
-  };
-
   // Both halves of this sentence count real rows, and the alert itself is skipped when both are
   // zero — nothing on this screen ever announces a shortage that isn't there.
   const reorderSentence = `${[
@@ -572,10 +601,6 @@ export default function InventoryPage() {
           <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
             <Upload size={16} /> {importing ? 'Importing…' : 'Import from File'}
             <input type="file" accept=".csv,.xls,.xlsx" hidden disabled={importing} onChange={handleFileImport} />
-          </label>
-          <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
-            <IndianRupee size={16} /> Update Costs from File
-            <input type="file" accept=".csv,.xls,.xlsx" hidden disabled={importing} onChange={handleCostFileSelected} />
           </label>
           <button className="btn btn-primary" onClick={handleOpenAdd}>
             <Plus size={16} /> Add New Part
@@ -1105,14 +1130,49 @@ export default function InventoryPage() {
         });
         const skipped = parsed ? parsed.skippedNoCost + parsed.skippedNoIdentifier : 0;
         const samples = costColumn ? sampleColumnValues(sheet, costColumn) : [];
+        const chosenNew = costSheet.newParts.filter((_, index) => !excludedNew.has(index));
+        const duplicateCount = costSheet.newParts.filter((part) =>
+          findExistingProduct(products, { partNumber: part.part_number, name: part.name })
+        ).length;
+        const allNewTicked = costSheet.newParts.length > 0 && chosenNew.length === costSheet.newParts.length;
+        const toggleNew = (index: number) =>
+          setExcludedNew((previous) => {
+            const next = new Set(previous);
+            if (next.has(index)) next.delete(index);
+            else next.add(index);
+            return next;
+          });
+        const toggleAllNew = () =>
+          setExcludedNew(allNewTicked ? new Set(costSheet.newParts.map((_, index) => index)) : new Set());
         return (
           <div className="modal-overlay">
             <div className="modal-box" style={{ maxWidth: '820px' }} role="dialog" aria-modal="true" aria-labelledby="cost-import-title">
               <div className="modal-header">
-                <h3 id="cost-import-title" className="modal-title">Update cost prices from {costSheet.fileName}</h3>
+                <h3 id="cost-import-title" className="modal-title">Import from {costSheet.fileName}</h3>
               </div>
               <div className="modal-body">
-                <div className="flex gap-4 flex-wrap" style={{ marginBottom: '12px' }}>
+                <div className="form-group" style={{ marginBottom: '12px' }}>
+                  <span className="form-label">What should this file do?</span>
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      className={'btn btn-sm ' + (importMode === 'costs' ? 'btn-primary' : 'btn-secondary')}
+                      onClick={() => setImportMode('costs')}
+                    >
+                      Update cost prices of parts I already have
+                    </button>
+                    <button
+                      type="button"
+                      className={'btn btn-sm ' + (importMode === 'new' ? 'btn-primary' : 'btn-secondary')}
+                      disabled={costSheet.newParts.length === 0}
+                      onClick={() => setImportMode('new')}
+                    >
+                      Add as new parts{costSheet.newParts.length > 0 ? ' (' + costSheet.newParts.length + ')' : ''}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-4 flex-wrap" style={{ marginBottom: '12px', display: importMode === 'costs' ? undefined : 'none' }}>
                   <div className="form-group" style={{ margin: 0, minWidth: '230px' }}>
                     <label className="form-label" htmlFor="cost-col">Which column holds the cost?</label>
                     <select id="cost-col" className="form-select" value={costColumn} onChange={(e) => { setCostColumn(e.target.value); setExcludedRows(new Set()); }}>
@@ -1134,9 +1194,64 @@ export default function InventoryPage() {
                   </div>
                 </div>
                 <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                  Only the cost price changes — stock, selling price and every other detail are left exactly as they are.
+                  {importMode === 'costs'
+                    ? 'Only the cost price changes — stock, selling price and every other detail are left exactly as they are.'
+                    : 'Each ticked row becomes a brand-new part. Rows matching something you already stock start unticked, so nothing is duplicated by accident.'}
                 </p>
-                {!parsed ? (
+                {importMode === 'new' ? (
+                  <>
+                    <p style={{ fontSize: '13px', margin: '10px 0' }}>
+                      <strong>{chosenNew.length} of {costSheet.newParts.length}</strong> selected to add
+                      {duplicateCount > 0 && (
+                        <span style={{ color: 'var(--color-warning)' }}> · {duplicateCount} already stocked</span>
+                      )}
+                    </p>
+                    <div style={{ maxHeight: '300px', overflowY: 'auto', overflowX: 'auto' }}>
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: '34px' }}>
+                              <input
+                                type="checkbox"
+                                aria-label={allNewTicked ? 'Clear all' : 'Select all'}
+                                checked={allNewTicked}
+                                ref={(el) => { if (el) el.indeterminate = chosenNew.length > 0 && !allNewTicked; }}
+                                onChange={toggleAllNew}
+                              />
+                            </th>
+                            <th>Part</th><th>Name</th><th>Stock</th><th>Cost</th><th>What happens</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {costSheet.newParts.map((part, index) => {
+                            const existing = findExistingProduct(products, { partNumber: part.part_number, name: part.name });
+                            return (
+                              <tr key={index} style={excludedNew.has(index) ? { opacity: 0.45 } : undefined}>
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    aria-label={'Add ' + (part.part_number || part.name)}
+                                    checked={!excludedNew.has(index)}
+                                    onChange={() => toggleNew(index)}
+                                  />
+                                </td>
+                                <td>{part.part_number || '—'}</td>
+                                <td>{part.name}</td>
+                                <td style={{ fontVariantNumeric: 'tabular-nums' }}>{part.current_stock}</td>
+                                <td style={{ fontVariantNumeric: 'tabular-nums' }}>₹{money(part.cost_price)}</td>
+                                <td>
+                                  {existing
+                                    ? <span style={{ color: 'var(--color-warning)' }}>already stocked as {existing.part_number || existing.name}</span>
+                                    : <span className="badge badge-success">add</span>}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : !parsed ? (
                   <p style={{ fontSize: '13px', color: 'var(--color-warning)', marginTop: '10px' }}>
                     Choose both columns above to see what would change.
                   </p>
@@ -1209,6 +1324,11 @@ export default function InventoryPage() {
               </div>
               <div className="modal-footer">
                 <button className="btn btn-secondary" disabled={applyingCosts} onClick={() => setCostSheet(null)}>Cancel</button>
+                {importMode === 'new' ? (
+                  <button className="btn btn-primary" disabled={applyingCosts || chosenNew.length === 0} onClick={() => applyNewParts(chosenNew)}>
+                    {applyingCosts ? 'Adding\u2026' : chosenNew.length === 0 ? 'Nothing selected' : 'Add ' + chosenNew.length + ' new part(s)'}
+                  </button>
+                ) : (
                 <button className="btn btn-primary" disabled={applyingCosts || pending.length === 0} onClick={() => applyCostPlan(pending)}>
                   {applyingCosts
                     ? `Updating ${costProgress} of ${pending.length}…`
@@ -1218,6 +1338,7 @@ export default function InventoryPage() {
                       ? (updatable.length === 0 ? 'Nothing to update' : 'Nothing selected')
                       : `Apply ${pending.length} cost update(s)`}
                 </button>
+                )}
               </div>
             </div>
           </div>

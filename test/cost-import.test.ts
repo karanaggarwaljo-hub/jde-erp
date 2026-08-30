@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { planCostUpdates, countOutcomes, type CostMatchProduct } from '../lib/cost-import';
+import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatchProduct } from '../lib/cost-import';
 import type { CostUpdateRow } from '../lib/client-import';
 
 const product = (over: Partial<CostMatchProduct> & { id: string }): CostMatchProduct => ({
@@ -120,4 +120,15 @@ test('counts add up to the rows supplied, so the preview can never under-report'
 test('an empty inventory matches nothing rather than throwing', () => {
   const matches = planCostUpdates([row({ rowNumber: 1, partNumber: 'JCB-H49', cost: 1 })], []);
   assert.equal(matches[0].outcome, 'not_found');
+});
+
+test('spots a part that already exists, so importing it again is flagged not silent', () => {
+  assert.equal(findExistingProduct(INVENTORY, { partNumber: 'jcb h49' })?.id, 'p1');
+  assert.equal(findExistingProduct(INVENTORY, { name: 'BOSCH FUEL FILTER' })?.id, 'p3');
+  assert.equal(findExistingProduct(INVENTORY, { partNumber: 'BRAND-NEW-1', name: 'Brand new thing' }), undefined);
+});
+
+test('a blank candidate matches nothing rather than the first row', () => {
+  assert.equal(findExistingProduct(INVENTORY, {}), undefined);
+  assert.equal(findExistingProduct(INVENTORY, { partNumber: '', name: '' }), undefined);
 });
