@@ -2,6 +2,25 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-26 — A sale on credit now has to name a customer
+
+Cash sales are unchanged — pick nothing, it bills to the counter, and it stays as fast as it was.
+
+But a sale that **isn't fully paid** now needs a named customer before it can be saved. Money owed by
+"Walk-in Customer" can never be chased, never appears on anyone's ledger, and never counts towards
+anyone's buying history. The existing **+ New** button beside the customer box adds one without
+leaving the sale, so it costs a few seconds on the sales that actually need it.
+
+You're told at the customer box the moment the sale becomes a credit sale, not after filling
+everything in — and the Save button stays disabled until it's sorted.
+
+This is also what makes the new customer grades work. Every unattributed credit sale was a customer
+insight lost permanently; from now on the ones that matter get recorded against someone.
+
+Worth knowing: six existing part-paid or unpaid walk-in invoices (about ₹18,925 of debt owed by
+nobody identifiable) are all in the **bkgkj** test company, none in your real one. If you ever edit
+one, it will now ask you to name the customer — which is the right fix for it anyway.
+
 ## 2026-08-26 — Customers are now graded Diamond / Gold / Silver, with behaviour flags
 
 The Customers page now shows a segment against each customer, so you can tell at a glance who is
