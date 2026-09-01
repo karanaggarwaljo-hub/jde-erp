@@ -221,6 +221,7 @@ export default function SalesPage() {
   const [quoteLines, setQuoteLines] = useState<InvoiceLine[]>([]);
   const [quoteDiscountPercent, setQuoteDiscountPercent] = useState(0);
   const [quoteGstPercent, setQuoteGstPercent] = useState(18);
+  const [quoteGstInclusive, setQuoteGstInclusive] = useState(false);
 
   // Two discounts now exist and they stack in a fixed order: each line is discounted on its own
   // first, and the invoice-wide discount then applies to whatever that leaves. Doing it the other
@@ -245,11 +246,29 @@ export default function SalesPage() {
   const netTaxableValue = gstInclusive ? taxableAmount - gstAmount : taxableAmount;
   const total = gstInclusive ? taxableAmount : taxableAmount + gstAmount;
   const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
-  const quoteSubtotal = quoteLines.reduce((sum, line) => sum + line.qty * line.price, 0);
-  const quoteDiscountAmount = quoteSubtotal * (quoteDiscountPercent / 100);
+  // Mirrors jde_save_quotation exactly. That function recomputes every figure from the lines and
+  // rejects the save if the numbers sent differ by more than a paisa, so rounding here must match
+  // it step for step: each line rounded, then each total rounded, never one sum rounded at the end.
+  const round2 = (value: number) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+  const quoteLineGross = (line: InvoiceLine) => round2(Number(line.qty) * Number(line.price));
+  const quoteLineDiscount = (line: InvoiceLine) =>
+    round2(quoteLineGross(line) * (Math.min(100, Math.max(0, Number(line.discount) || 0)) / 100));
+  const quoteLineNet = (line: InvoiceLine) => quoteLineGross(line) - quoteLineDiscount(line);
+
+  const quoteGrossSubtotal = quoteLines.reduce((sum, line) => sum + quoteLineGross(line), 0);
+  const quoteSubtotal = quoteLines.reduce((sum, line) => sum + quoteLineNet(line), 0);
+  const quoteItemDiscountTotal = quoteGrossSubtotal - quoteSubtotal;
+  const quoteDiscountAmount = round2(quoteSubtotal * (quoteDiscountPercent / 100));
   const quoteTaxableAmount = quoteSubtotal - quoteDiscountAmount;
-  const quoteGstAmount = quoteTaxableAmount * (quoteGstPercent / 100);
-  const quoteTotal = quoteTaxableAmount + quoteGstAmount;
+  const quoteGstAmount = round2(
+    quoteGstInclusive
+      ? quoteTaxableAmount * (quoteGstPercent / (100 + quoteGstPercent))
+      : quoteTaxableAmount * (quoteGstPercent / 100)
+  );
+  // What the tax is charged on, which stops being the same as the discounted amount once the
+  // quoted rates already contain the tax.
+  const quoteNetTaxableValue = quoteGstInclusive ? quoteTaxableAmount - quoteGstAmount : quoteTaxableAmount;
+  const quoteTotal = round2(quoteGstInclusive ? quoteTaxableAmount : quoteTaxableAmount + quoteGstAmount);
 
   const selectedCustomer = customers.find((c) => c.name === customer);
   const customerLabel = customer.trim() || WALK_IN_CUSTOMER;
@@ -391,7 +410,9 @@ export default function SalesPage() {
         name: product?.name ?? line.part,
         qty: line.qty,
         unit_price: line.price,
-        line_total: line.qty * line.price,
+        line_total: quoteLineNet(line),
+        discount_percent: Math.min(100, Math.max(0, Number(line.discount) || 0)),
+        discount_amount: quoteLineDiscount(line),
       };
     });
 
@@ -406,6 +427,7 @@ export default function SalesPage() {
     setQuoteLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0, discount: 0 }] : []);
     setQuoteDiscountPercent(0);
     setQuoteGstPercent(18);
+    setQuoteGstInclusive(false);
     setQuotationError('');
     setShowQuotationModal(true);
   };
@@ -432,9 +454,10 @@ export default function SalesPage() {
       );
       setQuoteDate(detail.date);
       setQuoteValidity(detail.validity);
-      setQuoteLines(detail.items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price) })));
+      setQuoteLines(detail.items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
       setQuoteDiscountPercent(Number(detail.discount_percent ?? 0));
       setQuoteGstPercent(Number(detail.gst_percent ?? 18));
+      setQuoteGstInclusive(detail.gst_mode === 'inclusive');
       setShowQuotationModal(true);
     } catch (error) {
       setQuotationError(error instanceof Error ? error.message : 'Failed to load quotation details.');
@@ -486,6 +509,7 @@ export default function SalesPage() {
         discountAmount: quoteDiscountAmount,
         gstPercent: quoteGstPercent,
         gstAmount: quoteGstAmount,
+        gstMode: quoteGstInclusive ? 'inclusive' : 'exclusive',
         total: quoteTotal,
       });
       await reloadQuotations();
@@ -1316,7 +1340,7 @@ export default function SalesPage() {
         <div className="modal-body flex flex-col gap-4">
           <div className="form-grid-2"><div><small className="text-muted">Customer</small><div style={{ fontWeight: 600 }}>{viewingQuotation.customer}</div></div><div><small className="text-muted">Quote date</small><div style={{ fontWeight: 600 }}>{viewingQuotation.date}</div></div><div><small className="text-muted">Valid until</small><div style={{ fontWeight: 600 }}>{viewingQuotation.validity}</div></div><div><small className="text-muted">Status</small><div style={{ fontWeight: 600 }}>{viewingQuotation.status.toUpperCase()}</div></div></div>
           <div className="table-wrap"><table className="erp-table"><thead><tr><th>Part</th><th className="text-right">Qty</th><th className="text-right">Unit Price</th><th className="text-right">Line Total</th></tr></thead><tbody>{viewingQuotation.items.map((item, index) => <tr key={`${item.part_number}-${index}`}><td><div style={{ fontWeight: 600 }}>{item.name}</div><small className="text-muted">{item.part_number}</small></td><td className="text-right">{item.qty}</td><td className="text-right">₹{Number(item.unit_price).toLocaleString()}</td><td className="text-right">₹{Number(item.line_total).toLocaleString()}</td></tr>)}</tbody></table></div>
-          <div className="report-summary"><div className="report-line"><span>Subtotal</span><span>₹{Number(viewingQuotation.subtotal ?? viewingQuotation.total).toLocaleString()}</span></div>{Number(viewingQuotation.discount_amount) > 0 && <div className="report-line"><span>Discount ({Number(viewingQuotation.discount_percent).toFixed(1)}%)</span><span className="text-danger">-₹{Number(viewingQuotation.discount_amount).toLocaleString()}</span></div>}<div className="report-line"><span>GST ({Number(viewingQuotation.gst_percent ?? 0).toFixed(1)}%)</span><span>₹{Number(viewingQuotation.gst_amount ?? 0).toLocaleString()}</span></div><div className="report-line report-strong"><span>Quotation Total</span><strong>₹{Number(viewingQuotation.total).toLocaleString()}</strong></div></div>
+          <div className="report-summary"><div className="report-line"><span>Subtotal{viewingQuotation.items.some((item) => Number(item.discount_percent) > 0) ? ' after item discounts' : ''}</span><span>₹{Number(viewingQuotation.subtotal ?? viewingQuotation.total).toLocaleString()}</span></div>{Number(viewingQuotation.discount_amount) > 0 && <div className="report-line"><span>Whole-quote discount ({Number(viewingQuotation.discount_percent).toFixed(1)}%)</span><span className="text-danger">-₹{Number(viewingQuotation.discount_amount).toLocaleString()}</span></div>}<div className="report-line"><span>GST ({Number(viewingQuotation.gst_percent ?? 0).toFixed(1)}%){viewingQuotation.gst_mode === 'inclusive' ? ' — included in the rates' : ''}</span><span>₹{Number(viewingQuotation.gst_amount ?? 0).toLocaleString()}</span></div><div className="report-line report-strong"><span>Quotation Total</span><strong>₹{Number(viewingQuotation.total).toLocaleString()}</strong></div></div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/quotation/${viewingQuotation.id}`, '_blank')}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingQuotation(null)}>Close</button></div>
       </div></div>}
@@ -1326,9 +1350,9 @@ export default function SalesPage() {
         <div className="modal-body flex flex-col gap-4">
           {quotationError && <div className="alert alert-danger" role="alert">{quotationError}</div>}
           <div className="form-grid-2"><div className="form-group"><label className="form-label">Customer</label><select required className="form-input form-select" value={quoteCustomer} onChange={(event) => setQuoteCustomer(event.target.value)}><option value="">Select customer…</option>{customers.map((entry) => <option key={entry.id} value={entry.name}>{entry.name}</option>)}</select></div><div className="form-group"><label className="form-label">Quote Date</label><input required type="date" className="form-input" value={quoteDate} onChange={(event) => setQuoteDate(event.target.value)} /></div><div className="form-group"><label className="form-label">Valid Until</label><input required type="date" min={quoteDate} className="form-input" value={quoteValidity} onChange={(event) => setQuoteValidity(event.target.value)} /></div></div>
-          <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Quoted Parts</h4>{partOptions.length === 0 && <p className="text-muted text-sm">Add parts in Inventory before creating a quotation.</p>}<datalist id="quotation-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>{quoteLines.map((line, index) => { const matched = partOptions.find((part) => part.value === line.part); return <div key={index} className="form-grid-4 mb-2"><div className="form-group"><label className="form-label">Part</label><input list="quotation-part-options" className="form-input" placeholder="Type to search a part…" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateQuoteLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }} />{line.part.trim() && !matched && <small className="text-danger">No matching part in Inventory</small>}</div><div className="form-group"><label className="form-label">Category</label><input className="form-input" value={matched?.category ?? '—'} disabled /></div><div className="form-group"><label className="form-label">Qty</label><input required type="number" min="1" className="form-input" value={line.qty} onChange={(event) => updateQuoteLine(index, { qty: Number(event.target.value) })} /></div><div className="form-group"><label className="form-label">Unit Price (₹)</label><input required type="number" min="0" className="form-input" value={line.price} onChange={(event) => updateQuoteLine(index, { price: Number(event.target.value) })} /></div></div>; })}{partOptions.length > 0 && <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setQuoteLines((current) => [...current, { part: '', qty: 1, price: 0, discount: 0 }])}>+ Add Item Row</button>}</div>
-          <div className="form-grid-2"><div className="form-group"><label className="form-label">Discount (%)</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={quoteDiscountPercent} onChange={(event) => setQuoteDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} /></div><div className="form-group"><label className="form-label">Discount Amount (₹)</label><input className="form-input" value={quoteDiscountAmount.toFixed(2)} disabled /></div><div className="form-group"><label className="form-label">GST Rate (%)</label><input type="number" min="0" max="28" step="0.1" className="form-input" value={quoteGstPercent} onChange={(event) => setQuoteGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} /></div><div className="form-group"><label className="form-label">GST Amount (₹)</label><input className="form-input" value={quoteGstAmount.toFixed(2)} disabled /></div></div>
-          <div className="flex justify-between items-center invoice-summary"><div><span className="text-muted">Subtotal: </span><strong>₹{quoteSubtotal.toLocaleString()}</strong></div>{quoteDiscountAmount > 0 && <div><span className="text-muted">Discount: </span><strong className="text-danger">-₹{quoteDiscountAmount.toFixed(2)}</strong></div>}<div><span className="text-muted">GST ({quoteGstPercent}%): </span><strong>₹{quoteGstAmount.toFixed(2)}</strong></div><div><strong>Quote Total: </strong><span className="invoice-total">₹{quoteTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div></div>
+          <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Quoted Parts</h4>{partOptions.length === 0 && <p className="text-muted text-sm">Add parts in Inventory before creating a quotation.</p>}<datalist id="quotation-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>{quoteLines.map((line, index) => { const matched = partOptions.find((part) => part.value === line.part); return <div key={index} className="form-grid-5 mb-2"><div className="form-group"><label className="form-label">Part</label><input list="quotation-part-options" className="form-input" placeholder="Type to search a part…" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateQuoteLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }} />{line.part.trim() && !matched && <small className="text-danger">No matching part in Inventory</small>}</div><div className="form-group"><label className="form-label">Category</label><input className="form-input" value={matched?.category ?? '—'} disabled /></div><div className="form-group"><label className="form-label">Qty</label><input required type="number" min="1" className="form-input" value={line.qty} onChange={(event) => updateQuoteLine(index, { qty: Number(event.target.value) })} /></div><div className="form-group"><label className="form-label">Unit Price (₹)</label><input required type="number" min="0" className="form-input" value={line.price} onChange={(event) => updateQuoteLine(index, { price: Number(event.target.value) })} /></div><div className="form-group"><label className="form-label">Disc %</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={line.discount ?? 0} onChange={(event) => updateQuoteLine(index, { discount: Math.min(100, Math.max(0, Number(event.target.value))) })} /><small className="text-muted">{quoteLineDiscount(line) > 0 ? `Line: ₹${quoteLineNet(line).toFixed(2)} (was ₹${quoteLineGross(line).toFixed(2)})` : `Line: ₹${quoteLineNet(line).toFixed(2)}`}</small></div></div>; })}{partOptions.length > 0 && <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setQuoteLines((current) => [...current, { part: '', qty: 1, price: 0, discount: 0 }])}>+ Add Item Row</button>}</div>
+          <div className="form-grid-2"><div className="form-group"><label className="form-label">Discount (%)</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={quoteDiscountPercent} onChange={(event) => setQuoteDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} /></div><div className="form-group"><label className="form-label">Discount Amount (₹)</label><input className="form-input" value={quoteDiscountAmount.toFixed(2)} disabled /></div><div className="form-group"><label className="form-label">GST Rate (%)</label><input type="number" min="0" max="28" step="0.1" className="form-input" value={quoteGstPercent} onChange={(event) => setQuoteGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} /><div className="flex gap-2 mt-2" role="group" aria-label="How the quoted rates are priced"><button type="button" className={'btn btn-sm ' + (quoteGstInclusive ? 'btn-secondary' : 'btn-primary')} onClick={() => setQuoteGstInclusive(false)}>GST extra</button><button type="button" className={'btn btn-sm ' + (quoteGstInclusive ? 'btn-primary' : 'btn-secondary')} onClick={() => setQuoteGstInclusive(true)}>GST included</button></div><small className="text-muted">{quoteGstInclusive ? 'Quoted rates already include GST — the tax is taken out of them.' : 'Quoted rates are before GST — the tax is added on top.'}</small></div><div className="form-group"><label className="form-label">GST Amount (₹)</label><input className="form-input" value={quoteGstAmount.toFixed(2)} disabled /></div></div>
+          <div className="flex justify-between items-center invoice-summary">{quoteItemDiscountTotal > 0 && <div><span className="text-muted">Item discounts: </span><strong className="text-danger">-₹{quoteItemDiscountTotal.toFixed(2)}</strong></div>}<div><span className="text-muted">Subtotal: </span><strong>₹{quoteSubtotal.toLocaleString()}</strong></div>{quoteDiscountAmount > 0 && <div><span className="text-muted">Whole-quote discount: </span><strong className="text-danger">-₹{quoteDiscountAmount.toFixed(2)}</strong></div>}<div><span className="text-muted">Taxable value: </span><strong>₹{quoteNetTaxableValue.toFixed(2)}</strong></div><div><span className="text-muted">GST ({quoteGstPercent}%){quoteGstInclusive ? ' incl.' : ''}: </span><strong>₹{quoteGstAmount.toFixed(2)}</strong></div><div><strong>Quote Total: </strong><span className="invoice-total">₹{quoteTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div></div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowQuotationModal(false); setEditingQuotation(null); }}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!quoteTotal || savingQuotation}>{savingQuotation ? 'Saving…' : editingQuotation ? 'Save Changes' : 'Save Quotation'}</button></div>
       </form></div></div>}

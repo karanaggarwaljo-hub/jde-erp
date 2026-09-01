@@ -35,7 +35,7 @@ export async function loadQuotation(quotationId: string, companyId: string): Pro
 
   const { data: items, error: itemsError } = await supabase
     .from('jde_quotation_items')
-    .select('product_id, part_number, name, qty, unit_price, line_total')
+    .select('product_id, part_number, name, qty, unit_price, line_total, discount_percent, discount_amount')
     .eq('quotation_id', quotationId)
     .eq('company_id', companyId)
     .order('created_at', { ascending: true });
@@ -58,6 +58,7 @@ export async function saveQuotation(input: QuotationInput): Promise<QuotationDet
     p_discount_amount: input.discountAmount,
     p_gst_percent: input.gstPercent,
     p_gst_amount: input.gstAmount,
+    p_gst_mode: input.gstMode ?? 'exclusive',
     p_total: input.total,
   }).single();
   if (error) throw error;
