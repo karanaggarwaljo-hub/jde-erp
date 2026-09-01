@@ -7,6 +7,7 @@ import PaymentReminderModal from '@/components/PaymentReminderModal';
 import SegmentOfferModal from '@/components/SegmentOfferModal';
 import AddCustomerModal from '@/components/AddCustomerModal';
 import ReceivePaymentModal from '@/components/ReceivePaymentModal';
+import { isInvoiceOpen } from '@/lib/invoice-balance';
 import {
   buildCustomerInsights,
   TIER_LABELS,
@@ -31,7 +32,7 @@ type Customer = {
   balance: number;
 };
 
-type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; discount_amount: number };
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; discount_amount: number; settlement_write_off: number };
 type InvoiceItem = { id: string; invoice_id: string; line_total: number };
 type StockConsumption = { invoice_item_id: string; qty: number; unit_cost: number };
 
@@ -108,7 +109,7 @@ export default function CustomersPage() {
       .filter((customer) => Number(customer.balance) > 0)
       .map((customer) => {
         const unpaidInvoices = invoices
-          .filter((invoice) => invoice.customer === customer.name && Number(invoice.total) > Number(invoice.paid))
+          .filter((invoice) => invoice.customer === customer.name && isInvoiceOpen(invoice))
           .sort((a, b) => a.date.localeCompare(b.date));
         const oldestInvoice = unpaidInvoices[0];
         const oldestDate = oldestInvoice ? new Date(`${oldestInvoice.date}T00:00:00`) : null;
@@ -130,7 +131,7 @@ export default function CustomersPage() {
 
   function overdueContext(customerName: string): string {
     const overdue = invoices
-      .filter((inv) => inv.customer === customerName && Number(inv.total) > Number(inv.paid))
+      .filter((inv) => inv.customer === customerName && isInvoiceOpen(inv))
       .sort((a, b) => a.date.localeCompare(b.date));
     if (overdue.length === 0) return '';
     return `${overdue.length} unpaid invoice${overdue.length > 1 ? 's' : ''}, oldest ${overdue[0].id} dated ${overdue[0].date}.`;
@@ -143,7 +144,7 @@ export default function CustomersPage() {
   const unpaidInvoiceCount = useMemo(() => {
     const counts = new Map<string, number>();
     for (const inv of invoices) {
-      if (Number(inv.total) > Number(inv.paid)) counts.set(inv.customer, (counts.get(inv.customer) ?? 0) + 1);
+      if (isInvoiceOpen(inv)) counts.set(inv.customer, (counts.get(inv.customer) ?? 0) + 1);
     }
     return counts;
   }, [invoices]);

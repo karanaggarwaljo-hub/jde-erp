@@ -24,9 +24,11 @@ import {
   MapPin,
   Undo2,
   Wallet,
+  HandCoins,
   History,
 } from 'lucide-react';
-import { saveSalesInvoice, deleteSalesInvoice, deleteCustomerPayment } from '@/lib/client-sales';
+import { saveSalesInvoice, deleteSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance } from '@/lib/client-sales';
+import { invoiceBalanceDue, invoiceWrittenOff, wasSettledShort } from '@/lib/invoice-balance';
 import { createSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem } from '@/lib/client-sales-returns';
 import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } from '@/lib/client-quotations';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -45,7 +47,7 @@ type Product = { id: string; company_id: string; part_number: string; name: stri
 type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
 // gst_percent / gst_amount are on the invoice table but were never filled in by the atomic save,
 // so they are absent on every invoice written before this screen started recording them.
-type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string; discount_percent: number; discount_amount: number; gst_percent?: number | null; gst_amount?: number | null; gst_mode?: string | null };
+type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; settlement_write_off: number; status: string; mode: string; discount_percent: number; discount_amount: number; gst_percent?: number | null; gst_amount?: number | null; gst_mode?: string | null };
 type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
 type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_price: number; line_total: number; discount_percent?: number; discount_amount?: number };
 type Payment = { id: string; company_id: string; customer_id: string; customer: string; date: string; amount: number; note: string; created_at: string };
@@ -169,6 +171,13 @@ export default function SalesPage() {
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Invoice | null>(null);
+  // Closing what is still owing on an invoice the customer settled by paying less than it was
+  // for. Deliberately separate from recording a payment: no money changes hands here.
+  const [settlingInvoice, setSettlingInvoice] = useState<Invoice | null>(null);
+  const [settleAmount, setSettleAmount] = useState(0);
+  const [settleReason, setSettleReason] = useState('');
+  const [settleError, setSettleError] = useState('');
+  const [savingSettlement, setSavingSettlement] = useState(false);
   const [returnCandidate, setReturnCandidate] = useState<Invoice | null>(null);
   const [returnableItems, setReturnableItems] = useState<ReturnableInvoiceItem[]>([]);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
@@ -276,7 +285,7 @@ export default function SalesPage() {
   // money: parking it added nothing to the customer's balance, so confirming it has to start from
   // zero outstanding. Starting from its total would reverse a debt that was never recorded.
   const editingDraft = Boolean(editingInvoice && editingInvoice.status === DRAFT_STATUS);
-  const editingOldOutstanding = editingInvoice && !editingDraft ? Number(editingInvoice.total) - Number(editingInvoice.paid) : 0;
+  const editingOldOutstanding = editingInvoice && !editingDraft ? invoiceBalanceDue(editingInvoice) : 0;
   const newOutstanding = total - paidAmount;
   /** Anything left owing has to be owed by someone nameable — see the check in saveInvoice. */
   const creditSaleNeedsCustomer = total > 0 && paidAmount < total && !selectedCustomer;
@@ -311,7 +320,7 @@ export default function SalesPage() {
 
   const totalRevenue = liveInvoices.reduce((t, inv) => t + Number(inv.total || 0), 0);
   const avgOrderValue = liveInvoices.length > 0 ? totalRevenue / liveInvoices.length : 0;
-  const outstandingDue = liveInvoices.reduce((t, inv) => t + Math.max(0, Number(inv.total) - Number(inv.paid)), 0);
+  const outstandingDue = liveInvoices.reduce((t, inv) => t + invoiceBalanceDue(inv), 0);
   const productRevenue = new Map<string, number>();
   for (const item of invoiceItems) {
     // Line items belonging to a draft are left out for the same reason: nothing has been sold yet.
@@ -323,7 +332,7 @@ export default function SalesPage() {
 
   // One definition of paid / partly paid / unpaid for the whole screen, so the KPI contexts, the
   // filter tabs and the row badges can never disagree with each other.
-  const balanceOf = (invoice: Invoice) => Number(invoice.total) - Number(invoice.paid);
+  const balanceOf = (invoice: Invoice) => invoiceBalanceDue(invoice);
   const isSettled = (invoice: Invoice) => balanceOf(invoice) <= 0;
   const isPartlyPaid = (invoice: Invoice) => Number(invoice.paid) > 0 && balanceOf(invoice) > 0;
   const isUnpaid = (invoice: Invoice) => Number(invoice.paid) <= 0 && balanceOf(invoice) > 0;
@@ -772,6 +781,38 @@ export default function SalesPage() {
     }
   };
 
+  const openSettleShort = (invoice: Invoice) => {
+    setSettlingInvoice(invoice);
+    // Defaults to forgiving the whole remaining balance, which is what "we're settled" usually
+    // means — still editable when only part of it is being let go.
+    setSettleAmount(invoiceBalanceDue(invoice));
+    setSettleReason('');
+    setSettleError('');
+  };
+
+  const confirmSettleShort = async () => {
+    if (!settlingInvoice || !activeCompany || savingSettlement) return;
+    setSettleError('');
+    setSavingSettlement(true);
+    try {
+      // How much may be written off is decided by the database, which locks the invoice first —
+      // this amount is only a request.
+      const result = await writeOffInvoiceBalance({
+        companyId: activeCompany.id,
+        invoiceId: settlingInvoice.id,
+        amount: settleAmount,
+        reason: settleReason,
+      });
+      await Promise.all([reloadInvoices(), reloadCustomers()]);
+      setFeedback(`₹${money(result.written_off)} written off on ${settlingInvoice.id}${result.remaining_due > 0 ? ` — ₹${money(result.remaining_due)} still owing` : ' — nothing left owing'}.`);
+      setSettlingInvoice(null);
+    } catch (error) {
+      setSettleError(error instanceof Error ? error.message : 'This settlement was not recorded.');
+    } finally {
+      setSavingSettlement(false);
+    }
+  };
+
   const confirmDeleteInvoice = async () => {
     if (!deleteCandidate || !activeCompany) return;
     setDeleteError('');
@@ -1065,7 +1106,8 @@ export default function SalesPage() {
                   </tr>
                 </thead>
                 <tbody>{pagedInvoices.map((invoice) => {
-                  const balance = Number(invoice.total) - Number(invoice.paid);
+                  const balance = invoiceBalanceDue(invoice);
+                  const writtenOff = invoiceWrittenOff(invoice);
                   const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
                   const productLabel = items[0]?.name ?? (invoice.items > 0 ? 'Legacy sale' : '—');
                   const customerRow = customers.find((c) => c.name === invoice.customer);
@@ -1108,11 +1150,15 @@ export default function SalesPage() {
                         <div className={`meter${balance <= 0 ? '' : Number(invoice.paid) <= 0 ? ' meter--out' : ' meter--low'}`} aria-hidden="true">
                           <i style={{ width: `${receivedPercent}%` }} />
                         </div>
+                        {/* Said out loud rather than folded into "paid": this money never arrived. */}
+                        {writtenOff > 0 && <div className="text-muted text-sm" style={{ marginTop: '2px' }}>₹{money(writtenOff)} written off</div>}
                       </div>
                     </td>
                     <td>
                       {balance <= 0
-                        ? <span className="badge badge-success"><CheckCircle2 size={12} />Paid</span>
+                        ? writtenOff > 0
+                          ? <span className="badge badge-success"><CheckCircle2 size={12} />Settled</span>
+                          : <span className="badge badge-success"><CheckCircle2 size={12} />Paid</span>
                         : Number(invoice.paid) > 0
                           ? <span className="badge badge-warning"><AlertTriangle size={12} />Due ₹{money(balance)}</span>
                           : <span className="badge badge-danger"><XCircle size={12} />Unpaid</span>}
@@ -1122,10 +1168,12 @@ export default function SalesPage() {
                       <button
                         className="btn btn-ghost btn-sm"
                         aria-label={`Edit ${invoice.id}`}
-                        title={items.length > 0 ? 'Edit invoice' : "Edit unavailable — this invoice predates line-item tracking"}
-                        disabled={items.length === 0}
-                        style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
-                        onClick={() => items.length > 0 && openEditInvoice(invoice)}
+                        title={writtenOff > 0
+                          ? 'Edit unavailable — this invoice was settled short, so its amounts are fixed'
+                          : items.length > 0 ? 'Edit invoice' : "Edit unavailable — this invoice predates line-item tracking"}
+                        disabled={items.length === 0 || writtenOff > 0}
+                        style={items.length === 0 || writtenOff > 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+                        onClick={() => items.length > 0 && writtenOff === 0 && openEditInvoice(invoice)}
                       ><Pencil size={14} /></button>
                       <button
                         className="btn btn-ghost btn-sm"
@@ -1135,6 +1183,14 @@ export default function SalesPage() {
                         style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         onClick={() => items.length > 0 && openSalesReturn(invoice)}
                       ><Undo2 size={14} /></button>
+                      {balance > 0 && !isDraft(invoice) && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          aria-label={`Settle ${invoice.id} for less`}
+                          title={`Customer paid less and this is settled — write off the remaining ₹${money(balance)}`}
+                          onClick={() => openSettleShort(invoice)}
+                        ><HandCoins size={14} /></button>
+                      )}
                       <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={() => window.open(`/sales/invoice/${invoice.id}`, '_blank')}><Printer size={14} /></button>
                       <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`} title="Delete invoice" style={{ color: 'var(--color-danger)' }} onClick={() => setDeleteCandidate(invoice)}><Trash2 size={14} /></button>
                     </div></td>
@@ -1383,17 +1439,58 @@ export default function SalesPage() {
             {Number(viewingInvoice.discount_amount) > 0 && <div className="report-line"><span>Discount ({Number(viewingInvoice.discount_percent).toFixed(0)}%)</span><span className="text-danger">-₹{money(Number(viewingInvoice.discount_amount))}</span></div>}
             <div className="report-line report-strong"><span>Total</span><strong>₹{money(Number(viewingInvoice.total))}</strong></div>
             <div className="report-line"><span>Paid</span><strong className="text-success">₹{money(Number(viewingInvoice.paid))}</strong></div>
-            <div className="report-line"><span>Balance</span><strong className="text-danger">₹{money(Number(viewingInvoice.total) - Number(viewingInvoice.paid))}</strong></div>
+            {wasSettledShort(viewingInvoice) && (
+              <div className="report-line"><span>Written off (settled short)</span><strong className="text-muted">₹{money(invoiceWrittenOff(viewingInvoice))}</strong></div>
+            )}
+            <div className="report-line"><span>Balance</span><strong className={invoiceBalanceDue(viewingInvoice) > 0 ? 'text-danger' : 'text-muted'}>₹{money(invoiceBalanceDue(viewingInvoice))}</strong></div>
           </div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/invoice/${viewingInvoice.id}`, '_blank')}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingInvoice(null)}>Close</button></div>
+      </div></div>}
+
+      {settlingInvoice && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '460px' }} role="dialog" aria-modal="true" aria-labelledby="settle-short-title">
+        <div className="modal-header">
+          <div>
+            <h3 id="settle-short-title" className="modal-title flex items-center gap-2"><HandCoins size={16} /> Settle for less</h3>
+            <p className="text-muted text-sm">For when the customer pays less and you agree that closes it.</p>
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingSettlement} onClick={() => setSettlingInvoice(null)}>✕</button>
+        </div>
+        <div className="modal-body flex flex-col gap-3">
+          {settleError && <div className="alert alert-danger" role="alert">{settleError}</div>}
+          <div className="report-summary">
+            <div className="report-line"><span>{settlingInvoice.id} — {settlingInvoice.customer}</span><span className="text-muted">{settlingInvoice.date}</span></div>
+            <div className="report-line"><span>Invoice total</span><strong>₹{money(Number(settlingInvoice.total))}</strong></div>
+            <div className="report-line"><span>Received</span><strong className="text-success">₹{money(Number(settlingInvoice.paid))}</strong></div>
+            <div className="report-line report-strong"><span>Still owing</span><strong className="text-danger">₹{money(invoiceBalanceDue(settlingInvoice))}</strong></div>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="settle-amount">Amount to write off (₹)</label>
+            <input id="settle-amount" type="number" min="0.01" step="0.01" max={invoiceBalanceDue(settlingInvoice)} className="form-input"
+              value={settleAmount} disabled={savingSettlement} onChange={(event) => setSettleAmount(Number(event.target.value))} autoFocus />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="settle-reason">Why (optional)</label>
+            <input id="settle-reason" type="text" className="form-input" placeholder="e.g. rounded off in cash, agreed discount for late delivery"
+              value={settleReason} disabled={savingSettlement} onChange={(event) => setSettleReason(event.target.value)} />
+          </div>
+          <p className="text-muted" style={{ fontSize: '12px' }}>
+            {settlingInvoice.customer} stops owing this, and the invoice keeps the total it was issued for.
+            It is <strong>not</strong> counted as money received — it will show as written off, so your
+            takings stay honest. Record any cash the customer actually handed over as a payment first.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-secondary" disabled={savingSettlement} onClick={() => setSettlingInvoice(null)}>Cancel</button>
+          <button type="button" className="btn btn-primary" disabled={savingSettlement || !(settleAmount > 0)} onClick={confirmSettleShort}>{savingSettlement ? 'Recording…' : 'Write It Off'}</button>
+        </div>
       </div></div>}
 
       {deleteCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="delete-invoice-title">
         <div className="modal-header"><h3 id="delete-invoice-title" className="modal-title">Delete invoice?</h3></div>
         <div className="modal-body flex flex-col gap-3">
           {deleteError && <div className="alert alert-danger" role="alert">{deleteError}</div>}
-          <p>This will delete <strong>{deleteCandidate.id}</strong> and add its items back to stock{customers.some((c) => c.name === deleteCandidate.customer) ? ` and reduce ${deleteCandidate.customer}'s balance by the outstanding ₹${(Number(deleteCandidate.total) - Number(deleteCandidate.paid)).toLocaleString()}` : ''}.</p>
+          <p>This will delete <strong>{deleteCandidate.id}</strong> and add its items back to stock{customers.some((c) => c.name === deleteCandidate.customer) ? ` and reduce ${deleteCandidate.customer}'s balance by the outstanding ₹${invoiceBalanceDue(deleteCandidate).toLocaleString()}` : ''}.</p>
         </div>
         <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setDeleteCandidate(null)} disabled={deletingInvoice}>Cancel</button><button className="btn btn-danger" onClick={confirmDeleteInvoice} disabled={deletingInvoice}>{deletingInvoice ? 'Deleting…' : 'Delete Invoice'}</button></div>
       </div></div>}

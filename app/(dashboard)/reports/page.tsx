@@ -6,10 +6,11 @@ import { Download, Printer, TrendingUp, TrendingDown, ShoppingBag, Wallet, Recei
 import { printCurrentPage } from '@/lib/client-export';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import AIReportSummary from '@/components/AIReportSummary';
+import { invoiceBalanceDue } from '@/lib/invoice-balance';
 
 type ReportType = 'pnl' | 'sales' | 'stock' | 'gst' | 'aging';
 
-type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string };
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string };
 type Expense = { amount: number };
 type Product = { category: string; current_stock: number; cost_price: number; sale_price: number };
@@ -156,7 +157,7 @@ export default function ReportsPage() {
 
   const salesRows = [...invoices].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 15);
   const avgOrderValue = invoices.length > 0 ? totalRevenue / invoices.length : 0;
-  const salesOutstandingDue = invoices.reduce((t, i) => t + Math.max(0, Number(i.total) - Number(i.paid)), 0);
+  const salesOutstandingDue = invoices.reduce((t, i) => t + invoiceBalanceDue(i), 0);
 
   const stockByCategory = new Map<string, { count: number; qty: number; cost: number; retail: number }>();
   for (const p of products) {
@@ -183,7 +184,7 @@ export default function ReportsPage() {
 
   const today = new Date();
   const receivablesAging = agingFrom(
-    invoices.map((inv) => ({ key: inv.customer, date: inv.date, due: Number(inv.total) - Number(inv.paid) })),
+    invoices.map((inv) => ({ key: inv.customer, date: inv.date, due: invoiceBalanceDue(inv) })),
     today
   );
   const payablesAging = agingFrom(

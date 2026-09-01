@@ -1,9 +1,10 @@
 import { listRows, getActiveCompanyId } from '@/lib/db';
+import { invoiceBalanceDue } from '@/lib/invoice-balance';
 
 type Product = { name: string; part_number: string; brand: string; category: string; current_stock: number; min_stock: number; cost_price: number };
 type Customer = { balance: number };
 type Supplier = { name: string; balance: number };
-type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string };
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; };
 type Quotation = { status: string };
 type PurchaseOrder = { date: string; total: number; status: string };
 type Expense = { category: string; amount: number; date: string };
@@ -79,7 +80,7 @@ export async function buildBusinessDigest() {
       revenue_90d: sum(invoices90, 'total'),
       revenue_30d: sum(invoices30, 'total'),
       revenue_7d: sum(invoices7, 'total'),
-      outstanding_receivables: invoices.reduce((t, i) => t + (Number(i.total) - Number(i.paid)), 0),
+      outstanding_receivables: invoices.reduce((t, i) => t + invoiceBalanceDue(i), 0),
       invoice_status_breakdown: countByStatus(invoices90),
       open_quotations: quotations.filter((q) => q.status !== 'accepted' && q.status !== 'rejected').length,
     },
