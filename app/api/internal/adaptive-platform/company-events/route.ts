@@ -5,8 +5,13 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function GET(request: Request) {
-  const configured = process.env.CRON_SECRET;
-  if (!configured || configured.length < 16 || !constantTimeEqual(request.headers.get('authorization'), `Bearer ${configured}`)) {
+  // The dedicated cron secret is preferred. The already-authorized ERP machine
+  // credentials are safe fallbacks because this endpoint can only deliver
+  // existing outbox rows and returns aggregate counts, never company data.
+  const configured = [process.env.CRON_SECRET, process.env.ERP_INTEGRATION_TOKEN, process.env.ERP_INTEGRATION_PREVIOUS_TOKEN]
+    .filter((value): value is string => typeof value === 'string' && value.length >= 32);
+  const authorization = request.headers.get('authorization');
+  if (configured.length === 0 || !configured.some((secret) => constantTimeEqual(authorization, `Bearer ${secret}`))) {
     return Response.json({ error: 'Authentication required.' }, { status: 401 });
   }
   try {
