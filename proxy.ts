@@ -29,12 +29,16 @@ const SESSION_ONLY_EXACT = new Set(['/accept-invite', '/api/auth/accept-invite']
 // Machine-to-machine endpoints authenticate themselves with a dedicated, company-scoped bearer
 // token inside their Route Handlers. They must bypass the browser's Supabase-cookie gate, but are
 // not public: a missing/invalid integration token is rejected before any database read occurs.
-const SERVICE_AUTH_PREFIXES = ['/api/integration/v1'];
+const SERVICE_AUTH_PREFIXES = ['/api/integration/v1', '/api/internal/adaptive-platform'];
 
 
 function matchesAny(pathname: string, exact: Set<string>, prefixes: string[] = []): boolean {
   if (exact.has(pathname)) return true;
   return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+export function isServiceAuthenticatedPath(pathname: string): boolean {
+  return matchesAny(pathname, new Set(), SERVICE_AUTH_PREFIXES);
 }
 
 
@@ -57,7 +61,7 @@ export async function proxy(request: NextRequest) {
   }
 
 
-  if (matchesAny(pathname, new Set(), SERVICE_AUTH_PREFIXES)) {
+  if (isServiceAuthenticatedPath(pathname)) {
     return NextResponse.next({ request });
   }
 
