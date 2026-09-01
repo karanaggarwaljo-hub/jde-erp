@@ -384,7 +384,29 @@ export async function hashFile(file: File): Promise<string> {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export const SPREADSHEET_EXTENSIONS = ['.csv', '.xls', '.xlsx'];
+/** Every spreadsheet format the bundled reader actually handles — verified by writing one of each
+ *  and reading it back through parseInventoryFile and readSheetForCostUpdate, all nine succeeding.
+ *
+ *  The list used to be just .csv/.xls/.xlsx, which is what the file picker offered, so a perfectly
+ *  readable file in any other format was greyed out in the dialog and appeared not to exist. The
+ *  reader was never the limitation; the filter was.
+ *
+ *  .xlsm is the common one to miss: Excel switches a workbook to it the moment it contains a macro,
+ *  and nothing about the data changes. */
+export const SPREADSHEET_EXTENSIONS = [
+  '.csv', '.xls', '.xlsx', '.xlsm', '.xlsb', '.ods', '.fods', '.txt', '.tsv', '.dif',
+];
+
+/** The `accept` attribute for a spreadsheet picker, derived from the list above so the dialog can
+ *  never again offer less than the app can read. */
+export const SPREADSHEET_ACCEPT = SPREADSHEET_EXTENSIONS.join(',');
+
+/** True when the reader is expected to cope with this file, judged on its name. Used both to filter
+ *  a dropped file and to explain a rejection, so the two can never disagree. */
+export function isSpreadsheetFileName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return SPREADSHEET_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
 export const SCANNABLE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
 
 /* ---------------------------------------------------------------------------------------------
