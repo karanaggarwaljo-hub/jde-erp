@@ -1812,3 +1812,79 @@ Modal
 
 .dropzone-title { font-size: 16px; font-weight: 650; color: var(--ink); }
 .dropzone-hint { font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
+
+/* ── Activity heatmap ───────────────────────────────────────────────────────────────────────
+   One square per day, columns running left to right as weeks. The five fills are the app's own
+   amber ramp rather than a second palette, and level 0 uses the panel tint so a quiet day still
+   reads as a day rather than as a hole in the grid. */
+.activity-grid {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.activity-week { display: flex; flex-direction: column; gap: 3px; }
+
+.activity-day {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  flex: none;
+}
+
+.activity-day[data-level="1"] { background: #FBE7C2; border-color: var(--amber-line); }
+.activity-day[data-level="2"] { background: #F5C86E; border-color: var(--amber-line); }
+.activity-day[data-level="3"] { background: var(--brand-primary-light); border-color: var(--amber); }
+.activity-day[data-level="4"] { background: var(--amber); border-color: var(--amber-2); }
+
+/* Days that haven't happened yet: outlined, not filled, so they can't be mistaken for a day
+   with nothing on it. */
+.activity-day[data-future="true"] { background: transparent; border-style: dashed; }
+
+.activity-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.activity-legend .activity-day { width: 11px; height: 11px; }
+
+.activity-months {
+  display: flex;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  margin-bottom: 4px;
+}
+
+.activity-month { width: 13px; flex: none; white-space: nowrap; }
+
+.activity-stat {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+
+.activity-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--ink-3);
+  font-weight: 600;
+}
+
+.activity-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.activity-stat-context { font-size: 11.5px; color: var(--ink-3); }

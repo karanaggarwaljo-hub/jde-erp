@@ -2,6 +2,38 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-02 — New: Everyday Activity on the Dashboard
+
+Asked for: something like the activity grid in that screenshot, showing everyday activity.
+
+Added to the Dashboard, above Recent Activity: one small square per day, shaded by how much you
+did, plus the figures that go with it — days with activity, your current run of working days, your
+longest run ever, your busiest single day, and the total records on file. Hover any square to see
+that day.
+
+Every square counts real records — invoices, purchases, expenses and quotations — on the date
+written on each one. Parked drafts are left out; a sale you haven't confirmed isn't a day's
+trading.
+
+**Two things in that screenshot are deliberately missing.**
+
+*Peak hour* is not there, and won't be, because this system doesn't know it. A sale carries a date,
+never a clock time. The nearest thing in the database is when a record was typed in — and that is
+badly misleading: 675 of your opening-stock entries all landed in one late-night hour because that
+is when the stock was bulk-loaded, not because 11 PM is when you trade. A "peak hour" drawn from
+that would look convincing and be false, so the card says plainly why it isn't shown.
+
+*Six months of squares* is also gone. Your records start on 30 July, so a fixed six-month grid
+would show four blank months that read as quiet days when the truth is the books don't go back
+that far. The grid now reaches back to your oldest record and no further — eight weeks today,
+growing on its own to a six-month maximum as you keep using it.
+
+Right now it shows 10 days with activity, a longest run of 4 days, and 1 September as your busiest
+day with 7 records.
+
+Eighteen automated tests cover the counting, the streaks, and the awkward cases — a run that
+reaches yesterday is shown as still alive rather than broken, since the day isn't over.
+
 ## 2026-09-02 — Fixed: the daily backup had not run once since the site went online
 
 Your live data was never in danger — Supabase holds the real thing, and nothing here touches it.
