@@ -16,6 +16,8 @@
 export type CustomerTier = 'diamond' | 'gold' | 'silver' | 'new';
 export type CustomerFlag = 'defaulter' | 'bargainer' | 'dormant';
 
+import { invoiceBalanceDue } from '@/lib/invoice-balance';
+
 /** Only the invoice fields this needs, so callers can pass their own richer rows. */
 export type InsightsInvoice = {
   id: string;
@@ -26,6 +28,8 @@ export type InsightsInvoice = {
   paid: number;
   status: string;
   discount_amount?: number | null;
+  /** Optional: rows saved before settlements existed simply have nothing written off. */
+  settlement_write_off?: number | null;
 };
 
 export type InsightsInvoiceItem = { id: string; invoice_id: string; line_total: number };
@@ -181,7 +185,9 @@ export function buildCustomerInsights(input: {
       discount += invoiceDiscount;
       grossBeforeDiscount += invoiceRevenue + invoiceDiscount;
 
-      const due = Math.max(invoiceRevenue - Number(invoice.paid ?? 0), 0);
+      // A shortfall the customer was let off is no longer outstanding — it was forgiven, not
+      // collected, so it belongs in neither this figure nor `paid`.
+      const due = invoiceBalanceDue(invoice);
       if (due > 0) {
         outstanding += due;
         if (!oldestUnpaidDate || invoice.date < oldestUnpaidDate) oldestUnpaidDate = invoice.date;

@@ -20,12 +20,13 @@ import {
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { totalStockValue, type StockLayerLike } from '@/lib/stock-value';
+import { invoiceBalanceDue, isInvoiceOpen } from '@/lib/invoice-balance';
 import { useCompany } from '@/components/CompanyProvider';
 
 type Product = { id: string; part_number: string; name: string; brand: string; category: string; cost_price: number; current_stock: number; min_stock: number; location: string };
 type Customer = { id: string; balance: number };
 type Supplier = { id: string; name: string; balance: number };
-type Invoice = { id: string; customer: string; date: string; total: number; paid: number };
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; settlement_write_off: number; };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number };
 type Grn = { id: string; po_number: string; supplier: string; received_at: string };
 type Quotation = { id: string; customer: string; date: string; total: number };
@@ -122,9 +123,9 @@ export default function DashboardPage() {
   // mockup's GST filing reminder is left out entirely because no filing dates are stored.
   const unpaidAgeCutoff = isoDate(daysAgoDate(30));
   const agedUnpaidInvoices = invoices
-    .filter((inv) => Number(inv.total || 0) - Number(inv.paid || 0) > 0 && inv.date < unpaidAgeCutoff)
+    .filter((inv) => isInvoiceOpen(inv) && inv.date < unpaidAgeCutoff)
     .sort((a, b) => a.date.localeCompare(b.date));
-  const agedUnpaidAmount = agedUnpaidInvoices.reduce((t, inv) => t + (Number(inv.total || 0) - Number(inv.paid || 0)), 0);
+  const agedUnpaidAmount = agedUnpaidInvoices.reduce((t, inv) => t + invoiceBalanceDue(inv), 0);
   const agedUnpaidCustomers = Array.from(new Set(agedUnpaidInvoices.map((inv) => inv.customer).filter(Boolean)));
   const outOfStockProducts = products.filter((p) => Number(p.current_stock || 0) <= 0);
   // Parts that still have stock but have fallen to or under their own reorder level. Split out

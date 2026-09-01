@@ -2,6 +2,45 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-01 — When a customer settles by paying less
+
+Reported: sometimes a customer settles their payment by giving a lesser amount.
+
+There was nowhere for that to go. If a customer owed ₹41,356.75 and handed over ₹40,000 with
+"that's settled", the ₹1,356.75 stayed on the books forever — the invoice never closed, the
+customer kept appearing in your collection queue, and your receivables total counted money nobody
+was ever going to pay.
+
+**Two places now handle it.**
+
+When you record the payment, each open invoice has a *Settle for less* tick box showing exactly
+what would be left over — tick it and that remainder is forgiven as part of the same action.
+
+And any invoice with money still owing has a new button in Sales (the hand-with-coins icon) for
+settling one after the fact, with a box for why — "rounded off in cash", "agreed discount for late
+delivery". Useful for the ones already sitting open.
+
+**What it deliberately does not do is pretend the money arrived.** The easy way to build this
+would have been to add the shortfall to the invoice's "paid" figure. Everything would close
+neatly — and every takings figure, report and AI summary in the app would then be quietly
+overstated by money you never received. So the invoice keeps the total it was issued for, "paid"
+keeps meaning cash that actually came in, and what you let go is recorded separately and labelled
+"written off" wherever it appears. The customer stops owing it; your takings stay honest.
+
+Every screen that showed what a customer owes now understands settled invoices — the Sales list,
+the invoice page, the customer collection queue, the Dashboard's unpaid-bills warning, the
+receivables report and its ageing table, the exported spreadsheet, and the AI daily briefing.
+
+A settled invoice can no longer be edited or deleted, and says so — its amounts are fixed once you
+have agreed the account is closed.
+
+Checked against the live database with real invoices and undone immediately: writing off part of a
+balance, then the rest; trying to write off a rupee more than is owed, a zero, a negative, another
+company's invoice, and a second settlement on an already-closed invoice — the first two accepted
+with the customer's balance moving by exactly the right amount and the paid figure untouched at
+₹40,000 throughout, the rest refused with a plain message. Twelve new automated tests cover the
+arithmetic.
+
 ## 2026-09-01 — Supplier payments, and showing what a scan actually read
 
 Reported: the HSN code isn't being extracted from the invoice, and there's no way to say whether

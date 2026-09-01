@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { useCompany } from '@/components/CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { invoiceBalanceDue, invoiceWrittenOff } from '@/lib/invoice-balance';
 
 // Copied verbatim from app/(dashboard)/sales/page.tsx (search `type Invoice =` / `type InvoiceItem =`
 // / `type Customer =` there) — that file is the source of truth for these shapes and doesn't export
@@ -17,6 +18,9 @@ type Invoice = {
   items: number;
   total: number;
   paid: number;
+  /** What the customer was let off when they settled for less than the invoice. Kept apart from
+   *  `paid` so this document never claims money arrived that didn't. */
+  settlement_write_off: number;
   status: string;
   mode: string;
   discount_percent: number;
@@ -79,7 +83,8 @@ export default function SalesInvoicePrintPage() {
 
   const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
   const customer = customers.find((row) => row.name === invoice.customer);
-  const balanceDue = Number(invoice.total) - Number(invoice.paid);
+  const balanceDue = invoiceBalanceDue(invoice);
+  const writtenOff = invoiceWrittenOff(invoice);
   const discountAmount = Number(invoice.discount_amount || 0);
 
   // Subtotal and GST are not columns on the invoice row itself — only `total`, `discount_percent`
@@ -206,6 +211,10 @@ export default function SalesInvoicePrintPage() {
           )}
           <div className="report-line report-strong"><span>Total</span><strong>₹{money(Number(invoice.total))}</strong></div>
           <div className="report-line"><span>Paid</span><strong className="text-success">₹{money(Number(invoice.paid))}</strong></div>
+          {/* Its own line, never folded into Paid — this money was forgiven, not received. */}
+          {writtenOff > 0 && (
+            <div className="report-line"><span>Written off (settled short)</span><strong className="text-muted">₹{money(writtenOff)}</strong></div>
+          )}
           <div className={`report-line report-strong${balanceDue > 0 ? ' invoice-balance-due' : ''}`}>
             <span>Balance Due</span>
             <strong className={balanceDue > 0 ? 'text-danger' : 'text-success'}>₹{money(balanceDue)}</strong>

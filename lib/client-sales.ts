@@ -89,6 +89,25 @@ export function receiveCustomerPayment(input: ReceiveCustomerPaymentInput) {
   return postJson<{ payment_id: string; applied_total: number }>('/api/sales/payments', input);
 }
 
+export type WriteOffInvoiceInput = {
+  companyId: string;
+  invoiceId: string;
+  amount: number;
+  reason: string;
+  /** Blank means today — the database decides, rather than trusting the browser's clock. */
+  date?: string;
+};
+
+/** Closes what a customer still owes on an invoice they settled by paying less. The invoice keeps
+ *  its issued total and its recorded payments; the shortfall is written off separately, with a
+ *  reason, and comes off the customer's balance. */
+export function writeOffInvoiceBalance(input: WriteOffInvoiceInput) {
+  return postJson<{ write_off_id: string; written_off: number; remaining_due: number; customer_balance: number | null }>(
+    '/api/sales/write-off',
+    input
+  );
+}
+
 /** Atomically reverses a recorded payment — restores every invoice it touched to its prior paid
  *  amount and status and corrects the customer balance — for a payment entered wrong. */
 export function deleteCustomerPayment(companyId: string, paymentId: string) {

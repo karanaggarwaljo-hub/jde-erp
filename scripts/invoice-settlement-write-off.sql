@@ -1,0 +1,51 @@
+-- Applied to the live Supabase project on 2026-09-01 as migrations
+--   add_invoice_settlement_write_off
+--   write_off_invoice_balance_rpc
+--   guard_settled_invoices_against_edit_and_delete
+--
+-- A customer pays less than the invoice and both sides call it settled. Until now the shortfall
+-- had nowhere to go: the invoice stayed open forever with a small balance, the customer kept
+-- showing in the collection queue, and the receivables total counted money nobody would ever pay.
+--
+-- The tempting shortcut is to add the shortfall to `paid`. That closes everything with no code
+-- changes — and quietly turns forgiven debt into reported cash in every KPI, report and AI digest
+-- that reads `paid`. It is rejected for exactly that reason.
+--
+-- Instead the shortfall gets its own column, so all three numbers stay true:
+--
+--   total                   what the invoice was issued for  (unchanged — it is the document)
+--   paid                    money that actually arrived      (unchanged — never inflated)
+--   settlement_write_off    what the customer was let off    (new)
+--
+-- and "still owing" becomes total - paid - settlement_write_off everywhere. That definition now
+-- lives in one place in the app (lib/invoice-balance.ts) rather than being spelled out at each of
+-- the ~15 call sites that used to write `total - paid` by hand.
+--
+-- jde_write_off_invoice_balance locks the invoice, then in one transaction: writes an audit row
+-- (WOFF-####: how much, when, why), adds to settlement_write_off, marks the invoice paid when
+-- nothing is left, and takes the same amount off the customer's balance.
+--
+-- Verified against the live database, rolled back, on INV-1011 (3,186.75 owing at the time):
+--
+--   one paisa more than owing        rejected: "has only 3186.75 still owing"
+--   zero / negative                  rejected: "Enter an amount greater than zero to write off."
+--   another company's invoice        rejected: "was not found for the active company"
+--   write off 100                    still owing 3086.75, customer balance 3086.75, paid still 40000
+--   write off the remaining 3086.75  still owing 0.00, customer balance 0.00, paid STILL 40000,
+--                                    written off 3186.75, status paid
+--   write off again once settled     rejected: "has nothing left owing"
+--   audit trail                      WOFF-1001 100.00 "part" | WOFF-1002 3086.75 "settled short"
+--
+-- jde_delete_sales_invoice and jde_save_sales_invoice both reversed a customer's debt using
+-- (total - paid), which stopped being the whole story. Rather than teach them a second kind of
+-- arithmetic, both now refuse to touch an invoice that carries a write-off, with a message saying
+-- why. Reopening a settled invoice should be a deliberate act, not a side effect of an edit.
+--
+-- jde_invoice_writeoffs matches jde_sales_returns' isolation: RLS on, no policies, and grants
+-- limited to postgres | service_role — Supabase's default privileges hand every new table and
+-- function to anon and authenticated as EXPLICIT grants, which "revoke ... from public" does not
+-- remove, so they are revoked by name.
+--
+-- Rollback, if it is ever needed: the column is additive and defaults to 0, so dropping
+-- jde_write_off_invoice_balance and jde_invoice_writeoffs and leaving the column in place returns
+-- the app to its previous behaviour without touching any recorded money.
