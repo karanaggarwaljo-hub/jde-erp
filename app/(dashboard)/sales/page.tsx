@@ -37,7 +37,9 @@ import ReceivePaymentModal from '@/components/ReceivePaymentModal';
 type SalesTab = 'invoices' | 'quotations' | 'ledger';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid' | 'drafts';
-type InvoiceLine = { part: string; qty: number; price: number };
+/** `discount` is a percentage off THIS line only, kept separate from the invoice-wide discount
+ *  below. Optional because quotations reuse this shape and do not offer one — absent means none. */
+type InvoiceLine = { part: string; qty: number; price: number; discount?: number };
 
 type Product = { id: string; company_id: string; part_number: string; name: string; brand: string; hsn_code: string; category: string; sale_price: number; current_stock: number };
 type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
@@ -45,7 +47,7 @@ type Customer = { id: string; company_id: string; name: string; phone: string; e
 // so they are absent on every invoice written before this screen started recording them.
 type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string; discount_percent: number; discount_amount: number; gst_percent?: number | null; gst_amount?: number | null };
 type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
-type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_price: number; line_total: number };
+type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_price: number; line_total: number; discount_percent?: number; discount_amount?: number };
 type Payment = { id: string; company_id: string; customer_id: string; customer: string; date: string; amount: number; note: string; created_at: string };
 type PaymentAllocation = { id: string; payment_id: string; company_id: string; invoice_id: string; amount: number; created_at: string };
 
@@ -217,7 +219,16 @@ export default function SalesPage() {
   const [quoteDiscountPercent, setQuoteDiscountPercent] = useState(0);
   const [quoteGstPercent, setQuoteGstPercent] = useState(18);
 
-  const subtotal = lines.reduce((sum, line) => sum + line.qty * line.price, 0);
+  // Two discounts now exist and they stack in a fixed order: each line is discounted on its own
+  // first, and the invoice-wide discount then applies to whatever that leaves. Doing it the other
+  // way round would change the tax base, so the order is not cosmetic.
+  const lineGross = (line: InvoiceLine) => Number(line.qty) * Number(line.price);
+  const lineDiscountPercent = (line: InvoiceLine) => Math.min(100, Math.max(0, Number(line.discount) || 0));
+  const lineNet = (line: InvoiceLine) => lineGross(line) * (1 - lineDiscountPercent(line) / 100);
+
+  const grossSubtotal = lines.reduce((sum, line) => sum + lineGross(line), 0);
+  const subtotal = lines.reduce((sum, line) => sum + lineNet(line), 0);
+  const itemDiscountTotal = grossSubtotal - subtotal;
   const discountAmount = subtotal * (discountPercent / 100);
   const taxableAmount = subtotal - discountAmount;
   const gstAmount = taxableAmount * (gstPercent / 100);
@@ -329,7 +340,7 @@ export default function SalesPage() {
   const openInvoice = (presetCustomer?: string) => {
     setEditingInvoice(null);
     setCustomer(presetCustomer ?? '');
-    setLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0 }] : []);
+    setLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0, discount: 0 }] : []);
     setDiscountPercent(0);
     setGstPercent(18);
     setInvoiceDate(todayIso());
@@ -346,7 +357,7 @@ export default function SalesPage() {
     setInvoiceDate(invoice.date);
     setDiscountPercent(Number(invoice.discount_percent));
     setGstPercent(18);
-    setLines(items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price) })));
+    setLines(items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
     const paid = Number(invoice.paid);
     const invoiceTotal = Number(invoice.total);
     setPaymentStatus(paid >= invoiceTotal && invoiceTotal > 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid');
@@ -377,7 +388,7 @@ export default function SalesPage() {
     setQuoteCustomer('');
     setQuoteDate(date);
     setQuoteValidity(validity.toISOString().split('T')[0]);
-    setQuoteLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0 }] : []);
+    setQuoteLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0, discount: 0 }] : []);
     setQuoteDiscountPercent(0);
     setQuoteGstPercent(18);
     setQuotationError('');
@@ -508,7 +519,12 @@ export default function SalesPage() {
         name: product?.name ?? line.part,
         qty: line.qty,
         unit_price: line.price,
-        line_total: line.qty * line.price,
+        // What is actually charged for the line, already net of its own discount. Everything that
+        // reads line_total later — the printable invoice subtotal, sales returns, credit notes —
+        // therefore needs no knowledge of line discounts at all.
+        line_total: lineNet(line),
+        discount_percent: lineDiscountPercent(line),
+        discount_amount: lineGross(line) - lineNet(line),
       };
     });
 
@@ -1276,7 +1292,7 @@ export default function SalesPage() {
         <div className="modal-body flex flex-col gap-4">
           {quotationError && <div className="alert alert-danger" role="alert">{quotationError}</div>}
           <div className="form-grid-2"><div className="form-group"><label className="form-label">Customer</label><select required className="form-input form-select" value={quoteCustomer} onChange={(event) => setQuoteCustomer(event.target.value)}><option value="">Select customer…</option>{customers.map((entry) => <option key={entry.id} value={entry.name}>{entry.name}</option>)}</select></div><div className="form-group"><label className="form-label">Quote Date</label><input required type="date" className="form-input" value={quoteDate} onChange={(event) => setQuoteDate(event.target.value)} /></div><div className="form-group"><label className="form-label">Valid Until</label><input required type="date" min={quoteDate} className="form-input" value={quoteValidity} onChange={(event) => setQuoteValidity(event.target.value)} /></div></div>
-          <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Quoted Parts</h4>{partOptions.length === 0 && <p className="text-muted text-sm">Add parts in Inventory before creating a quotation.</p>}<datalist id="quotation-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>{quoteLines.map((line, index) => { const matched = partOptions.find((part) => part.value === line.part); return <div key={index} className="form-grid-4 mb-2"><div className="form-group"><label className="form-label">Part</label><input list="quotation-part-options" className="form-input" placeholder="Type to search a part…" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateQuoteLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }} />{line.part.trim() && !matched && <small className="text-danger">No matching part in Inventory</small>}</div><div className="form-group"><label className="form-label">Category</label><input className="form-input" value={matched?.category ?? '—'} disabled /></div><div className="form-group"><label className="form-label">Qty</label><input required type="number" min="1" className="form-input" value={line.qty} onChange={(event) => updateQuoteLine(index, { qty: Number(event.target.value) })} /></div><div className="form-group"><label className="form-label">Unit Price (₹)</label><input required type="number" min="0" className="form-input" value={line.price} onChange={(event) => updateQuoteLine(index, { price: Number(event.target.value) })} /></div></div>; })}{partOptions.length > 0 && <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setQuoteLines((current) => [...current, { part: '', qty: 1, price: 0 }])}>+ Add Item Row</button>}</div>
+          <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Quoted Parts</h4>{partOptions.length === 0 && <p className="text-muted text-sm">Add parts in Inventory before creating a quotation.</p>}<datalist id="quotation-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>{quoteLines.map((line, index) => { const matched = partOptions.find((part) => part.value === line.part); return <div key={index} className="form-grid-4 mb-2"><div className="form-group"><label className="form-label">Part</label><input list="quotation-part-options" className="form-input" placeholder="Type to search a part…" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateQuoteLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }} />{line.part.trim() && !matched && <small className="text-danger">No matching part in Inventory</small>}</div><div className="form-group"><label className="form-label">Category</label><input className="form-input" value={matched?.category ?? '—'} disabled /></div><div className="form-group"><label className="form-label">Qty</label><input required type="number" min="1" className="form-input" value={line.qty} onChange={(event) => updateQuoteLine(index, { qty: Number(event.target.value) })} /></div><div className="form-group"><label className="form-label">Unit Price (₹)</label><input required type="number" min="0" className="form-input" value={line.price} onChange={(event) => updateQuoteLine(index, { price: Number(event.target.value) })} /></div></div>; })}{partOptions.length > 0 && <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setQuoteLines((current) => [...current, { part: '', qty: 1, price: 0, discount: 0 }])}>+ Add Item Row</button>}</div>
           <div className="form-grid-2"><div className="form-group"><label className="form-label">Discount (%)</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={quoteDiscountPercent} onChange={(event) => setQuoteDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} /></div><div className="form-group"><label className="form-label">Discount Amount (₹)</label><input className="form-input" value={quoteDiscountAmount.toFixed(2)} disabled /></div><div className="form-group"><label className="form-label">GST Rate (%)</label><input type="number" min="0" max="28" step="0.1" className="form-input" value={quoteGstPercent} onChange={(event) => setQuoteGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} /></div><div className="form-group"><label className="form-label">GST Amount (₹)</label><input className="form-input" value={quoteGstAmount.toFixed(2)} disabled /></div></div>
           <div className="flex justify-between items-center invoice-summary"><div><span className="text-muted">Subtotal: </span><strong>₹{quoteSubtotal.toLocaleString()}</strong></div>{quoteDiscountAmount > 0 && <div><span className="text-muted">Discount: </span><strong className="text-danger">-₹{quoteDiscountAmount.toFixed(2)}</strong></div>}<div><span className="text-muted">GST ({quoteGstPercent}%): </span><strong>₹{quoteGstAmount.toFixed(2)}</strong></div><div><strong>Quote Total: </strong><span className="invoice-total">₹{quoteTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div></div>
         </div>
@@ -1411,7 +1427,8 @@ export default function SalesPage() {
                         <th style={{ width: '96px' }}>HSN</th>
                         <th className="text-right" style={{ width: '168px' }}>Qty</th>
                         <th className="text-right" style={{ width: '132px' }}>Rate</th>
-                        <th className="text-right" style={{ width: '130px' }}>Amount</th>
+                        <th className="text-right" style={{ width: '104px' }}>Disc %</th>
+                        <th className="text-right" style={{ width: '150px' }}>Amount</th>
                         <th style={{ width: '54px' }} aria-label="Remove line"></th>
                       </tr>
                     </thead>
@@ -1483,7 +1500,27 @@ export default function SalesPage() {
                                 onChange={(event) => updateLine(index, { price: Number(event.target.value) })}
                               />
                             </td>
-                            <td className="text-right font-semibold">₹{paise(line.qty * line.price)}</td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.1"
+                                className="form-input"
+                                style={{ textAlign: 'right' }}
+                                aria-label={`Discount percent on line ${index + 1}`}
+                                value={line.discount ?? 0}
+                                onChange={(event) => updateLine(index, { discount: Math.min(100, Math.max(0, Number(event.target.value))) })}
+                              />
+                            </td>
+                            <td className="text-right font-semibold">
+                              {lineDiscountPercent(line) > 0 && (
+                                <div style={{ fontSize: '11px', fontWeight: 400, color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+                                  ₹{paise(lineGross(line))}
+                                </div>
+                              )}
+                              ₹{paise(lineNet(line))}
+                            </td>
                             <td className="text-center">
                               <button
                                 type="button"
@@ -1498,7 +1535,7 @@ export default function SalesPage() {
                         );
                       })}
                       {lines.length === 0 && (
-                        <tr><td colSpan={6}><div className="empty-state" style={{ padding: '28px 20px' }}>
+                        <tr><td colSpan={7}><div className="empty-state" style={{ padding: '28px 20px' }}>
                           <p className="empty-state-title">{partOptions.length === 0 ? 'No parts to sell yet' : 'No lines on this invoice'}</p>
                           <p className="empty-state-desc">{partOptions.length === 0 ? 'Add parts in Inventory before creating an invoice.' : 'Add a line below to start billing.'}</p>
                         </div></td></tr>
@@ -1509,7 +1546,7 @@ export default function SalesPage() {
 
                 <div className="pager">
                   {partOptions.length > 0
-                    ? <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLines((current) => [...current, { part: '', qty: 1, price: 0 }])}><Plus size={14} /> Add line — type or scan a part number</button>
+                    ? <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLines((current) => [...current, { part: '', qty: 1, price: 0, discount: 0 }])}><Plus size={14} /> Add line — type or scan a part number</button>
                     : <span className="pager-info">Add parts in Inventory before creating an invoice.</span>}
                   <div className="pager-info"><strong>{lines.length}</strong> {lines.length === 1 ? 'line' : 'lines'}</div>
                 </div>
@@ -1519,8 +1556,9 @@ export default function SalesPage() {
                 <div className="flex flex-col gap-4">
                   <div className="form-grid-2">
                     <div className="form-group">
-                      <label className="form-label">Discount (%)</label>
+                      <label className="form-label">Whole-invoice discount (%)</label>
                       <input type="number" min="0" max="100" step="0.1" className="form-input" value={discountPercent} onChange={(event) => setDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} />
+                      <small className="text-muted">Applied on top of any per-item discounts. Leave at 0 to discount items only.</small>
                       <span className="text-muted text-sm">Applied on the subtotal</span>
                     </div>
                     <div className="form-group">
@@ -1557,9 +1595,20 @@ export default function SalesPage() {
                     of the same gstAmount, never a second sum. */}
                 <div className="card" style={{ background: 'var(--surface-2)' }}>
                   <div className="report-summary" style={{ maxWidth: 'none', margin: 0, padding: 0, gap: '0' }}>
-                    <div className="report-line"><span className="text-muted">Subtotal</span><strong>₹{paise(subtotal)}</strong></div>
+                    {/* Shown only when line discounts are actually in use, so an invoice without
+                        them reads exactly as it always did. */}
+                    {itemDiscountTotal > 0 && (
+                      <>
+                        <div className="report-line"><span className="text-muted">Gross amount</span><strong>₹{paise(grossSubtotal)}</strong></div>
+                        <div className="report-line">
+                          <span className="text-muted">Item discounts</span>
+                          <strong className="text-danger">-₹{paise(itemDiscountTotal)}</strong>
+                        </div>
+                      </>
+                    )}
+                    <div className="report-line"><span className="text-muted">Subtotal{itemDiscountTotal > 0 ? ' after item discounts' : ''}</span><strong>₹{paise(subtotal)}</strong></div>
                     <div className="report-line">
-                      <span className="text-muted">Discount ({discountPercent}%)</span>
+                      <span className="text-muted">Whole-invoice discount ({discountPercent}%)</span>
                       {discountAmount > 0
                         ? <strong className="text-danger">-₹{paise(discountAmount)}</strong>
                         : <strong>₹{paise(0)}</strong>}

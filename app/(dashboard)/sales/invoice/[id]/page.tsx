@@ -31,6 +31,8 @@ type InvoiceItem = {
   qty: number;
   unit_price: number;
   line_total: number;
+  discount_percent?: number;
+  discount_amount?: number;
 };
 type Customer = {
   id: string;
@@ -87,6 +89,9 @@ export default function SalesInvoicePrintPage() {
   // figures, not an estimate, so it's shown. Invoices that predate line-item tracking have nothing
   // to reconstruct it from, so the subtotal/GST rows are simply left out for them.
   const subtotal = items.reduce((sum, item) => sum + Number(item.line_total || 0), 0);
+  // Only worth a column when the invoice actually uses per-line discounts.
+  const anyLineDiscount = items.some((item) => Number(item.discount_percent) > 0);
+  const lineDiscountTotal = items.reduce((sum, item) => sum + Number(item.discount_amount || 0), 0);
   const gstAmount = items.length > 0 ? Number(invoice.total) - (subtotal - discountAmount) : 0;
 
   return (
@@ -136,6 +141,7 @@ export default function SalesInvoicePrintPage() {
                 <th>Description</th>
                 <th className="text-right">Qty</th>
                 <th className="text-right">Unit Price</th>
+                {anyLineDiscount && <th className="text-right">Discount</th>}
                 <th className="text-right">Line Total</th>
               </tr>
             </thead>
@@ -146,19 +152,29 @@ export default function SalesInvoicePrintPage() {
                   <td>{item.name}</td>
                   <td className="text-right">{item.qty}</td>
                   <td className="text-right">₹{money(Number(item.unit_price))}</td>
+                  {anyLineDiscount && (
+                    <td className="text-right">
+                      {Number(item.discount_percent) > 0
+                        ? `${Number(item.discount_percent)}%  (-₹${money(Number(item.discount_amount ?? 0))})`
+                        : '—'}
+                    </td>
+                  )}
                   <td className="text-right">₹{money(Number(item.line_total))}</td>
                 </tr>
               ))}
               {items.length === 0 && (
-                <tr><td colSpan={5}><p className="text-muted text-sm" style={{ padding: '12px 0' }}>Line items weren&apos;t recorded for this older invoice — only the total is available.</p></td></tr>
+                <tr><td colSpan={anyLineDiscount ? 6 : 5}><p className="text-muted text-sm" style={{ padding: '12px 0' }}>Line items weren&apos;t recorded for this older invoice — only the total is available.</p></td></tr>
               )}
             </tbody>
           </table>
         </div>
 
         <div className="report-summary">
+          {items.length > 0 && lineDiscountTotal > 0 && (
+            <div className="report-line"><span>Item discounts</span><span className="text-danger">-₹{money(lineDiscountTotal)}</span></div>
+          )}
           {items.length > 0 && (
-            <div className="report-line"><span>Subtotal</span><span>₹{money(subtotal)}</span></div>
+            <div className="report-line"><span>Subtotal{lineDiscountTotal > 0 ? " after item discounts" : ""}</span><span>₹{money(subtotal)}</span></div>
           )}
           {discountAmount > 0 && (
             <div className="report-line"><span>Discount ({Number(invoice.discount_percent).toFixed(0)}%)</span><span className="text-danger">-₹{money(discountAmount)}</span></div>
