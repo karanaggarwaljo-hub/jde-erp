@@ -29,7 +29,12 @@ const SESSION_ONLY_EXACT = new Set(['/accept-invite', '/api/auth/accept-invite']
 // Machine-to-machine endpoints authenticate themselves with a dedicated, company-scoped bearer
 // token inside their Route Handlers. They must bypass the browser's Supabase-cookie gate, but are
 // not public: a missing/invalid integration token is rejected before any database read occurs.
-const SERVICE_AUTH_PREFIXES = ['/api/integration/v1', '/api/internal/adaptive-platform'];
+//
+// /api/cron belongs here rather than in PUBLIC_EXACT above: a Vercel Cron request carries no
+// session cookie, so it has to bypass the browser gate, but "reachable by anyone, no session
+// required at all" is emphatically not what these routes are. Each one checks a Bearer
+// CRON_SECRET itself and refuses everybody when that secret is missing or too short.
+const SERVICE_AUTH_PREFIXES = ['/api/integration/v1', '/api/internal/adaptive-platform', '/api/cron'];
 
 
 function matchesAny(pathname: string, exact: Set<string>, prefixes: string[] = []): boolean {
@@ -45,10 +50,14 @@ export function isServiceAuthenticatedPath(pathname: string): boolean {
 // The one screen/actions that can delete a whole company or change other people's access.
 // /api/companies/active is deliberately excluded even though it shares the /api/companies
 // prefix — CompanyProvider calls it on mount for every dashboard page, for every role.
+//
+// /api/backup covers listing, creating and downloading snapshots. The Settings screen it is
+// reached from was already owner-only, but the routes behind it were not, so any active staff
+// login could pull a JSON copy of every company's data straight from the API.
 function isOwnerOnlyPath(pathname: string): boolean {
   if (pathname === '/api/companies/active') return false;
   if (pathname.startsWith('/api/companies/')) return true;
-  return matchesAny(pathname, new Set(), ['/settings', '/api/auth/invite', '/api/local/users', '/api/local/companies']);
+  return matchesAny(pathname, new Set(), ['/settings', '/api/auth/invite', '/api/local/users', '/api/local/companies', '/api/backup']);
 }
 
 

@@ -318,7 +318,16 @@ npx tsx scripts/stock-integrity-check.ts
 
 ### Backups
 
-A JSON snapshot of every table is saved to `data/backups/` once per day automatically while the app is running (and on-demand from Settings → Data Backups). Snapshots older than 7 days are pruned automatically. This is a local safety net in addition to whatever backup/PITR your Supabase plan provides — it never touches your live data.
+A JSON snapshot of every table is saved to the private `jde-backups` Supabase Storage bucket once per day (and on-demand from Settings → Data Backups, where each snapshot can also be downloaded). Snapshots older than 7 days are pruned automatically. This is a secondary safety net in addition to whatever backup/PITR your Supabase plan provides — it never touches your live data.
+
+The daily run is triggered by **Vercel Cron**, configured in `vercel.json`, which calls `/api/cron/backup` once a day. A cron request carries no browser session, so `/api/cron` is a `SERVICE_AUTH_PREFIXES` entry in `proxy.ts` — it bypasses the Supabase-cookie gate and authenticates itself instead:
+
+- It uses the **same `CRON_SECRET`** as the adaptive-platform reconciliation job, which is the Vercel convention (one secret, sent as `Authorization: Bearer <CRON_SECRET>` on every cron invocation). If that job is already running in production, this one needs no new configuration.
+- The secret must be at least 32 characters, matching the reconciliation route's floor. Unset or shorter, the route refuses everyone including the cron — it fails closed rather than leaving a read of every table open.
+
+Note that Vercel's free plan allows **two** cron jobs, which is exactly what `vercel.json` now declares; a third would need a plan change. Free-plan crons also fire once within the scheduled hour rather than at an exact minute, which is immaterial for a nightly snapshot.
+
+Running outside Vercel (local `npm run dev`, or a self-hosted server) means no cron trigger: use **Backup Now** in Settings → Data Backups, or call `/api/cron/backup` from any scheduler with the same bearer header.
 
 ## License & Ownership
 

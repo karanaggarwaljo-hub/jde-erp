@@ -35,6 +35,19 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 import { buildCustomerLedger } from '@/lib/customer-ledger';
 import AddCustomerModal from '@/components/AddCustomerModal';
 import ReceivePaymentModal from '@/components/ReceivePaymentModal';
+import { money, paise } from '@/lib/money';
+import {
+  DRAFT_STATUS,
+  GST_STATE_NAMES,
+  WALK_IN_CUSTOMER,
+  type Customer,
+  type Invoice,
+  type InvoiceItem,
+  type Payment,
+  type PaymentAllocation,
+  type Product,
+  type Quotation,
+} from '@/lib/sales-types';
 
 type SalesTab = 'invoices' | 'quotations' | 'ledger';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
@@ -43,22 +56,12 @@ type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid' | 'drafts';
  *  below. Optional because quotations reuse this shape and do not offer one — absent means none. */
 type InvoiceLine = { part: string; qty: number; price: number; discount?: number };
 
-type Product = { id: string; company_id: string; part_number: string; name: string; brand: string; hsn_code: string; category: string; sale_price: number; current_stock: number };
-type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
-// gst_percent / gst_amount are on the invoice table but were never filled in by the atomic save,
-// so they are absent on every invoice written before this screen started recording them.
-type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; settlement_write_off: number; status: string; mode: string; discount_percent: number; discount_amount: number; gst_percent?: number | null; gst_amount?: number | null; gst_mode?: string | null };
-type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
-type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_price: number; line_total: number; discount_percent?: number; discount_amount?: number };
-type Payment = { id: string; company_id: string; customer_id: string; customer: string; date: string; amount: number; note: string; created_at: string };
-type PaymentAllocation = { id: string; payment_id: string; company_id: string; invoice_id: string; amount: number; created_at: string };
 
 // Everything the printable document needs, captured at the moment it is opened. A snapshot rather
 // than a live lookup, so the document keeps showing the invoice it was opened for even after the
 // dialog behind it has been reset for the next sale.
 // The status the atomic save is given for a sale the owner wants to park and finish later. It
 // reserves stock like any other invoice, but nothing is billed and nothing is owed yet.
-const DRAFT_STATUS = 'draft';
 
 function todayIso() {
   return new Date().toISOString().split('T')[0];
@@ -71,53 +74,9 @@ const PAGE_SIZE = 25;
 // Reference data, not business data: the statutory GST state codes, which are the first two
 // digits of every GSTIN. Used only to name the place of supply on a tax invoice — nothing here
 // is a figure, a price or a company-specific value.
-const GST_STATE_NAMES: Record<string, string> = {
-  '01': 'Jammu and Kashmir',
-  '02': 'Himachal Pradesh',
-  '03': 'Punjab',
-  '04': 'Chandigarh',
-  '05': 'Uttarakhand',
-  '06': 'Haryana',
-  '07': 'Delhi',
-  '08': 'Rajasthan',
-  '09': 'Uttar Pradesh',
-  '10': 'Bihar',
-  '11': 'Sikkim',
-  '12': 'Arunachal Pradesh',
-  '13': 'Nagaland',
-  '14': 'Manipur',
-  '15': 'Mizoram',
-  '16': 'Tripura',
-  '17': 'Meghalaya',
-  '18': 'Assam',
-  '19': 'West Bengal',
-  '20': 'Jharkhand',
-  '21': 'Odisha',
-  '22': 'Chhattisgarh',
-  '23': 'Madhya Pradesh',
-  '24': 'Gujarat',
-  '25': 'Daman and Diu',
-  '26': 'Dadra and Nagar Haveli and Daman and Diu',
-  '27': 'Maharashtra',
-  '28': 'Andhra Pradesh',
-  '29': 'Karnataka',
-  '30': 'Goa',
-  '31': 'Lakshadweep',
-  '32': 'Kerala',
-  '33': 'Tamil Nadu',
-  '34': 'Puducherry',
-  '35': 'Andaman and Nicobar Islands',
-  '36': 'Telangana',
-  '37': 'Andhra Pradesh',
-  '38': 'Ladakh',
-  '97': 'Other Territory',
-  '99': 'Centre Jurisdiction',
-};
 
 // Indian digit grouping, matching Inventory and Customers. Display only — nothing rounded here
 // is ever written back.
-const money = (value: number) => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-const paise = (value: number) => Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // Which page buttons to show: short lists show every page, long ones collapse to 1 … n-1 n n+1 … last.
 function pageWindow(current: number, total: number): Array<number | 'gap'> {
@@ -140,7 +99,6 @@ function pageWindow(current: number, total: number): Array<number | 'gap'> {
 // under this fixed label rather than as an empty string. Kept separate from the `customer` form
 // state (which stays '' for a walk-in) so the customer-lookup logic below never has to special-case
 // it — an empty string simply never matches a real customer.
-const WALK_IN_CUSTOMER = 'Walk-in Customer';
 
 export default function SalesPage() {
   const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');

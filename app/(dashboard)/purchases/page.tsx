@@ -26,6 +26,7 @@ import { matchImportedLine, normalizeImportText, planFieldUpdates, type LineMatc
 import { savePurchase, receivePurchaseStock, recordPurchasePayment } from '@/lib/client-purchases';
 import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-purchase-returns';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { money, wholeMoney } from '@/lib/money';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
 
@@ -58,8 +59,6 @@ function formatDay(iso: string) {
   return `${day} ${MONTHS[month - 1]} ${year}`;
 }
 
-const money = (value: number) => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-const wholeMoney = (value: number) => Math.round(Number(value || 0)).toLocaleString('en-IN');
 
 /** Which page buttons to show: short lists show every page, long ones collapse to 1 … n-1 n n+1 … last. */
 function pageWindow(current: number, total: number): Array<number | 'gap'> {

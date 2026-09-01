@@ -49,6 +49,52 @@ anywhere in the app.
 Recorded in `scripts/lock-down-jde-function-grants.sql` and
 `scripts/revoke-leftover-anon-table-grants.sql`.
 
+## 2026-09-02 — Fixed: the daily backup had not run once since the site went online
+
+Your live data was never in danger — Supabase holds the real thing, and nothing here touches it.
+What had stopped working was the spare copy.
+
+**What was wrong.** The app tried to save each day's snapshot into a folder on the machine it was
+running on. That was right when the ERP ran from a computer in the office, but the live site does
+not work that way — it has no folder of its own to write to, and keeps nothing between one visit
+and the next. So every attempt failed the moment it started, about once an hour, filling the server
+log with the same error each time. There had been no snapshot at all since the app moved to
+erp.jd-enterprise.com.
+
+**Where backups go now.** Into a private storage area inside your own Supabase account, next to
+where the website catalogue photos already live. Private, not public: checked directly, the file
+cannot be opened by anyone who hasn't gone through the ERP signed in as owner.
+
+**When they happen now.** Once a night, run by the same real scheduler that already handles the
+nightly platform sync, instead of by the app noticing the time while somebody happens to have it
+open — which is the part that could never have worked on a live site. Snapshots older than 7 days
+are still cleared out automatically.
+
+**You can now download a backup.** When these files sat on a hard drive you could always go and
+find one; now that they're in the cloud, each row in Settings → Data Backups has a Download button
+that saves it to your computer. Worth doing occasionally — a copy on your own machine is the only
+one that would survive losing the Supabase account itself.
+
+**Also fixed while in there:**
+
+- **The snapshot was close to silently losing data.** It asked for every row of every table in one
+  go, and Supabase quietly stops answering at 1,000 rows. Your parts list is already past 900.
+  A few dozen more parts and every backup would have been cut short while still looking complete.
+  It now reads everything in batches, however large a table gets. Checked row for row against the
+  live database afterwards: every table matches exactly.
+- **Any member of staff could have downloaded all of your data.** The Settings screen was owner-only,
+  but the web address behind it wasn't — anyone with a working login could have pulled a full copy
+  of every company's records straight from it. Now owner-only, matching the screen.
+- **A backup now takes 4 seconds instead of 14**, because it reads all the tables at the same time
+  rather than one after another. Beyond being quicker, it means the snapshot is taken across a
+  narrower moment, so a sale recorded midway through is less likely to be caught half in, half out.
+- **The repeating error in the server log is gone**, because the thing producing it no longer exists.
+- **The desktop version's local backup folder was removed**, since you confirmed everyone works from
+  the website now. One place backups live, one way they're made.
+
+**Nothing to set up.** The nightly backup is protected by the same `CRON_SECRET` already in use for
+the platform sync, so if that one is running, this one will too.
+
 ## 2026-09-01 — When a customer settles by paying less
 
 Reported: sometimes a customer settles their payment by giving a lesser amount.
