@@ -2,6 +2,37 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-01 — Fixed: editing a draft forced you to turn it into a real invoice
+
+Reported: opening a draft to change it bills it as a final invoice; it should stay a draft until
+you decide otherwise.
+
+That was exactly what happened. Once a draft was reopened, the only way out of the dialog other
+than Cancel was **Confirm Invoice** — so any change you wanted to make came bundled with billing
+the customer. The code had assumed a saved sale was either a draft you were confirming or a live
+invoice you were correcting, and simply didn't allow for the obvious third case: a draft you are
+still working on.
+
+Reopening a draft now offers **Save & Keep as Draft** alongside Confirm Invoice. Use it as often
+as you like — change lines, prices, discounts, the GST setting, the customer — and the sale stays
+parked. Nothing is billed until you press Confirm Invoice, which behaves exactly as it did before.
+
+The footer now also spells this out while a draft is open, since it otherwise describes what
+happens on confirmation: the "stays outstanding on their account" line is followed by a note that
+saving it as a draft changes nothing on any account.
+
+**What stays reserved and what doesn't:** saving a draft again re-reserves stock to match whatever
+the draft now says — increase a quantity from 2 to 3 and the reservation follows — but it still
+puts nothing on the customer's account. Checked against the live database and undone immediately:
+parking a draft, editing and re-saving it as a draft, then confirming it. The customer's balance
+stayed at zero through both draft saves and only moved when it was confirmed; stock went 9 to 7 to
+6 as the quantity changed, and the draft kept a single set of lines rather than accumulating
+copies.
+
+A live invoice deliberately cannot be turned back into a draft. It has already been billed and is
+already on someone's account, so parking it would quietly erase a real debt — correct it or delete
+it instead.
+
 ## 2026-09-01 — New: bill with GST included in the price, or added on top
 
 Asked for: GST should work both inclusive and exclusive.
