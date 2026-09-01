@@ -22,6 +22,8 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 import { totalStockValue, type StockLayerLike } from '@/lib/stock-value';
 import { invoiceBalanceDue, isInvoiceOpen } from '@/lib/invoice-balance';
 import { useCompany } from '@/components/CompanyProvider';
+import ActivityCalendar from '@/components/ActivityCalendar';
+import type { ActivityEvent } from '@/lib/activity-calendar';
 
 type Product = { id: string; part_number: string; name: string; brand: string; category: string; cost_price: number; current_stock: number; min_stock: number; location: string };
 type Customer = { id: string; balance: number };
@@ -30,6 +32,7 @@ type Invoice = { id: string; customer: string; date: string; total: number; paid
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number };
 type Grn = { id: string; po_number: string; supplier: string; received_at: string };
 type Quotation = { id: string; customer: string; date: string; total: number };
+type Expense = { id: string; date: string };
 
 type TrendPeriod = '7 Days' | '30 Days' | '1 Year';
 
@@ -64,6 +67,8 @@ export default function DashboardPage() {
   const { rows: purchaseOrders } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const { rows: grns } = useCompanyTable<Grn>('grns');
   const { rows: quotations } = useCompanyTable<Quotation>('quotations');
+  // Only for the activity calendar — an expense is a day's work recorded like any other.
+  const { rows: expenses } = useCompanyTable<Expense>('expenses');
   // Needed to value stock the same way Inventory does — at each part's oldest open
   // purchase batch rather than its static cost_price field.
   const { rows: stockLayers } = useCompanyTable<StockLayerLike>('stock_layers');
@@ -191,6 +196,15 @@ export default function DashboardPage() {
         }
       : null,
   ].filter((item): item is NonNullable<typeof item> => item !== null);
+
+  /** One entry per record actually entered, keyed on the date written on it. Drafts are left
+   *  out on purpose: a parked sale is not a day's trading. */
+  const activityEvents = useMemo<ActivityEvent[]>(() => [
+    ...invoices.filter((inv) => inv.date).map((inv) => ({ day: inv.date, kind: 'sale' as const })),
+    ...purchaseOrders.filter((po) => po.date).map((po) => ({ day: po.date, kind: 'purchase' as const })),
+    ...expenses.filter((expense) => expense.date).map((expense) => ({ day: expense.date, kind: 'expense' as const })),
+    ...quotations.filter((quote) => quote.date).map((quote) => ({ day: quote.date, kind: 'quotation' as const })),
+  ], [invoices, purchaseOrders, expenses, quotations]);
 
   const recentActivities = useMemo(() => {
     const events: Array<{ date: string; title: string; desc: string; type: string }> = [];
@@ -376,6 +390,8 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      <ActivityCalendar events={activityEvents} today={today} />
 
       <div className="card">
         <div className="card-header">
