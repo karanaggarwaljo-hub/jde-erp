@@ -6,7 +6,10 @@ export type QuotationItemInput = {
   name: string;
   qty: number;
   unit_price: number;
+  /** Net of this line's own discount — the same meaning it has on an invoice line. */
   line_total: number;
+  discount_percent?: number;
+  discount_amount?: number;
 };
 
 export type QuotationInput = {
@@ -23,6 +26,9 @@ export type QuotationInput = {
   discountAmount: number;
   gstPercent: number;
   gstAmount: number;
+  /** 'exclusive' (tax added on top of the quoted rates) or 'inclusive' (tax already inside them).
+   *  Optional so the server keeps its own default rather than this having to be sent everywhere. */
+  gstMode?: 'exclusive' | 'inclusive';
   total: number;
 };
 
@@ -38,6 +44,7 @@ export type QuotationDetail = {
   discount_amount: number;
   gst_percent: number;
   gst_amount: number;
+  gst_mode?: string | null;
   total: number;
   status: string;
   items: QuotationItemInput[];

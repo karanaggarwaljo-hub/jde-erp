@@ -2,6 +2,43 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-01 — Quotations get per-item discounts and the GST inclusive/exclusive choice too
+
+Asked for: the same treatment the sales invoice just had.
+
+Quotations now work exactly like sales invoices do:
+
+- **Every quoted line has its own Disc % box**, showing that line's amount underneath — and the
+  original beside it when a discount is applied.
+- **The same two GST buttons beside the rate** — *GST extra* (added on top of the rates you quote)
+  and *GST included* (the rates already contain the tax) — with a line underneath saying which one
+  you are on.
+- **The totals show the working**: item discounts, subtotal, whole-quote discount, the real taxable
+  value, GST, and the quotation total.
+- **Reopening a quotation brings it all back**, and the printed quotation shows a Discount column
+  and the correct tax split — both appearing only when the quotation actually uses them, so
+  anything already saved prints unchanged.
+
+**Converting a quotation into an invoice carries all of it across.** That mattered more than it
+sounds: without it, a quote priced with GST included would have become an invoice priced with GST
+extra — the customer's total would have looked identical while the tax printed on the invoice was
+wrong.
+
+**A difference worth knowing about, behind the scenes.** Unlike a sales invoice, a quotation's
+totals are recalculated by the database itself and the save is refused if the figures don't match
+its lines to the paisa. That check is a good thing — it is why a quotation can never quietly
+disagree with its own line items — but it meant the calculation had to be taught both new ideas in
+lockstep, and rounded in exactly the same order in both places, or every discounted quotation would
+have been rejected. Both sides now round line by line, then total by total.
+
+Checked end to end against the live database and undone immediately: a quotation of 2 x ₹1,000 with
+10% off that line plus 1 x ₹500, a 5% whole-quote discount, priced GST-included at 18%, stored a
+subtotal of ₹2,300.00, discount ₹115.00, GST ₹333.31 and a total of ₹2,185.00 — then converting it
+produced an invoice carrying both the line discounts and the GST-included setting. A quotation saved
+the old way, with neither of the new fields, produced exactly the figures it always did.
+
+There are no saved quotations yet, so nothing existing was affected either way.
+
 ## 2026-09-01 — Fixed: editing a draft forced you to turn it into a real invoice
 
 Reported: opening a draft to change it bills it as a final invoice; it should stay a draft until

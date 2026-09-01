@@ -84,6 +84,12 @@ export default function SalesQuotationPrintPage() {
 
   const discountAmount = Number(quotation.discount_amount || 0);
   const gstAmount = Number(quotation.gst_amount || 0);
+  const gstInclusive = quotation.gst_mode === 'inclusive';
+  // Only worth a column when the quotation actually uses per-line discounts.
+  const anyLineDiscount = quotation.items.some((item) => Number(item.discount_percent) > 0);
+  // What the tax is charged on: the discounted amount, less the tax itself when the quoted rates
+  // already contain it.
+  const netTaxableValue = (Number(quotation.subtotal ?? quotation.total) - discountAmount) - (gstInclusive ? gstAmount : 0);
 
   return (
     <div>
@@ -135,6 +141,7 @@ export default function SalesQuotationPrintPage() {
                 <th>Description</th>
                 <th className="text-right">Qty</th>
                 <th className="text-right">Unit Price</th>
+                {anyLineDiscount && <th className="text-right">Discount</th>}
                 <th className="text-right">Line Total</th>
               </tr>
             </thead>
@@ -145,23 +152,33 @@ export default function SalesQuotationPrintPage() {
                   <td>{item.name}</td>
                   <td className="text-right">{item.qty}</td>
                   <td className="text-right">₹{money(Number(item.unit_price))}</td>
+                  {anyLineDiscount && (
+                    <td className="text-right">
+                      {Number(item.discount_percent) > 0
+                        ? `${Number(item.discount_percent)}%  (-₹${money(Number(item.discount_amount ?? 0))})`
+                        : '—'}
+                    </td>
+                  )}
                   <td className="text-right">₹{money(Number(item.line_total))}</td>
                 </tr>
               ))}
               {quotation.items.length === 0 && (
-                <tr><td colSpan={5}><p className="text-muted text-sm" style={{ padding: '12px 0' }}>No line items on this quotation.</p></td></tr>
+                <tr><td colSpan={anyLineDiscount ? 6 : 5}><p className="text-muted text-sm" style={{ padding: '12px 0' }}>No line items on this quotation.</p></td></tr>
               )}
             </tbody>
           </table>
         </div>
 
         <div className="report-summary">
-          <div className="report-line"><span>Subtotal</span><span>₹{money(Number(quotation.subtotal ?? quotation.total))}</span></div>
+          <div className="report-line"><span>Subtotal{anyLineDiscount ? ' after item discounts' : ''}</span><span>₹{money(Number(quotation.subtotal ?? quotation.total))}</span></div>
           {discountAmount > 0 && (
             <div className="report-line"><span>Discount ({Number(quotation.discount_percent).toFixed(0)}%)</span><span className="text-danger">-₹{money(discountAmount)}</span></div>
           )}
           {gstAmount > 0 && (
-            <div className="report-line"><span>GST ({Number(quotation.gst_percent ?? 0).toFixed(0)}%)</span><span>₹{money(gstAmount)}</span></div>
+            <>
+              <div className="report-line"><span>Taxable value</span><span>₹{money(netTaxableValue)}</span></div>
+              <div className="report-line"><span>GST ({Number(quotation.gst_percent ?? 0).toFixed(0)}%){gstInclusive ? ' — included in the rates above' : ''}</span><span>₹{money(gstAmount)}</span></div>
+            </>
           )}
           <div className="report-line report-strong"><span>Quotation Total</span><strong>₹{money(Number(quotation.total))}</strong></div>
         </div>
