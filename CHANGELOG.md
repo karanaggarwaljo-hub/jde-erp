@@ -2,6 +2,37 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-01 — Fixed: a backup-AI hiccup showing you a raw error instead of just working
+
+Reported: "Groq 400: Failed to validate JSON. Please adjust your prompt."
+
+Two things were wrong, and the second is the one that actually reached you.
+
+**The backup AI service occasionally garbles its answer.** When reading a photo, it was being asked
+for JSON by *describing* the required shape in the instructions and hoping for the best, rather than
+being told the shape formally — which the service does support, and which stops it producing a bad
+answer in the first place. It now gets the shape properly. (Tested directly: it reads the same
+photo correctly either way, but only the formal method makes a bad answer impossible rather than
+unlikely.)
+
+**And when it did garble one, everything stopped instead of falling back.** This is the real fault.
+The app treats that kind of refusal as "we asked for something impossible" — which is a sensible
+rule, because a genuinely malformed request fails the same way everywhere, so trying a second
+service would just waste time. But a garbled *answer* is not a malformed request. It says nothing
+about whether Google's AI could do the job — and it could, easily. So the app gave up and showed
+you the backup service's raw complaint while a perfectly good alternative sat untried.
+
+Now that specific refusal is treated as "this service failed at this task", which means the next one
+is asked and you simply get your result. A genuinely malformed request still stops immediately, as
+before — that rule was right, it was just being applied to the wrong thing.
+
+Covered by five new automated tests, including one that fails a provider exactly the way this
+happened and checks the answer still comes back from the next one.
+
+**If you see a raw error naming an AI service again, tell me** — you should never see one. Every one
+of these is either something that should have failed over quietly, or something worth explaining in
+plain words. Being shown the machinery is a bug in itself.
+
 ## 2026-09-01 — Inventory now reads a photo of a parts list
 
 Reported by dropping a WhatsApp photo onto Inventory and being told to go and use Purchases instead.
