@@ -57,6 +57,13 @@ export function savePurchase(input: SavePurchaseInput) {
   return postJson<Record<string, unknown>>('/api/purchases/save', input);
 }
 
+/** Records a payment against one purchase order. The order's paid amount and the supplier's
+ *  outstanding balance are updated together in a single database transaction; how much is still
+ *  owing is decided there, not here. */
+export function recordPurchasePayment(input: { companyId: string; poId: string; amount: number }) {
+  return postJson<Record<string, unknown>>('/api/purchases/pay', input);
+}
+
 /** Atomically marks a pre-existing pending purchase order received — GRN, FIFO stock layers,
  *  and status — as one database transaction. */
 export function receivePurchaseStock(input: ReceivePurchaseStockInput) {

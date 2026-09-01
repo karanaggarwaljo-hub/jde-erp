@@ -422,6 +422,29 @@ export async function savePurchase(input: SavePurchaseInput): Promise<Record<str
   return data as Record<string, unknown>;
 }
 
+export type RecordPurchasePaymentInput = {
+  companyId: string;
+  poId: string;
+  amount: number;
+};
+
+/** Atomically records a payment against one purchase order: the amount paid on the order and the
+ *  supplier's outstanding payable move together inside jde_record_purchase_payment, so they can
+ *  never disagree. The database is the sole judge of how much is still owing — it locks the order
+ *  and rejects a payment larger than the balance, an amount of zero or less, and an order that is
+ *  already settled, rather than trusting whatever the browser calculated. */
+export async function recordPurchasePayment(input: RecordPurchasePaymentInput): Promise<Record<string, unknown>> {
+  const { data, error } = await getClient()
+    .rpc('jde_record_purchase_payment', {
+      p_company_id: input.companyId,
+      p_po_id: input.poId,
+      p_amount: input.amount,
+    })
+    .single();
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
 /** Server-only: the id of the purchase already recorded from this exact invoice file, if any —
  *  used to reject a re-scan of a file that's already been recorded before spending an AI call on
  *  it, not just at final save time. Returns undefined when this file hasn't been recorded yet. */
