@@ -10,14 +10,22 @@ export const maxDuration = 60;
 
 /** The daily snapshot trigger, called by Vercel Cron — see the `crons` entry in vercel.json.
  *
- *  This route is listed in proxy.ts's PUBLIC_EXACT because a cron request arrives with no
- *  browser session and no cookies, so the normal Supabase-session gate would reject it. That
- *  makes the secret check below the *only* thing standing in front of a full database read, so
- *  it fails closed: no CRON_SECRET configured means nobody gets in, including the cron. */
+ *  /api/cron is a SERVICE_AUTH_PREFIX in proxy.ts, because a cron request arrives with no browser
+ *  session and no cookies, so the normal Supabase-session gate would reject it. That makes the
+ *  secret check below the *only* thing standing in front of a read of every table, so it fails
+ *  closed: no usable CRON_SECRET means nobody gets in, the cron included.
+ *
+ *  The same secret and the same 32-character floor as the adaptive-platform reconciliation job
+ *  next door, deliberately — one secret for every scheduled job is the Vercel convention, and a
+ *  value too short for one route should not be quietly good enough for the other. */
+const MINIMUM_SECRET_LENGTH = 32;
+
 export async function GET(request: Request) {
   const expected = process.env.CRON_SECRET;
-  if (!expected) {
-    console.error('[backup] CRON_SECRET is not set — refusing to run the scheduled backup.');
+  if (!expected || expected.length < MINIMUM_SECRET_LENGTH) {
+    console.error(
+      `[backup] CRON_SECRET is ${expected ? 'shorter than 32 characters' : 'not set'} — refusing to run the scheduled backup.`
+    );
     return Response.json({ error: 'Scheduled backups are not configured.' }, { status: 503 });
   }
 

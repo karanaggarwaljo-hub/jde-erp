@@ -8,6 +8,7 @@ An ERP web app for an auto spare parts trading business: inventory, sales, purch
 - **Database**: Supabase (managed Postgres). All data access happens server-side through Next.js API routes using a service-role key — the browser never talks to Supabase directly.
 - **Auth**: Supabase Auth (email/password, via `@supabase/ssr`) gates the whole app in `proxy.ts`. A valid login isn't enough on its own — it must also match an active row in `jde_users` (role: owner/manager/salesman/accountant/warehouse), which is how staff are actually granted access. See "Authentication" below.
 - **AI**: Google Gemini (`@google/genai`) powers the Business Insights and Stock Reorder Forecast features on `/analytics`. These degrade gracefully (a plain error message, not a crash) if no API key is configured or the free-tier quota is exhausted.
+- **Adaptive-platform integration**: a bearer-authenticated, company-scoped, read-only API projects audited inventory and purchasing data without exposing the ERP's generic table routes. New companies are available automatically from the live ERP registry. See [docs/adaptive-platform-integration.md](docs/adaptive-platform-integration.md).
 
 ## Modules
 
@@ -71,6 +72,8 @@ Every page and API route requires a real, signed-in staff account — enforced c
    - `NEXT_PUBLIC_SUPABASE_URL` — your Supabase project URL.
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — from Supabase dashboard → Project Settings → API → the `anon public` (or newer `publishable`) key. Safe to expose to the browser — it's what your own sign-in page uses.
    - `SUPABASE_SERVICE_ROLE_KEY` — from Supabase dashboard → Project Settings → API → `service_role` secret. **Never commit this or expose it to the browser.**
+   - `SUPABASE_SECRET_KEY` — preferred newer replacement for `SUPABASE_SERVICE_ROLE_KEY` when available; it is also server-only.
+   - `ERP_INTEGRATION_TOKEN` — required only when connecting the Adaptive Skill Platform. Keep it server-side. Companies are read from `jde_companies`, so a newly created company is available to the integration immediately without changing deployment settings.
    - `GEMINI_API_KEY` — optional, only needed for the AI features. Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
    - `GROQ_API_KEY` — optional but recommended. The backup AI provider: when Gemini is rate-limited or overloaded, the AI features automatically retry on Groq instead of failing. Free, no card, from [console.groq.com](https://console.groq.com) → API Keys. See "AI provider fallback" below.
 
@@ -132,6 +135,39 @@ follows Google's newest flash model, which carries the *smallest* free-tier allo
 20 requests a day) and is also the most contended — it answers 503 "experiencing high demand" under
 load while a pinned version of the same family answers normally. Both of those have taken the AI
 features down in production. `GEMINI_MODEL` still overrides the pin; see `.env.example`.
+
+### How often the AI actually runs
+
+The three expensive AI panels — Business Insights, Stock Reorder Recommendation and the report
+summaries — do **not** regenerate on every page load. Each one is allowed `DAILY_ALLOWANCE`
+(currently 2) real provider calls per company per day; every other request replays the stored
+answer out of `jde_ai_cache`. Report summaries count per report tab, since each tab is a different
+question. See `lib/ai/cache.ts`.
+
+Why: the free tiers here are small (Gemini's newest models allow as few as 20 requests a day, Groq
+caps tokens per minute), and before this, idle browsing consumed the same allowance the owner needed
+when they actually wanted an answer — five report tabs meant five generations just to look around.
+
+Rules worth knowing before changing it:
+
+- An automatic page load never spends a run unless nothing is stored yet, or the stored answer is
+  older than `REFRESH_AFTER_HOURS` (12), which spaces the day's two runs out.
+- Pressing **Refresh** spends a run deliberately — but cannot exceed the daily allowance.
+- A failed generation costs nothing: the counter only advances on success, and the last good answer
+  is shown with a note rather than being replaced by an error.
+- Every replayed answer carries the time it was really produced. The panels display that, never the
+  browser's own clock — otherwise a stored answer would appear to have been generated just now.
+- Report summaries additionally store a fingerprint of the figures they describe. If the numbers
+  move, the summary is not shown as though it described the new ones.
+
+Verify the whole thing against the real database, without spending any AI calls:
+
+```bash
+npx tsx scripts/ai-cache-check.ts
+```
+
+It runs the real cache code under a reserved feature key, asserts the allowance actually holds
+(including that a forced refresh cannot exceed it), and deletes everything it created.
 
 Not everything can fail over. Gemini remains the only provider here that reads PDFs, does Google
 Search grounding (Website Catalog → Reference Search) or generates images, so those three keep their
@@ -229,6 +265,43 @@ produces Search Console's "Sitemap is HTML" error. Both files fall back to
 `app/api/public/catalog/route.ts`) when `NEXT_PUBLIC_SITE_URL` isn't set, so a missing env var can't
 silently produce a sitemap full of `localhost` URLs.
 
+### Customer segmentation
+
+`lib/customer-insights.ts` grades customers Diamond / Gold / Silver (or New) and attaches
+Defaulter / Bargainer / Dormant flags. Pure and dependency-free for the same reason as
+`lib/import-matching.ts` — it decides who gets an offer and whose credit gets tightened, so it is
+exercised directly by `scripts/customer-insights-check.ts` rather than only through the UI.
+
+Two design points worth keeping:
+
+- **Tiers are cut from cumulative gross profit, not revenue** (classic ABC analysis, three bands).
+  Diamond is "the customers who between them earn the first 50% of your profit" — a statement about
+  the business, rather than a rupee threshold that ages badly. Profit is real, not estimated: line
+  totals minus the actual FIFO cost drawn for them via `jde_stock_consumptions`. On this app's own
+  data revenue and profit rank customers in *opposite* orders, which is the whole justification.
+- **Tier and flags are independent.** A Diamond customer can also be a Defaulter — that combination
+  ("buys the most, pays the worst") is the single most useful thing on the screen and a single flat
+  label would hide it.
+
+Grades are recomputed from live rows on every render rather than stored, so a grade can never go
+stale against the sales it was derived from. Anything below `INSIGHT_RULES.minOrdersToGrade` sales
+returns `new` with a reason, never a guessed tier. All thresholds live in `INSIGHT_RULES` — they are
+defensible starting points, not values tuned against real trading history, which does not exist yet.
+
+```bash
+npx tsx scripts/customer-insights-check.ts
+```
+
+The live half of that script prints the real grades per company, which is the quickest way to sanity-check the rules against the actual business.
+
+**Drafting an offer** (`app/api/ai-draft-offer`, `components/SegmentOfferModal.tsx`) deliberately splits the commercial decision from the wording: the owner types the terms, the model only words them for that customer. A model inventing "15% off this week" would be writing a commitment the owner is bound to honour once it is sent — so the prompt forbids stating any percentage, price, product, quantity or deadline not present in the given terms, and a vague offer must stay vague rather than being filled out with invented specifics. The internal grade is never repeated back to the customer either; it only selects the angle. The segment guidance shown above the input comes from the hardcoded `TIER_ACTIONS`/`FLAG_ACTIONS`, not from a model, so advice on what kind of offer suits a group is stable and reviewable.
+
+```bash
+npx tsx scripts/offer-draft-check.ts
+```
+
+That one calls a real provider, so it costs a few requests and its output is not deterministic — the assertions are about what must never appear (an invented number, the tier word) rather than exact wording.
+
 ### Stock integrity
 
 `products.current_stock` is a denormalized figure — the real, audited stock is the sum of a
@@ -247,10 +320,12 @@ npx tsx scripts/stock-integrity-check.ts
 
 A JSON snapshot of every table is saved to the private `jde-backups` Supabase Storage bucket once per day (and on-demand from Settings → Data Backups, where each snapshot can also be downloaded). Snapshots older than 7 days are pruned automatically. This is a secondary safety net in addition to whatever backup/PITR your Supabase plan provides — it never touches your live data.
 
-The daily run is triggered by **Vercel Cron**, configured in `vercel.json`, which calls `/api/cron/backup` once a day. That route is unauthenticated at the session layer (a cron request has no browser session), so it requires a `CRON_SECRET` bearer token instead:
+The daily run is triggered by **Vercel Cron**, configured in `vercel.json`, which calls `/api/cron/backup` once a day. A cron request carries no browser session, so `/api/cron` is a `SERVICE_AUTH_PREFIXES` entry in `proxy.ts` — it bypasses the Supabase-cookie gate and authenticates itself instead:
 
-- Set `CRON_SECRET` to any long random string in the Vercel project's Environment Variables, then redeploy. Vercel automatically sends it as `Authorization: Bearer <CRON_SECRET>` on every cron invocation.
-- If `CRON_SECRET` is unset the route refuses everyone, including the cron — it fails closed rather than leaving a full database read open.
+- It uses the **same `CRON_SECRET`** as the adaptive-platform reconciliation job, which is the Vercel convention (one secret, sent as `Authorization: Bearer <CRON_SECRET>` on every cron invocation). If that job is already running in production, this one needs no new configuration.
+- The secret must be at least 32 characters, matching the reconciliation route's floor. Unset or shorter, the route refuses everyone including the cron — it fails closed rather than leaving a read of every table open.
+
+Note that Vercel's free plan allows **two** cron jobs, which is exactly what `vercel.json` now declares; a third would need a plan change. Free-plan crons also fire once within the scheduled hour rather than at an exact minute, which is immaterial for a nightly snapshot.
 
 Running outside Vercel (local `npm run dev`, or a self-hosted server) means no cron trigger: use **Backup Now** in Settings → Data Backups, or call `/api/cron/backup` from any scheduler with the same bearer header.
 

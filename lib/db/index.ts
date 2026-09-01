@@ -63,6 +63,13 @@ export async function getActiveCompanyId(): Promise<string | undefined> {
   return (data as { id: string } | null)?.id;
 }
 
+/** Server-only existence check; never returns another company's record. */
+export async function companyExists(id: string): Promise<boolean> {
+  const { data, error } = await getClient().from(supaTable('companies')).select('id').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data !== null;
+}
+
 export async function activateCompany(id: string): Promise<Record<string, unknown> | undefined> {
   const { error } = await getClient().rpc('jde_activate_company', { target_id: id });
   if (error) throw error;
@@ -386,6 +393,43 @@ export async function receiveCustomerPayment(input: ReceiveCustomerPaymentInput)
   return data as { payment_id: string; applied_total: number };
 }
 
+export type WriteOffInvoiceBalanceInput = {
+  companyId: string;
+  invoiceId: string;
+  /** How much of what is still owing to forgive. The database refuses anything larger. */
+  amount: number;
+  reason: string;
+  /** Blank means today in India — the database fills it in rather than trusting a browser clock. */
+  date: string;
+};
+
+export type WriteOffResult = {
+  write_off_id: string;
+  written_off: number;
+  remaining_due: number;
+  customer_balance: number | null;
+};
+
+/** Atomically closes part or all of what a customer still owes on an invoice they settled by
+ *  paying less than it was for. The invoice keeps the total it was issued for and its `paid`
+ *  amount is left alone — only real money belongs there — while the shortfall is recorded in its
+ *  own column, written to an audit row with its reason, and taken off the customer's balance
+ *  (jde_write_off_invoice_balance). Splitting it out this way is what stops forgiven debt from
+ *  being counted as cash received in every report and digest that reads `paid`. */
+export async function writeOffInvoiceBalance(input: WriteOffInvoiceBalanceInput): Promise<WriteOffResult> {
+  const { data, error } = await getClient()
+    .rpc('jde_write_off_invoice_balance', {
+      p_company_id: input.companyId,
+      p_invoice_id: input.invoiceId,
+      p_amount: input.amount,
+      p_reason: input.reason,
+      p_date: input.date,
+    })
+    .single();
+  if (error) throw error;
+  return data as WriteOffResult;
+}
+
 /** Atomically reverses a recorded payment — puts every invoice it was applied to back to its
  *  prior paid amount and status, corrects the customer's balance by the same total, then removes
  *  the payment and its allocations. Used when a payment was entered wrong, not for a genuine
@@ -442,6 +486,29 @@ export async function savePurchase(input: SavePurchaseInput): Promise<Record<str
       p_paid: input.paid,
       p_status: input.status,
       p_source_file_hash: input.sourceFileHash ?? null,
+    })
+    .single();
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
+export type RecordPurchasePaymentInput = {
+  companyId: string;
+  poId: string;
+  amount: number;
+};
+
+/** Atomically records a payment against one purchase order: the amount paid on the order and the
+ *  supplier's outstanding payable move together inside jde_record_purchase_payment, so they can
+ *  never disagree. The database is the sole judge of how much is still owing — it locks the order
+ *  and rejects a payment larger than the balance, an amount of zero or less, and an order that is
+ *  already settled, rather than trusting whatever the browser calculated. */
+export async function recordPurchasePayment(input: RecordPurchasePaymentInput): Promise<Record<string, unknown>> {
+  const { data, error } = await getClient()
+    .rpc('jde_record_purchase_payment', {
+      p_company_id: input.companyId,
+      p_po_id: input.poId,
+      p_amount: input.amount,
     })
     .single();
   if (error) throw error;
@@ -755,4 +822,77 @@ export async function createBackupSignedUrl(name: string, expiresInSeconds: numb
     .createSignedUrl(name, expiresInSeconds, { download: name });
   if (error) throw error;
   return data.signedUrl;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * AI result cache
+ *
+ * Deliberately NOT registered in lib/db/schema.ts's TABLES map. That map drives the generic
+ * /api/local/[table] CRUD routes the browser talks to; this table is server-internal bookkeeping
+ * and has no business being reachable from a page.
+ * ------------------------------------------------------------------------------------------- */
+
+export type AiCacheRow = {
+  payload: unknown;
+  fingerprint: string;
+  generated_at: string;
+  day_ist: string;
+  runs_on_day: number;
+};
+
+/** The business day in Asia/Kolkata, as YYYY-MM-DD. The daily allowance resets on the owner's
+ *  own day, not on UTC midnight — which in India falls at 5:30am, mid-morning. */
+export function businessDayIst(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+}
+
+export async function readAiCache(companyId: string, feature: string, variant = ''): Promise<AiCacheRow | undefined> {
+  const { data, error } = await getClient()
+    .from('jde_ai_cache')
+    .select('payload, fingerprint, generated_at, day_ist, runs_on_day')
+    .eq('company_id', companyId)
+    .eq('feature', feature)
+    .eq('variant', variant)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as AiCacheRow | null) ?? undefined;
+}
+
+/** Records a freshly generated result and counts it against today's allowance. Called only after
+ *  a generation actually succeeded, so a failed or unreachable AI never burns an attempt. */
+export async function writeAiCache(
+  companyId: string,
+  feature: string,
+  variant: string,
+  fingerprint: string,
+  payload: unknown
+): Promise<AiCacheRow> {
+  const today = businessDayIst();
+  const existing = await readAiCache(companyId, feature, variant);
+  const runsOnDay = existing && existing.day_ist === today ? existing.runs_on_day + 1 : 1;
+
+  const { data, error } = await getClient()
+    .from('jde_ai_cache')
+    .upsert(
+      {
+        company_id: companyId,
+        feature,
+        variant,
+        fingerprint,
+        payload,
+        generated_at: new Date().toISOString(),
+        day_ist: today,
+        runs_on_day: runsOnDay,
+      },
+      { onConflict: 'company_id,feature,variant' }
+    )
+    .select('payload, fingerprint, generated_at, day_ist, runs_on_day')
+    .single();
+  if (error) throw new Error(error.message);
+  return data as AiCacheRow;
 }

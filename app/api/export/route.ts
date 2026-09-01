@@ -1,6 +1,7 @@
 import { getActiveCompanyId, listRows } from '@/lib/db';
+import { invoiceBalanceDue } from '@/lib/invoice-balance';
 
-type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string };
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; };
 type PurchaseOrder = { total: number; supplier: string; date: string; paid: number; status: string };
 type Expense = { amount: number };
 type Product = { category: string; current_stock: number; cost_price: number; sale_price: number };
@@ -112,7 +113,7 @@ async function buildExport(type: string): Promise<{ filename: string; rows: Arra
   }
 
   if (type === 'aging') {
-    const receivables = agingRows(invoices.map((i) => ({ key: i.customer, date: i.date, due: Number(i.total) - Number(i.paid) })));
+    const receivables = agingRows(invoices.map((i) => ({ key: i.customer, date: i.date, due: invoiceBalanceDue(i) })));
     const payables = agingRows(
       purchaseOrders.filter((p) => p.status === 'received').map((p) => ({ key: p.supplier, date: p.date, due: Number(p.total) - Number(p.paid) }))
     );

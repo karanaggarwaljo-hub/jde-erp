@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ChangeEvent, useRef, useState } from 'react';
+import { ChangeEvent, DragEvent, useEffect, useRef, useState } from 'react';
 import {
   Plus,
   Search,
@@ -22,9 +22,12 @@ import {
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { useCompany } from '@/components/CompanyProvider';
-import { parseInventoryFile } from '@/lib/client-import';
+import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, sheetFromScannedParts, fileToBase64, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
+import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { fifoCostLookup } from '@/lib/stock-value';
+import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
 
 type Product = {
   id: string;
@@ -124,15 +127,9 @@ export default function InventoryPage() {
   // Cost price shown per product = the oldest FIFO batch that still has stock left (i.e. what the
   // next sale will actually cost), falling back to the static cost_price field when a product has
   // no batches at all (e.g. it's never been purchased through the FIFO-tracked flow).
-  const oldestOpenLayerByProduct = new Map<string, StockLayer>();
-  for (const layer of stockLayers) {
-    if (Number(layer.qty_remaining) <= 0) continue;
-    const current = oldestOpenLayerByProduct.get(layer.product_id);
-    if (!current || new Date(layer.created_at).getTime() < new Date(current.created_at).getTime()) {
-      oldestOpenLayerByProduct.set(layer.product_id, layer);
-    }
-  }
-  const fifoCostFor = (product: Product) => Number(oldestOpenLayerByProduct.get(product.id)?.unit_cost ?? product.cost_price);
+  // Shared with the Dashboard's Inventory Value KPI — the two used to compute this separately and
+  // disagreed by ₹27,970 on real data. See lib/stock-value.ts.
+  const fifoCostFor = fifoCostLookup(stockLayers);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [stockFilter, setStockFilter] = useState<StockFilter>('all');
@@ -143,6 +140,26 @@ export default function InventoryPage() {
   const [feedback, setFeedback] = useState('');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
+  // Cost-sheet import. Nothing is written until the owner has seen this plan and pressed
+  // Apply — a bulk price overwrite is not something to do on a file-picker click.
+  // The sheet is read once; which column means what stays the owner's choice, so changing it
+  // re-plans instantly without touching the file again.
+  const [costSheet, setCostSheet] = useState<
+    { fileName: string; sheet: SheetForCostUpdate; newParts: ImportedProduct[]; guessedFields: string[] } | null
+  >(null);
+  // One file can mean two different jobs. Which one is proposed from the file's own content —
+  // rows that match parts already stocked are a price list; rows that don't are a parts list.
+  const [importMode, setImportMode] = useState<'costs' | 'new'>('costs');
+  const [excludedNew, setExcludedNew] = useState<Set<number>>(new Set());
+  const [costColumn, setCostColumn] = useState('');
+  const [idColumn, setIdColumn] = useState('');
+  // Row numbers the owner has unticked. Storing exclusions rather than selections means a row
+  // that appears after changing a column is included by default instead of silently skipped.
+  const [excludedRows, setExcludedRows] = useState<Set<number>>(new Set());
+  const [draggingFile, setDraggingFile] = useState(false);
+  const dragDepth = useRef(0);
+  const [applyingCosts, setApplyingCosts] = useState(false);
+  const [costProgress, setCostProgress] = useState(0);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestFailed, setSuggestFailed] = useState(false);
   const [savingProduct, setSavingProduct] = useState(false);
@@ -452,33 +469,220 @@ export default function InventoryPage() {
     }
   };
 
-  const handleFileImport = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
+  /** Everything a chosen file goes through, shared by the picker and by drag-and-drop so the two
+   *  can never behave differently. */
+  const beginImport = async (file: File) => {
+    // A dropped file bypasses the picker's filter entirely, so the check has to happen here —
+    // and say what IS accepted rather than just refusing.
+    const scannable = isScannableFileName(file.name, file.type);
+    if (!scannable && !isSpreadsheetFileName(file.name)) {
+      setImportError(
+        `"${file.name}" can't be read. Drop a spreadsheet (${SPREADSHEET_EXTENSIONS.join(', ')}), ` +
+          'or a photo or PDF of a parts list.'
+      );
+      return;
+    }
     setImportError('');
     setFeedback('');
     setImporting(true);
     try {
-      const { products: imported, guessedFields } = await parseInventoryFile(file);
-      if (imported.length === 0) {
-        throw new Error('Couldn’t find a part name/description column in this file. Recognized headers include things like "Name", "Item Name", "Description", or "Part Number" — check your column titles, or share them and we can adjust the import.');
+      // Read the file once, both ways. Neither reading writes anything, and having both up front
+      // is what lets the dialog offer either job — and switch between them — without re-uploading.
+      let sheet: SheetForCostUpdate;
+      let newParts: ImportedProduct[];
+      let guessedFields: string[] = [];
+
+      if (scannable) {
+        // Same size problem as the purchase-invoice scan: a phone photo is far past the platform's
+        // request limit once encoded, and is rejected before it reaches the app. Shrink first.
+        let base64: string;
+        let mimeType: string;
+        if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+          if (file.size > 4_000_000) {
+            throw new Error('This PDF is too large to read (over 4MB). Save it smaller, or photograph the page instead.');
+          }
+          base64 = await fileToBase64(file);
+          mimeType = 'application/pdf';
+        } else {
+          ({ base64, mimeType } = await resizeImageForUpload(file, { maxDimension: DOCUMENT_SCAN_DIMENSION }));
+        }
+
+        const res = await fetch('/api/inventory/scan-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64, mimeType }),
+        });
+        const body = (await parseJsonOrThrow(res, 'Could not read this document.')) as { items?: ScannedPart[] };
+        const items = Array.isArray(body.items) ? body.items : [];
+        if (items.length === 0) {
+          throw new Error('No parts could be read from this image. Make sure the list is in focus and the whole page is in frame.');
+        }
+        // Turned into the shapes a spreadsheet produces, so the preview, the column pickers, the
+        // matching and the tick boxes all work on a photo exactly as they do on a file.
+        ({ sheet, products: newParts } = sheetFromScannedParts(items));
+      } else {
+        sheet = await readSheetForCostUpdate(file);
+        ({ products: newParts, guessedFields } = await parseInventoryFile(file).catch(() => ({
+          products: [] as ImportedProduct[],
+          guessedFields: [] as string[],
+        })));
       }
-      const res = await fetch('/api/local/products?bulk=1', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: imported.map((product) => ({ ...product, company_id: activeCompany?.id })) }),
-      });
-      await parseJsonOrThrow(res, 'Failed to import parts.');
-      await reload();
-      const guessNote = guessedFields.length > 0
-        ? ` Your file's column titles didn't clearly label ${guessedFields.join(', ')}, so those were guessed from the numbers — please spot-check a few rows.`
-        : '';
-      setFeedback(`Imported ${imported.length} part(s) from ${file.name}.${guessNote}`);
+
+      const costColumnGuess = sheet.suggestedCostColumn ?? '';
+      const idColumnGuess = sheet.suggestedIdColumn ?? sheet.columns[0] ?? '';
+
+      // Propose the job that fits the file. A sheet whose rows are mostly parts already stocked is
+      // a price list; one whose rows are mostly unknown is a list of parts to add. Getting this
+      // wrong is harmless — it is a preview either way — but getting it right saves a step.
+      let mode: 'costs' | 'new' = 'new';
+      if (costColumnGuess && idColumnGuess) {
+        const rows = extractCostRows(sheet, costColumnGuess, idColumnGuess).rows;
+        const known = planCostUpdates(rows, products).filter((m) => m.product).length;
+        if (rows.length > 0 && known >= rows.length / 2) mode = 'costs';
+      }
+      if (newParts.length === 0) mode = 'costs';
+
+      setCostColumn(costColumnGuess);
+      setIdColumn(idColumnGuess);
+      setExcludedRows(new Set());
+      // Anything already stocked starts unticked in "add new parts" mode: re-adding it would
+      // create a second copy, which is the single most likely way to damage inventory here.
+      // It can still be ticked deliberately — the duplicate is named on the row.
+      setExcludedNew(
+        new Set(
+          newParts
+            .map((part, index) => (findExistingProduct(products, { partNumber: part.part_number, name: part.name }) ? index : -1))
+            .filter((index) => index >= 0)
+        )
+      );
+      setImportMode(mode);
+      setCostSheet({ fileName: file.name, sheet, newParts, guessedFields });
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to read the file.');
     } finally {
       setImporting(false);
+    }
+  };
+
+  const handleFileImport = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Cleared before the await so picking the same file twice in a row still fires onChange.
+    event.target.value = '';
+    if (file) void beginImport(file);
+  };
+
+  // Only react to an actual file being dragged in — dragging selected text or a link across the
+  // page should not put the screen into a drop state.
+  const dragCarriesFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files');
+
+  const onDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragCarriesFiles(event)) return;
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDraggingFile(true);
+  };
+
+  const onDragOver = (event: DragEvent<HTMLDivElement>) => {
+    // Without preventDefault here the browser refuses the drop and opens the file instead.
+    if (dragCarriesFiles(event)) event.preventDefault();
+  };
+
+  const onDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragCarriesFiles(event)) return;
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setDraggingFile(false);
+    }
+  };
+
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragCarriesFiles(event)) return;
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDraggingFile(false);
+    if (importing) return;
+    const file = event.dataTransfer?.files?.[0];
+    if (file) void beginImport(file);
+  };
+
+  // A file dropped just outside the zone — on the sidebar, or the margin beside it — would
+  // otherwise make the browser navigate away to that file, losing whatever was on screen. Swallow
+  // those so a near miss simply does nothing. The zone's own handlers still run first and are
+  // unaffected, because they stop the event before it reaches the window.
+  useEffect(() => {
+    const swallow = (event: globalThis.DragEvent) => {
+      if (!Array.from(event.dataTransfer?.types ?? []).includes('Files')) return;
+      event.preventDefault();
+    };
+    const clear = () => {
+      dragDepth.current = 0;
+      setDraggingFile(false);
+    };
+    window.addEventListener('dragover', swallow);
+    window.addEventListener('drop', swallow);
+    window.addEventListener('drop', clear);
+    window.addEventListener('dragend', clear);
+    return () => {
+      window.removeEventListener('dragover', swallow);
+      window.removeEventListener('drop', swallow);
+      window.removeEventListener('drop', clear);
+      window.removeEventListener('dragend', clear);
+    };
+  }, []);
+
+  const applyNewParts = async (chosen: ImportedProduct[]) => {
+    if (!costSheet) return;
+    setApplyingCosts(true);
+    setImportError('');
+    try {
+      const res = await fetch('/api/local/products?bulk=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: chosen.map((product) => ({ ...product, company_id: activeCompany?.id })) }),
+      });
+      await parseJsonOrThrow(res, 'Failed to import parts.');
+      await Promise.all([reload(), reloadStockLayers()]);
+      const guessNote = costSheet.guessedFields.length > 0
+        ? ` Your file's column titles didn't clearly label ${costSheet.guessedFields.join(', ')}, so those were guessed from the numbers — please spot-check a few rows.`
+        : '';
+      setFeedback(`Added ${chosen.length} new part(s) from ${costSheet.fileName}.${guessNote}`);
+      setCostSheet(null);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Failed to import parts.');
+    } finally {
+      setApplyingCosts(false);
+    }
+  };
+
+  const applyCostPlan = async (pending: CostMatch[]) => {
+    if (!costSheet) return;
+    setApplyingCosts(true);
+    setCostProgress(0);
+    setImportError('');
+    let done = 0;
+    try {
+      for (const match of pending) {
+        // Same two steps the edit form performs for a cost change: the part's own field, and the
+        // purchase batch the displayed cost and margin actually read from. Updating only the
+        // first is the bug that made a typed-in cost price appear not to take effect.
+        await update(match.product!.id, { cost_price: match.row.cost });
+        await correctOldestLayerCost(match.product!.id, match.row.cost);
+        done += 1;
+        setCostProgress(done);
+      }
+      await Promise.all([reload(), reloadStockLayers()]);
+      setFeedback(`Updated the cost price of ${done} part(s) from ${costSheet.fileName}.`);
+      setCostSheet(null);
+    } catch (err) {
+      // Say exactly how far it got — a half-applied run the owner knows the shape of is
+      // recoverable; a silent one is not.
+      await Promise.all([reload(), reloadStockLayers()]);
+      setImportError(
+        `${err instanceof Error ? err.message : 'Failed to update costs.'} ${done} of ${pending.length} part(s) were updated before this stopped; re-uploading the same file will retry the rest.`
+      );
+    } finally {
+      setApplyingCosts(false);
     }
   };
 
@@ -498,7 +702,26 @@ export default function InventoryPage() {
     : '';
 
   return (
-    <div>
+    <div
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      style={{ position: 'relative', minHeight: '60vh' }}
+    >
+      {draggingFile && (
+        <div className="dropzone-overlay" role="status" aria-live="polite">
+          <div className="dropzone-card">
+            <Upload size={28} />
+            <p className="dropzone-title">Drop the file to import</p>
+            <p className="dropzone-hint">
+              A spreadsheet ({SPREADSHEET_EXTENSIONS.slice(0, 4).join(', ')}…), or a photo or PDF of a parts list.
+              You choose what it does next; nothing is saved yet.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="page-header">
         <div>
@@ -508,12 +731,13 @@ export default function InventoryPage() {
         </div>
         <div className="flex gap-2">
           <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
-            <Upload size={16} /> {importing ? 'Importing…' : 'Import from File'}
-            <input type="file" accept=".csv,.xls,.xlsx" hidden disabled={importing} onChange={handleFileImport} />
+            <Upload size={16} /> {importing ? 'Reading…' : 'Import from File'}
+            <input type="file" accept={`${SPREADSHEET_ACCEPT},${SCANNABLE_IMPORT_ACCEPT}`} hidden disabled={importing} onChange={handleFileImport} />
           </label>
           <button className="btn btn-primary" onClick={handleOpenAdd}>
             <Plus size={16} /> Add New Part
           </button>
+          <span className="text-muted text-sm" style={{ alignSelf: 'center' }}>or drop a spreadsheet, photo or PDF anywhere on this page</span>
         </div>
       </div>
 
@@ -1011,6 +1235,248 @@ export default function InventoryPage() {
           </div>
         </div>
       )}
+
+      {costSheet && (() => {
+        const sheet = costSheet.sheet;
+        // Re-derived on every render, so changing either dropdown immediately re-plans against
+        // the same already-read sheet — no re-upload, no stale preview.
+        const parsed = costColumn && idColumn ? extractCostRows(sheet, costColumn, idColumn) : null;
+        const matches = parsed ? planCostUpdates(parsed.rows, products) : [];
+        const counts = countOutcomes(matches);
+        const updatable = matches.filter((m) => m.outcome === 'update' && m.product);
+        const pending = updatable.filter((m) => !excludedRows.has(m.row.rowNumber));
+        const allTicked = updatable.length > 0 && pending.length === updatable.length;
+        const toggleRow = (rowNumber: number) =>
+          setExcludedRows((previous) => {
+            const next = new Set(previous);
+            if (next.has(rowNumber)) next.delete(rowNumber);
+            else next.add(rowNumber);
+            return next;
+          });
+        const toggleAll = () =>
+          setExcludedRows(allTicked ? new Set(updatable.map((m) => m.row.rowNumber)) : new Set());
+        // Anything that will not be applied is listed first: the point of this screen is to show
+        // what the file failed to do, not to bury it under a long list of successes.
+        const ordered = [...matches].sort((a, b) => {
+          const rank = { conflict: 0, not_found: 1, update: 2, unchanged: 3 } as const;
+          return rank[a.outcome] - rank[b.outcome] || a.row.rowNumber - b.row.rowNumber;
+        });
+        const skipped = parsed ? parsed.skippedNoCost + parsed.skippedNoIdentifier : 0;
+        const samples = costColumn ? sampleColumnValues(sheet, costColumn) : [];
+        const chosenNew = costSheet.newParts.filter((_, index) => !excludedNew.has(index));
+        const duplicateCount = costSheet.newParts.filter((part) =>
+          findExistingProduct(products, { partNumber: part.part_number, name: part.name })
+        ).length;
+        const allNewTicked = costSheet.newParts.length > 0 && chosenNew.length === costSheet.newParts.length;
+        const toggleNew = (index: number) =>
+          setExcludedNew((previous) => {
+            const next = new Set(previous);
+            if (next.has(index)) next.delete(index);
+            else next.add(index);
+            return next;
+          });
+        const toggleAllNew = () =>
+          setExcludedNew(allNewTicked ? new Set(costSheet.newParts.map((_, index) => index)) : new Set());
+        return (
+          <div className="modal-overlay">
+            <div className="modal-box" style={{ maxWidth: '820px' }} role="dialog" aria-modal="true" aria-labelledby="cost-import-title">
+              <div className="modal-header">
+                <h3 id="cost-import-title" className="modal-title">Import from {costSheet.fileName}</h3>
+              </div>
+              <div className="modal-body">
+                <div className="form-group" style={{ marginBottom: '12px' }}>
+                  <span className="form-label">What should this file do?</span>
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      className={'btn btn-sm ' + (importMode === 'costs' ? 'btn-primary' : 'btn-secondary')}
+                      onClick={() => setImportMode('costs')}
+                    >
+                      Update cost prices of parts I already have
+                    </button>
+                    <button
+                      type="button"
+                      className={'btn btn-sm ' + (importMode === 'new' ? 'btn-primary' : 'btn-secondary')}
+                      disabled={costSheet.newParts.length === 0}
+                      onClick={() => setImportMode('new')}
+                    >
+                      Add as new parts{costSheet.newParts.length > 0 ? ' (' + costSheet.newParts.length + ')' : ''}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-4 flex-wrap" style={{ marginBottom: '12px', display: importMode === 'costs' ? undefined : 'none' }}>
+                  <div className="form-group" style={{ margin: 0, minWidth: '230px' }}>
+                    <label className="form-label" htmlFor="cost-col">Which column holds the cost?</label>
+                    <select id="cost-col" className="form-select" value={costColumn} onChange={(e) => { setCostColumn(e.target.value); setExcludedRows(new Set()); }}>
+                      <option value="">— choose a column —</option>
+                      {sheet.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    {samples.length > 0 && (
+                      <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        First values: {samples.join(', ')}
+                      </p>
+                    )}
+                  </div>
+                  <div className="form-group" style={{ margin: 0, minWidth: '230px' }}>
+                    <label className="form-label" htmlFor="id-col">Which column names the part?</label>
+                    <select id="id-col" className="form-select" value={idColumn} onChange={(e) => { setIdColumn(e.target.value); setExcludedRows(new Set()); }}>
+                      <option value="">— choose a column —</option>
+                      {sheet.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  {importMode === 'costs'
+                    ? 'Only the cost price changes — stock, selling price and every other detail are left exactly as they are.'
+                    : 'Each ticked row becomes a brand-new part. Rows matching something you already stock start unticked, so nothing is duplicated by accident.'}
+                </p>
+                {importMode === 'new' ? (
+                  <>
+                    <p style={{ fontSize: '13px', margin: '10px 0' }}>
+                      <strong>{chosenNew.length} of {costSheet.newParts.length}</strong> selected to add
+                      {duplicateCount > 0 && (
+                        <span style={{ color: 'var(--color-warning)' }}> · {duplicateCount} already stocked</span>
+                      )}
+                    </p>
+                    <div style={{ maxHeight: '300px', overflowY: 'auto', overflowX: 'auto' }}>
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: '34px' }}>
+                              <input
+                                type="checkbox"
+                                aria-label={allNewTicked ? 'Clear all' : 'Select all'}
+                                checked={allNewTicked}
+                                ref={(el) => { if (el) el.indeterminate = chosenNew.length > 0 && !allNewTicked; }}
+                                onChange={toggleAllNew}
+                              />
+                            </th>
+                            <th>Part</th><th>Name</th><th>Stock</th><th>Cost</th><th>What happens</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {costSheet.newParts.map((part, index) => {
+                            const existing = findExistingProduct(products, { partNumber: part.part_number, name: part.name });
+                            return (
+                              <tr key={index} style={excludedNew.has(index) ? { opacity: 0.45 } : undefined}>
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    aria-label={'Add ' + (part.part_number || part.name)}
+                                    checked={!excludedNew.has(index)}
+                                    onChange={() => toggleNew(index)}
+                                  />
+                                </td>
+                                <td>{part.part_number || '—'}</td>
+                                <td>{part.name}</td>
+                                <td style={{ fontVariantNumeric: 'tabular-nums' }}>{part.current_stock}</td>
+                                <td style={{ fontVariantNumeric: 'tabular-nums' }}>₹{money(part.cost_price)}</td>
+                                <td>
+                                  {existing
+                                    ? <span style={{ color: 'var(--color-warning)' }}>already stocked as {existing.part_number || existing.name}</span>
+                                    : <span className="badge badge-success">add</span>}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : !parsed ? (
+                  <p style={{ fontSize: '13px', color: 'var(--color-warning)', marginTop: '10px' }}>
+                    Choose both columns above to see what would change.
+                  </p>
+                ) : (
+                  <>
+                    <p style={{ fontSize: '13px', margin: '10px 0' }}>
+                      <strong>{pending.length} of {counts.update}</strong> selected to update · {counts.unchanged} already correct · {counts.not_found} not found
+                      {counts.conflict > 0 && <> · <span style={{ color: 'var(--color-warning)' }}>{counts.conflict} unclear</span></>}
+                      {skipped > 0 && <span style={{ color: 'var(--text-muted)' }}> · {skipped} row(s) skipped as unreadable</span>}
+                    </p>
+                    {/* The likeliest cause of a wall of "not found" is not a bad file but the wrong
+                        company being active — this sheet's part codes simply belong elsewhere.
+                        Say that plainly instead of leaving 227 unexplained misses to decode. */}
+                    {matches.length > 0 && counts.not_found > matches.length / 2 && (
+                      <p className="alert alert-warning" style={{ fontSize: '13px', padding: '8px 12px' }}>
+                        Most rows don&apos;t match anything in <strong>{activeCompany?.name ?? 'this company'}</strong>. If this
+                        price list belongs to another company, switch to it first — or check that the
+                        &ldquo;{idColumn}&rdquo; column really holds your part codes.
+                      </p>
+                    )}
+                    <div style={{ maxHeight: '300px', overflowY: 'auto', overflowX: 'auto' }}>
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: '34px' }}>
+                              <input
+                                type="checkbox"
+                                aria-label={allTicked ? 'Clear all' : 'Select all'}
+                                checked={allTicked}
+                                disabled={updatable.length === 0}
+                                // Partly-ticked has to be set on the node; there is no attribute for it.
+                                ref={(el) => { if (el) el.indeterminate = pending.length > 0 && !allTicked; }}
+                                onChange={toggleAll}
+                              />
+                            </th>
+                            <th>Row</th><th>Part</th><th>Cost now</th><th>New cost</th><th>What happens</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ordered.map((m) => (
+                            <tr key={m.row.rowNumber} style={m.outcome === 'update' && excludedRows.has(m.row.rowNumber) ? { opacity: 0.45 } : undefined}>
+                              <td>
+                                {m.outcome === 'update' && (
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Update ${m.product?.part_number || m.product?.name || `row ${m.row.rowNumber}`}`}
+                                    checked={!excludedRows.has(m.row.rowNumber)}
+                                    onChange={() => toggleRow(m.row.rowNumber)}
+                                  />
+                                )}
+                              </td>
+                              <td style={{ color: 'var(--text-muted)' }}>{m.row.rowNumber}</td>
+                              <td>{m.product ? `${m.product.part_number || '—'} · ${m.product.name}` : (m.row.partNumber || m.row.name || m.row.oemNumber)}</td>
+                              <td style={{ fontVariantNumeric: 'tabular-nums' }}>{m.product ? `₹${money(Number(m.product.cost_price))}` : '—'}</td>
+                              <td style={{ fontVariantNumeric: 'tabular-nums' }}>₹{money(m.row.cost)}</td>
+                              <td>
+                                {m.outcome === 'update' && <span className="badge badge-success">update</span>}
+                                {m.outcome === 'unchanged' && <span style={{ color: 'var(--text-muted)' }}>{m.reason ?? 'no change'}</span>}
+                                {m.outcome === 'not_found' && <span style={{ color: 'var(--text-muted)' }}>{m.reason}</span>}
+                                {m.outcome === 'conflict' && <span style={{ color: 'var(--color-warning)' }}>{m.reason}</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+                {importError && <p className="form-error" role="alert">{importError}</p>}
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" disabled={applyingCosts} onClick={() => setCostSheet(null)}>Cancel</button>
+                {importMode === 'new' ? (
+                  <button className="btn btn-primary" disabled={applyingCosts || chosenNew.length === 0} onClick={() => applyNewParts(chosenNew)}>
+                    {applyingCosts ? 'Adding\u2026' : chosenNew.length === 0 ? 'Nothing selected' : 'Add ' + chosenNew.length + ' new part(s)'}
+                  </button>
+                ) : (
+                <button className="btn btn-primary" disabled={applyingCosts || pending.length === 0} onClick={() => applyCostPlan(pending)}>
+                  {applyingCosts
+                    ? `Updating ${costProgress} of ${pending.length}…`
+                    : pending.length === 0
+                      // "Nothing to update" would be wrong when there are updates and the owner
+                      // has simply unticked them all — say which of the two it is.
+                      ? (updatable.length === 0 ? 'Nothing to update' : 'Nothing selected')
+                      : `Apply ${pending.length} cost update(s)`}
+                </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

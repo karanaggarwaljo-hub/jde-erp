@@ -1,0 +1,43 @@
+-- Applied to the live Supabase project on 2026-09-01 as migrations
+--   record_purchase_payment
+--   lock_down_record_purchase_payment_grants
+--
+-- There was no way to say "this supplier invoice is paid".
+--
+-- The Purchases table showed a PAID / PARTIAL / UNPAID badge per order, but nothing could change
+-- it. The only payment control in the app lived on the Suppliers screen, and it worked on the
+-- supplier as a whole: it walked their oldest unpaid orders in a browser-side loop, PATCHing each
+-- one, then adjusted the payable balance in a separate call afterwards. A failure partway through
+-- left orders marked paid against a balance that was never reduced.
+--
+-- Separately, "Record Purchase from File" hardcoded paid: 0 — every purchase recorded from a
+-- scanned invoice was filed as unpaid credit, whether or not it had been settled on the spot.
+-- PO-1009 (KRISHNA HYDRAULICS, 4,440.70) is a real example.
+--
+-- jde_record_purchase_payment settles one specific order, and the two numbers that must agree —
+-- the order's paid amount and the supplier's outstanding payable — move inside one transaction:
+--
+--   select * from jde_purchase_orders where id = p_po_id and company_id = p_company_id for update;
+--   update ... set paid = round(coalesce(paid,0) + p_amount, 2)
+--   perform jde_adjust_supplier_balance(v_supplier_id, -round(p_amount, 2));
+--
+-- The row is locked first, so two people paying the same order at once cannot both read the same
+-- "still owing" and both be let through. Every limit is enforced here rather than in the browser,
+-- which only sends a requested amount. Verified against the live database, all rolled back:
+--
+--   payment of 2,000 on PO-1009      paid 0 -> 2,000.00, supplier balance 4,440.70 -> 2,440.70
+--   exact full payment               paid -> 4,440.70,   supplier balance -> 0.00
+--   over-payment by 1 paisa          rejected: "has only 4440.70 still owing"
+--   zero payment                     rejected: "Enter a payment amount greater than zero."
+--   negative payment                 rejected: same
+--   another company's purchase       rejected: "was not found for this company"
+--   paying an already-settled order  rejected: "is already fully paid"
+--
+-- The supplier is matched by name within the company, which is how jde_save_purchase records it
+-- on the order in the first place. An order whose supplier name no longer matches any supplier
+-- row still records its payment; only the payable adjustment is skipped.
+--
+-- Grants: Supabase's default privileges hand every newly created function to anon and
+-- authenticated as EXPLICIT grants, which "revoke ... from public" does not remove — the second
+-- migration revokes those by name. Final state matches jde_record_purchase_return:
+--   {postgres=X/postgres,service_role=X/postgres}

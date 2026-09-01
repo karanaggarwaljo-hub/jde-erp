@@ -17,11 +17,7 @@ export const config = {
 // hitting either gets redirected to /login like any other page — which is what actually produced
 // Search Console's "Sitemap is HTML" error, not merely the routes being absent before app/sitemap.ts
 // and app/robots.ts existed.
-// /api/cron/backup is here because a Vercel Cron request carries no session cookie — there is no
-// browser and no logged-in person behind it, so the gate below would always reject it. It is not
-// actually open: the route itself requires a Bearer CRON_SECRET and refuses everyone when that
-// secret is unset. Anything else added to this list must carry its own check the same way.
-const PUBLIC_EXACT = new Set(['/login', '/forgot-password', '/auth/callback', '/api/auth/login', '/api/auth/logout', '/api/auth/forgot-password', '/api/catalog-rfq', '/api/catalog-event', '/api/public/catalog', '/api/cron/backup', '/sitemap.xml', '/robots.txt']);
+const PUBLIC_EXACT = new Set(['/login', '/forgot-password', '/auth/callback', '/api/auth/login', '/api/auth/logout', '/api/auth/forgot-password', '/api/catalog-rfq', '/api/catalog-event', '/api/public/catalog', '/sitemap.xml', '/robots.txt']);
 const PUBLIC_PREFIXES = ['/catalog'];
 
 
@@ -30,9 +26,24 @@ const PUBLIC_PREFIXES = ['/catalog'];
 const SESSION_ONLY_EXACT = new Set(['/accept-invite', '/api/auth/accept-invite']);
 
 
+// Machine-to-machine endpoints authenticate themselves with a dedicated, company-scoped bearer
+// token inside their Route Handlers. They must bypass the browser's Supabase-cookie gate, but are
+// not public: a missing/invalid integration token is rejected before any database read occurs.
+//
+// /api/cron belongs here rather than in PUBLIC_EXACT above: a Vercel Cron request carries no
+// session cookie, so it has to bypass the browser gate, but "reachable by anyone, no session
+// required at all" is emphatically not what these routes are. Each one checks a Bearer
+// CRON_SECRET itself and refuses everybody when that secret is missing or too short.
+const SERVICE_AUTH_PREFIXES = ['/api/integration/v1', '/api/internal/adaptive-platform', '/api/cron'];
+
+
 function matchesAny(pathname: string, exact: Set<string>, prefixes: string[] = []): boolean {
   if (exact.has(pathname)) return true;
   return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+export function isServiceAuthenticatedPath(pathname: string): boolean {
+  return matchesAny(pathname, new Set(), SERVICE_AUTH_PREFIXES);
 }
 
 
@@ -56,6 +67,11 @@ export async function proxy(request: NextRequest) {
 
   if (matchesAny(pathname, PUBLIC_EXACT, PUBLIC_PREFIXES)) {
     return NextResponse.next();
+  }
+
+
+  if (isServiceAuthenticatedPath(pathname)) {
+    return NextResponse.next({ request });
   }
 
 

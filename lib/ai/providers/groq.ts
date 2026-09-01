@@ -1,8 +1,23 @@
-import { AiProviderError, classifyStatus, classifyError } from '../errors';
+import { AiProviderError, classifyStatus, classifyError, type AiFailureKind } from '../errors';
 import { toStrictJsonSchema } from '../schema';
 import type { AiJsonRequest, AiProvider, AiProviderResult } from '../types';
 
 const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+
+/** How a Groq HTTP failure should be treated by the failover chain.
+ *
+ *  classifyStatus maps every 400 to bad_request, which deliberately STOPS the chain on the grounds
+ *  that a malformed request fails identically everywhere. That reasoning does not hold for two
+ *  cases: "failed to validate JSON" means this model produced a bad answer, and an unsupported
+ *  response_format means this model lacks a feature. Neither says anything about whether another
+ *  provider can do the job — and Gemini demonstrably can. Left as bad_request they surfaced a raw
+ *  "Groq 400: Failed to validate JSON" to the owner while a working provider sat untried. */
+export function classifyGroqFailure(status: number, detail: string): AiFailureKind {
+  const providerFailedTheTask = /failed_generation|failed to validate json|response_format|json_schema|not supported/i.test(detail);
+  if (status === 400 && providerFailedTheTask) return 'empty';
+  return classifyStatus(status);
+}
+
 
 /** Groq speaks the OpenAI chat API, so this is a plain fetch — no extra dependency to install
  *  or keep in step with. Two models are used: a text model for the JSON routes, and a separate
@@ -35,25 +50,17 @@ export const groqProvider: AiProvider = {
         ]
       : request.prompt;
 
-    // Strict schema enforcement is a text-model feature on Groq. The vision model only offers
-    // plain JSON mode, so there the schema is spelled out in the instructions instead and the
-    // gateway validates the parsed result afterwards.
+    // The vision model accepts a strict schema too — verified directly against
+    // qwen/qwen3.6-27b. It used to be given plain JSON mode with the schema described in prose
+    // instead, which left the model free to answer in a shape Groq's own validator then rejected
+    // with "Failed to validate JSON"; constraining generation means it cannot produce that.
     const strictSchema = toStrictJsonSchema(request.schema);
-    const responseFormat = hasAttachments
-      ? { type: 'json_object' as const }
-      : {
-          type: 'json_schema' as const,
-          json_schema: { name: request.schemaName || 'response', strict: true, schema: strictSchema },
-        };
+    const responseFormat = {
+      type: 'json_schema' as const,
+      json_schema: { name: request.schemaName || 'response', strict: true, schema: strictSchema },
+    };
 
-    const system = [
-      request.system,
-      hasAttachments
-        ? `Reply with a single JSON object and nothing else. It must match this JSON Schema exactly:\n${JSON.stringify(strictSchema)}`
-        : null,
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+    const system = request.system ?? '';
 
     let response: Response;
     try {
@@ -92,7 +99,15 @@ export const groqProvider: AiProvider = {
       } catch {
         // Non-JSON error body (a proxy or edge error) — the raw text is the best detail we have.
       }
-      throw new AiProviderError(`Groq ${response.status}: ${detail}`, classifyStatus(response.status), 'groq', response.status);
+
+      // classifyStatus maps every 400 to bad_request, which deliberately STOPS the failover chain
+      // on the grounds that a malformed request fails identically everywhere. That reasoning does
+      // not hold for these two: "failed to validate JSON" means this model produced a bad answer,
+      // and an unsupported response_format means this model lacks a feature — neither says
+      // anything about whether Gemini can do the job, and Gemini demonstrably can. Left as
+      // bad_request they surfaced a raw "Groq 400" to the owner while a working provider sat
+      // untried. Classed as `empty` they are retryable, so the next provider is asked.
+      throw new AiProviderError(`Groq ${response.status}: ${detail}`, classifyGroqFailure(response.status, detail), 'groq', response.status);
     }
 
     const payload = (await response.json()) as {

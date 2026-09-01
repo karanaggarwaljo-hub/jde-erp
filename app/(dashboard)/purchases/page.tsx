@@ -21,12 +21,13 @@ import {
   ChevronRight,
   ArrowRight,
 } from 'lucide-react';
-import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
+import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_ACCEPT, isSpreadsheetFileName, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
 import { matchImportedLine, normalizeImportText, planFieldUpdates, type LineMatch, type MatchableProduct } from '@/lib/import-matching';
-import { savePurchase, receivePurchaseStock } from '@/lib/client-purchases';
+import { savePurchase, receivePurchaseStock, recordPurchasePayment } from '@/lib/client-purchases';
 import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-purchase-returns';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
 
 type PurchaseTab = 'purchases' | 'invoices';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
@@ -100,7 +101,7 @@ function todayIso() {
 }
 
 function isSpreadsheetFile(file: File) {
-  return SPREADSHEET_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext));
+  return isSpreadsheetFileName(file.name);
 }
 
 function isScannableFile(file: File) {
@@ -110,6 +111,15 @@ function isScannableFile(file: File) {
 function cleanedGuess(text: string): string {
   return text.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
 }
+
+/** The identifiers a supplier document prints alongside each line. Shown on the review screen so
+ *  what the scan read can be checked, and typed in when it read nothing. */
+const IMPORT_IDENTIFIERS: { field: 'part_number' | 'hsn_code' | 'oem_number' | 'brand'; label: string }[] = [
+  { field: 'part_number', label: 'Part no' },
+  { field: 'hsn_code', label: 'HSN' },
+  { field: 'oem_number', label: 'OEM no' },
+  { field: 'brand', label: 'Brand' },
+];
 
 function reviewImportedLines(lines: ImportedLine[], products: Product[], links: Record<number, string>): ImportLineReview[] {
   const descriptionCounts = new Map<string, number>();
@@ -194,6 +204,19 @@ export default function PurchasesPage() {
   // Line index -> the part the owner linked it to, or NEW_PART for "keep this separate".
   // Only suggested (not exact) matches ever need an entry here.
   const [importLinks, setImportLinks] = useState<Record<number, string>>({});
+  // Whether this invoice has been paid, asked the same way the manual purchase form asks it.
+  // It used to be hardcoded to zero here, so a purchase recorded from a file was always filed as
+  // unpaid credit — adding the full amount to the supplier's balance even when it was settled on
+  // the spot, with no way to say so short of editing the order afterwards.
+  const [importPaymentStatus, setImportPaymentStatus] = useState<PaymentStatus>('unpaid');
+  const [importAmountPaid, setImportAmountPaid] = useState(0);
+  // Paying one specific purchase. Until now the only way to pay a supplier was from the
+  // Suppliers screen, which spread the money across their oldest unpaid orders automatically —
+  // there was no way to say "this invoice is settled".
+  const [payingOrder, setPayingOrder] = useState<PurchaseOrder | null>(null);
+  const [payAmount, setPayAmount] = useState(0);
+  const [payError, setPayError] = useState('');
+  const [savingPayment, setSavingPayment] = useState(false);
   const [returningOrder, setReturningOrder] = useState<PurchaseOrder | null>(null);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [returnNote, setReturnNote] = useState('');
@@ -457,6 +480,34 @@ export default function PurchasesPage() {
     }
   };
 
+  const openPaymentModal = (po: PurchaseOrder) => {
+    setPayingOrder(po);
+    // Defaults to settling it in full, which is what "mark this as paid" usually means — still
+    // editable for a part payment.
+    setPayAmount(Number(po.total || 0) - Number(po.paid || 0));
+    setPayError('');
+  };
+
+  const submitPayment = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!payingOrder || !activeCompany || savingPayment) return;
+    setPayError('');
+    setSavingPayment(true);
+    try {
+      // The order's paid amount and the supplier's balance move together inside one database
+      // transaction, and how much is still owing is decided there — this figure is only a
+      // request. An over-payment or a double submit comes back as a message, not a wrong balance.
+      await recordPurchasePayment({ companyId: activeCompany.id, poId: payingOrder.id, amount: payAmount });
+      await Promise.all([reloadPurchaseOrders(), reloadSuppliers()]);
+      setFeedback(`₹${money(payAmount)} payment recorded against ${payingOrder.id}.`);
+      setPayingOrder(null);
+    } catch (error) {
+      setPayError(error instanceof Error ? error.message : 'Failed to record this payment.');
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
   const guessSupplierFromText = (text: string | undefined | null): string | undefined => {
     if (!text) return undefined;
     const guess = text.toLowerCase();
@@ -472,6 +523,8 @@ export default function PurchasesPage() {
     setFeedback('');
     setImportPreview(null);
     setImportLinks({});
+    setImportPaymentStatus('unpaid');
+    setImportAmountPaid(0);
     setImporting(true);
     try {
       if (isSpreadsheetFile(file)) {
@@ -481,15 +534,39 @@ export default function PurchasesPage() {
         }
         setImportPreview({ fileName: file.name, lines: imported, supplier: guessSupplierFromText(file.name) ?? '', supplierGstin: '', fileHash: null });
       } else if (isScannableFile(file)) {
-        const base64 = await fileToBase64(file);
         // Content-based, not filename-based, so the exact same invoice can't be scanned or
         // recorded twice even under a renamed/re-saved copy — checked server-side before this
         // spends an AI call, and again (as a hard guarantee) when the purchase is actually saved.
+        // Hashed from the ORIGINAL file, before any resizing, so the identity of the document
+        // does not change just because the browser shrank the copy it uploads.
         const fileHash = await hashFile(file);
+
+        // A photo straight off a phone is 3-10MB, which becomes 4-13MB once base64-encoded into
+        // this JSON body — past the platform's ~4.5MB request ceiling. Such a request is rejected
+        // before it ever reaches the ERP, which is why this failed with nothing in the server
+        // logs to explain it. Shrinking it in the browser is the only fix available; the limit is
+        // not ours to raise. Confirmed against production: a 1MB body is accepted, a 6MB one is
+        // refused outright.
+        let base64: string;
+        let mimeType: string;
+        if (file.type === 'application/pdf') {
+          // A PDF can't be redrawn through a canvas the way an image can, so there is nothing to
+          // shrink — say so plainly instead of letting it fail with an unexplained error.
+          if (file.size > 4_000_000) {
+            throw new Error(
+              'This PDF is too large to scan (over 4MB). Save or export it at a smaller size, or take a photo of the invoice and scan that instead.'
+            );
+          }
+          base64 = await fileToBase64(file);
+          mimeType = file.type;
+        } else {
+          ({ base64, mimeType } = await resizeImageForUpload(file, { maxDimension: DOCUMENT_SCAN_DIMENSION }));
+        }
+
         const res = await fetch('/api/purchases/import-scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64, mimeType: file.type, fileHash, companyId: activeCompany?.id }),
+          body: JSON.stringify({ base64, mimeType, fileHash, companyId: activeCompany?.id }),
         });
         const data = (await parseJsonOrThrow(res, 'Failed to scan document.')) as { items?: unknown; supplier_name?: string; supplier_gstin?: string };
 
@@ -567,7 +644,7 @@ export default function PurchasesPage() {
         receivedAt: new Date().toLocaleString('en-IN'),
         items,
         total: importedTotal,
-        paid: 0,
+        paid: importPaidAmount,
         status: 'received',
         sourceFileHash: importPreview.fileHash,
       });
@@ -681,6 +758,9 @@ export default function PurchasesPage() {
   const awaitingSentence = `${pendingOrders.length} ${pendingOrders.length === 1 ? 'order' : 'orders'} worth ₹${wholeMoney(pendingValue)} ${pendingOrders.length === 1 ? 'is' : 'are'} still awaiting delivery${overdueOrders.length > 0 ? `, and ${overdueOrders.length} ${overdueOrders.length === 1 ? 'is' : 'are'} past the expected date on the order` : ''}.`;
 
   const importedPreviewTotal = importPreview ? importPreview.lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0) : 0;
+  const importPaidAmount = importPaymentStatus === 'paid'
+    ? importedPreviewTotal
+    : importPaymentStatus === 'partial' ? Math.min(Math.max(importAmountPaid, 0), importedPreviewTotal) : 0;
 
   return (
     <div>
@@ -693,7 +773,7 @@ export default function PurchasesPage() {
         <div className="flex gap-2">
           <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
             <Upload size={16} /> {importing ? 'Reading file…' : 'Import from File'}
-            <input type="file" accept=".csv,.xls,.xlsx,.pdf,image/*" hidden disabled={importing} onChange={handleImportFile} />
+            <input type="file" accept={`${SPREADSHEET_ACCEPT},.pdf,image/*`} hidden disabled={importing} onChange={handleImportFile} />
           </label>
           <button className="btn btn-primary" onClick={openPurchaseModal}><Plus size={16} /> Record Purchase</button>
         </div>
@@ -872,9 +952,16 @@ export default function PurchasesPage() {
                   {po.status.toUpperCase()}
                 </span>
               </td>
-              <td className="text-center">{po.status !== 'received'
-                ? <button className="btn btn-secondary btn-sm" disabled={receivingPoId === po.id} onClick={() => markReceived(po.id)}><PackageCheck size={14} /> {receivingPoId === po.id ? 'Marking…' : 'Mark Received'}</button>
-                : <button className="btn btn-secondary btn-sm" onClick={() => openReturnModal(po)} title="Return some or all received items to this supplier"><Undo2 size={14} /> Return Items</button>}</td>
+              <td className="text-center">
+                <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  {po.status !== 'received'
+                    ? <button className="btn btn-secondary btn-sm" disabled={receivingPoId === po.id} onClick={() => markReceived(po.id)}><PackageCheck size={14} /> {receivingPoId === po.id ? 'Marking…' : 'Mark Received'}</button>
+                    : <button className="btn btn-secondary btn-sm" onClick={() => openReturnModal(po)} title="Return some or all received items to this supplier"><Undo2 size={14} /> Return Items</button>}
+                  {balance > 0 && (
+                    <button className="btn btn-secondary btn-sm" onClick={() => openPaymentModal(po)} title={`Record a payment against ${po.id}`}><Wallet size={14} /> Record Payment</button>
+                  )}
+                </div>
+              </td>
             </tr>;
           })}
           {pagedOrders.length === 0 && (
@@ -978,6 +1065,38 @@ export default function PurchasesPage() {
         <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingReturn} onClick={() => setReturningOrder(null)}>Cancel</button><button type="button" className="btn btn-primary" disabled={savingReturn || loadingReturnAvailability || returnableQtyByPoItemId === null || selectedReturnLines.length === 0 || hasInvalidReturnQuantity || returnableItems.length === 0} onClick={submitPurchaseReturn}>{savingReturn ? 'Recording…' : loadingReturnAvailability ? 'Checking stock…' : 'Review & Record Return'}</button></div>
       </div></div>}
 
+      {payingOrder && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="pay-modal-title"><form onSubmit={submitPayment}>
+        <div className="modal-header">
+          <h3 id="pay-modal-title" className="modal-title">Record Payment</h3>
+          <button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingPayment} onClick={() => setPayingOrder(null)}>✕</button>
+        </div>
+        <div className="modal-body">
+          {payError && <div className="alert alert-danger" role="alert">{payError}</div>}
+          <p className="text-muted" style={{ fontSize: '13px', marginTop: 0 }}>
+            <strong>{payingOrder.id}</strong> — {payingOrder.supplier}, dated {payingOrder.date}.
+          </p>
+          <div className="flex justify-between items-center invoice-summary" style={{ marginBottom: '12px' }}>
+            <div><span className="text-muted">Order total: </span><strong>₹{money(payingOrder.total)}</strong></div>
+            <div><span className="text-muted">Already paid: </span><strong className="text-success">₹{money(payingOrder.paid)}</strong></div>
+            <div><span className="text-muted">Still owing: </span><strong className="text-danger">₹{money(Number(payingOrder.total) - Number(payingOrder.paid))}</strong></div>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="pay-amount">Amount Paid Now (₹)</label>
+            <input id="pay-amount" type="number" min="0.01" step="0.01" max={Number(payingOrder.total) - Number(payingOrder.paid)}
+              className="form-input" value={payAmount} disabled={savingPayment}
+              onChange={(event) => setPayAmount(Number(event.target.value))} autoFocus />
+          </div>
+          <p className="text-muted" style={{ fontSize: '12px' }}>
+            This reduces what you owe {payingOrder.supplier} by the same amount. Nothing about the stock
+            already received changes.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-secondary" disabled={savingPayment} onClick={() => setPayingOrder(null)}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={savingPayment || !(payAmount > 0)}>{savingPayment ? 'Recording…' : 'Record Payment'}</button>
+        </div>
+      </form></div></div>}
+
       {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
         <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Record Purchase from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={confirmingImport} onClick={() => { setImportPreview(null); setImportLinks({}); }}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
@@ -1026,7 +1145,7 @@ export default function PurchasesPage() {
             <div className="tbl-toolbar">
               <div className="tbl-toolbar-title">
                 <strong>Review imported items</strong>
-                <small>Edit a row to correct it before saving — a red row must be fixed first</small>
+                <small>Edit a row to correct it before saving — a red row must be fixed first. Part no, HSN, OEM and brand are read from the document; fill in anything blank.</small>
               </div>
             </div>
 
@@ -1038,7 +1157,20 @@ export default function PurchasesPage() {
                   const suggestion = review?.match.kind === 'suggested' ? review.match.product : null;
                   const isInvalid = !line.description.trim() || line.quantity <= 0 || line.unit_price <= 0;
                   return <tr key={index} style={isInvalid ? { background: 'var(--color-danger-bg)' } : undefined}>
-                    <td style={{ minWidth: '220px' }}><input list="import-part-options" className="form-input" aria-label={`Item ${index + 1}`} value={line.description} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { description: event.target.value })} /></td>
+                    <td style={{ minWidth: '250px' }}>
+                      <input list="import-part-options" className="form-input" aria-label={`Item ${index + 1}`} value={line.description} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { description: event.target.value })} />
+                      {/* These are what let the next invoice from any supplier recognise this
+                          same part, whoever's name it is printed under, so they are worth
+                          checking now — while the document is still in front of you. */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '4px' }}>
+                        {IMPORT_IDENTIFIERS.map(({ field, label }) => (
+                          <input key={field} className="form-input" style={{ fontSize: '12px', padding: '4px 6px' }}
+                            placeholder={label} aria-label={`${label} for item ${index + 1}`}
+                            value={line[field] ?? ''} disabled={confirmingImport}
+                            onChange={(event) => updateImportedLine(index, { [field]: event.target.value })} />
+                        ))}
+                      </div>
+                    </td>
                     <td style={{ minWidth: '82px' }}><input type="number" min="1" className="form-input text-right" aria-label={`Quantity for item ${index + 1}`} value={line.quantity} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { quantity: Number(event.target.value) })} /></td>
                     <td style={{ minWidth: '118px' }}><input type="number" min="0.01" step="0.01" className="form-input text-right" aria-label={`Unit cost for item ${index + 1}`} value={line.unit_price} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { unit_price: Number(event.target.value) })} /></td>
                     <td className="text-right font-semibold">₹{money(line.quantity * line.unit_price)}</td>
@@ -1105,6 +1237,31 @@ export default function PurchasesPage() {
               Choose <strong>Same part</strong> or <strong>Different part</strong> for each — otherwise a duplicate part gets created.
             </div>
           )}
+
+          <div className="form-grid-2">
+            <div className="form-group">
+              <label className="form-label" htmlFor="import-payment-status">Payment to Supplier</label>
+              <select id="import-payment-status" className="form-input form-select" value={importPaymentStatus} disabled={confirmingImport}
+                onChange={(event) => setImportPaymentStatus(event.target.value as PaymentStatus)}>
+                <option value="paid">Paid in Full</option>
+                <option value="partial">Partially Paid</option>
+                <option value="unpaid">Unpaid (Credit)</option>
+              </select>
+            </div>
+            {importPaymentStatus === 'partial' && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="import-amount-paid">Amount Paid (₹)</label>
+                <input id="import-amount-paid" type="number" min="0" max={importedPreviewTotal} className="form-input" value={importAmountPaid}
+                  disabled={confirmingImport} onChange={(event) => setImportAmountPaid(Number(event.target.value))} />
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-between items-center invoice-summary">
+            <div><span className="text-muted">Paid: </span><strong className="text-success">₹{money(importPaidAmount)}</strong></div>
+            <div><span className="text-muted">Balance to supplier: </span><strong className={importedPreviewTotal - importPaidAmount > 0 ? 'text-danger' : 'text-muted'}>₹{money(importedPreviewTotal - importPaidAmount)}</strong></div>
+            <div><strong>Total: </strong><span className="invoice-total">₹{money(importedPreviewTotal)}</span></div>
+          </div>
 
           <p className="text-muted" style={{ fontSize: '12px' }}>
             Anything here that isn&apos;t already in Inventory is added as a new part when you record this purchase.

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles, RefreshCw } from 'lucide-react';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { AiCacheNote, describeGenerated, type CacheMeta } from './AiCacheNote';
 
 type Props = {
   reportType: string;
@@ -11,6 +12,7 @@ type Props = {
 
 export default function AIReportSummary({ reportType, data }: Props) {
   const [summary, setSummary] = useState('');
+  const [meta, setMeta] = useState<CacheMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const abortController = useRef<AbortController | null>(null);
@@ -21,7 +23,10 @@ export default function AIReportSummary({ reportType, data }: Props) {
 
   const dataKey = JSON.stringify(data);
 
-  const fetchSummary = async () => {
+  // Switching between the five report tabs used to generate a fresh summary every single time.
+  // It still asks the server on every switch, but the server now replays a stored answer unless
+  // one is genuinely due — only `manual` (a press of Refresh) asks it to spend an AI run.
+  const fetchSummary = async (manual = false) => {
     abortController.current?.abort();
     const controller = new AbortController();
     abortController.current = controller;
@@ -32,12 +37,13 @@ export default function AIReportSummary({ reportType, data }: Props) {
       const res = await fetch('/api/ai-report-summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reportType, data }),
+        body: JSON.stringify({ reportType, data, refresh: manual }),
         signal: controller.signal,
       });
-      const body = (await parseJsonOrThrow(res, 'Failed to summarize this report.')) as { summary: string };
+      const body = (await parseJsonOrThrow(res, 'Failed to summarize this report.')) as { summary: string; cache?: CacheMeta };
       if (thisRequest !== requestId.current) return;
       setSummary(body.summary);
+      setMeta(body.cache ?? null);
     } catch (err) {
       if (thisRequest !== requestId.current) return;
       if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -50,7 +56,7 @@ export default function AIReportSummary({ reportType, data }: Props) {
   useEffect(() => {
     // Report inputs settle over a few renders; waiting briefly avoids paying for a summary of
     // the initial empty data and then immediately generating the real one as well.
-    const timer = setTimeout(fetchSummary, 450);
+    const timer = setTimeout(() => fetchSummary(false), 450);
     return () => {
       clearTimeout(timer);
       abortController.current?.abort();
@@ -64,14 +70,20 @@ export default function AIReportSummary({ reportType, data }: Props) {
         <div className="flex items-center gap-2">
           <Sparkles size={15} className="text-brand" />
           <span style={{ fontSize: '13px', fontWeight: 600 }}>AI Summary</span>
+          {describeGenerated(meta) && (
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{describeGenerated(meta)}</span>
+          )}
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={fetchSummary} disabled={loading} aria-label="Refresh summary">
+        <button className="btn btn-ghost btn-sm" onClick={() => fetchSummary(true)} disabled={loading} aria-label="Refresh summary">
           <RefreshCw size={13} className={loading ? 'spin' : ''} />
         </button>
       </div>
       {loading && <div className="skeleton" style={{ height: '14px', width: '80%' }} />}
       {error && <p style={{ fontSize: '13px', color: 'var(--color-danger)' }}>{error}</p>}
-      {!loading && !error && summary && <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{summary}</p>}
+      {!loading && !error && summary && !meta?.stale_input && (
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{summary}</p>
+      )}
+      {!loading && !error && <AiCacheNote meta={meta} />}
     </div>
   );
 }

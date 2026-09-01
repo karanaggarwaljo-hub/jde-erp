@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Sparkles, RefreshCw, TrendingUp, TrendingDown, Minus, AlertTriangle, Lightbulb } from 'lucide-react';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { AiCacheNote, describeGenerated, type CacheMeta } from './AiCacheNote';
 
 type Trend = { label: string; detail: string; direction: 'up' | 'down' | 'flat' };
 type Risk = { title: string; detail: string; severity: 'low' | 'medium' | 'high' };
@@ -25,16 +26,17 @@ export default function AIInsightsCard() {
   const [insights, setInsights] = useState<Insights | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [generatedAt, setGeneratedAt] = useState<Date | null>(null);
+  const [meta, setMeta] = useState<CacheMeta | null>(null);
 
-  const fetchInsights = async () => {
+  // Only a deliberate press of Refresh may spend one of the day's two AI runs.
+  const fetchInsights = async (manual = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/ai-insights');
-      const body = (await parseJsonOrThrow(res, 'Failed to generate insights.')) as { insights: Insights };
+      const res = await fetch(`/api/ai-insights${manual ? '?refresh=1' : ''}`);
+      const body = (await parseJsonOrThrow(res, 'Failed to generate insights.')) as { insights: Insights; cache?: CacheMeta };
       setInsights(body.insights);
-      setGeneratedAt(new Date());
+      setMeta(body.cache ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate insights.');
     } finally {
@@ -43,7 +45,7 @@ export default function AIInsightsCard() {
   };
 
   useEffect(() => {
-    const timer = setTimeout(fetchInsights, 0);
+    const timer = setTimeout(() => fetchInsights(false), 0);
     return () => clearTimeout(timer);
   }, []);
 
@@ -55,7 +57,7 @@ export default function AIInsightsCard() {
           <div>
             <h3 className="card-title">AI Business Insights</h3>
             <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-              {generatedAt ? `Generated ${generatedAt.toLocaleTimeString()}` : 'Trends, forecast, and recommended actions'}
+              {describeGenerated(meta) ?? 'Trends, forecast, and recommended actions'}
             </p>
           </div>
         </div>
@@ -65,7 +67,7 @@ export default function AIInsightsCard() {
               {insights.data_confidence} confidence
             </span>
           )}
-          <button className="btn btn-secondary btn-sm" onClick={fetchInsights} disabled={loading}>
+          <button className="btn btn-secondary btn-sm" onClick={() => fetchInsights(true)} disabled={loading}>
             <RefreshCw size={14} className={loading ? 'spin' : ''} /> {loading ? 'Analyzing…' : 'Refresh'}
           </button>
         </div>
@@ -154,6 +156,8 @@ export default function AIInsightsCard() {
           )}
         </div>
       )}
+
+      <AiCacheNote meta={meta} />
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
-## 2026-08-26 — Fixed: the daily backup had not run once since the site went online
+## 2026-09-02 — Fixed: the daily backup had not run once since the site went online
 
 Your live data was never in danger — Supabase holds the real thing, and nothing here touches it.
 What had stopped working was the spare copy.
@@ -11,16 +11,17 @@ What had stopped working was the spare copy.
 running on. That was right when the ERP ran from a computer in the office, but the live site does
 not work that way — it has no folder of its own to write to, and keeps nothing between one visit
 and the next. So every attempt failed the moment it started, about once an hour, filling the server
-log with the same error each time. There has been no snapshot at all since the app moved to
+log with the same error each time. There had been no snapshot at all since the app moved to
 erp.jd-enterprise.com.
 
 **Where backups go now.** Into a private storage area inside your own Supabase account, next to
 where the website catalogue photos already live. Private, not public: checked directly, the file
 cannot be opened by anyone who hasn't gone through the ERP signed in as owner.
 
-**When they happen now.** Once a night, around 1:30am, run by a real scheduler instead of by the
-app noticing the time while somebody happens to have it open — which is the part that could never
-have worked on a live site. Snapshots older than 7 days are still cleared out automatically.
+**When they happen now.** Once a night, run by the same real scheduler that already handles the
+nightly platform sync, instead of by the app noticing the time while somebody happens to have it
+open — which is the part that could never have worked on a live site. Snapshots older than 7 days
+are still cleared out automatically.
 
 **You can now download a backup.** When these files sat on a hard drive you could always go and
 find one; now that they're in the cloud, each row in Settings → Data Backups has a Download button
@@ -30,10 +31,10 @@ one that would survive losing the Supabase account itself.
 **Also fixed while in there:**
 
 - **The snapshot was close to silently losing data.** It asked for every row of every table in one
-  go, and Supabase quietly stops answering at 1,000 rows. Your parts list is at 934. Another 66
-  parts and every backup would have been cut short while still looking complete. It now reads
-  everything in batches, however large a table gets. Checked row for row against the live database
-  afterwards: all 19 tables match exactly.
+  go, and Supabase quietly stops answering at 1,000 rows. Your parts list is already past 900.
+  A few dozen more parts and every backup would have been cut short while still looking complete.
+  It now reads everything in batches, however large a table gets. Checked row for row against the
+  live database afterwards: every table matches exactly.
 - **Any member of staff could have downloaded all of your data.** The Settings screen was owner-only,
   but the web address behind it wasn't — anyone with a working login could have pulled a full copy
   of every company's records straight from it. Now owner-only, matching the screen.
@@ -44,11 +45,655 @@ one that would survive losing the Supabase account itself.
 - **The desktop version's local backup folder was removed**, since you confirmed everyone works from
   the website now. One place backups live, one way they're made.
 
-**One thing to do at your end.** In Vercel, add a setting called `CRON_SECRET` with any long random
-value, then redeploy. That's the password the nightly scheduler uses to prove it really is the
-scheduler. Until it's set the nightly run refuses to start — deliberately, because that address can
-read your entire database, and doing nothing is safer than being left open. "Backup Now" in Settings
-works either way.
+**Nothing to set up.** The nightly backup is protected by the same `CRON_SECRET` already in use for
+the platform sync, so if that one is running, this one will too.
+
+## 2026-09-01 — When a customer settles by paying less
+
+Reported: sometimes a customer settles their payment by giving a lesser amount.
+
+There was nowhere for that to go. If a customer owed ₹41,356.75 and handed over ₹40,000 with
+"that's settled", the ₹1,356.75 stayed on the books forever — the invoice never closed, the
+customer kept appearing in your collection queue, and your receivables total counted money nobody
+was ever going to pay.
+
+**Two places now handle it.**
+
+When you record the payment, each open invoice has a *Settle for less* tick box showing exactly
+what would be left over — tick it and that remainder is forgiven as part of the same action.
+
+And any invoice with money still owing has a new button in Sales (the hand-with-coins icon) for
+settling one after the fact, with a box for why — "rounded off in cash", "agreed discount for late
+delivery". Useful for the ones already sitting open.
+
+**What it deliberately does not do is pretend the money arrived.** The easy way to build this
+would have been to add the shortfall to the invoice's "paid" figure. Everything would close
+neatly — and every takings figure, report and AI summary in the app would then be quietly
+overstated by money you never received. So the invoice keeps the total it was issued for, "paid"
+keeps meaning cash that actually came in, and what you let go is recorded separately and labelled
+"written off" wherever it appears. The customer stops owing it; your takings stay honest.
+
+Every screen that showed what a customer owes now understands settled invoices — the Sales list,
+the invoice page, the customer collection queue, the Dashboard's unpaid-bills warning, the
+receivables report and its ageing table, the exported spreadsheet, and the AI daily briefing.
+
+A settled invoice can no longer be edited or deleted, and says so — its amounts are fixed once you
+have agreed the account is closed.
+
+Checked against the live database with real invoices and undone immediately: writing off part of a
+balance, then the rest; trying to write off a rupee more than is owed, a zero, a negative, another
+company's invoice, and a second settlement on an already-closed invoice — the first two accepted
+with the customer's balance moving by exactly the right amount and the paid figure untouched at
+₹40,000 throughout, the rest refused with a plain message. Twelve new automated tests cover the
+arithmetic.
+
+## 2026-09-01 — Supplier payments, and showing what a scan actually read
+
+Reported: the HSN code isn't being extracted from the invoice, and there's no way to say whether
+the supplier has been paid.
+
+**The HSN code was being read — you just couldn't see it.** Checked against your own data: the
+part from that KRISHNA HYDRAULICS invoice was created with part number 331/34392, HSN 84129090 and
+brand JCB, all read off the photo. None of it appeared on the review screen, so there was no way
+to tell it had worked, and no way to type it in on the occasions it doesn't.
+
+The review screen now shows all four — part no, HSN, OEM no and brand — under each item, and each
+one can be edited before you save. Correcting a part number there can also turn a "new part" into
+a match against something you already stock.
+
+**Payment to the supplier is now asked when you record a purchase from a file.** It never was: the
+dialog silently recorded every scanned invoice as unpaid credit, which added the whole amount to
+that supplier's balance even if you had paid on the spot. It now has the same Paid in Full /
+Partially Paid / Unpaid choice the manual purchase form has, with the balance shown before you
+commit.
+
+**And any purchase can now be paid afterwards.** Each order with money still owing has a Record
+Payment button. Until now the only payment control was on the Suppliers screen and it worked on
+the supplier as a whole — it spread your money across their oldest unpaid orders automatically,
+with no way to settle one particular invoice.
+
+The order's paid amount and what you owe that supplier now move together, in one step that either
+fully happens or doesn't happen at all. The old Suppliers-screen route updated each order and then
+the balance in separate calls, so an interruption partway could leave orders marked paid against a
+balance that was never reduced. It also refuses, with a plain message, to accept more than the
+order still owes, an amount of zero, or a second payment on something already settled.
+
+Checked against the live database with real orders and undone immediately: a part payment, a full
+payment, an over-payment, a zero, a negative, another company's order, and a double payment — the
+first two accepted with both numbers correct, the rest refused.
+
+**One thing to correct yourself:** PO-1009 (KRISHNA HYDRAULICS, ₹4,440.70) was recorded before
+this, so it is filed as unpaid. If you have paid it, use Record Payment on that row.
+
+## 2026-09-01 — Fixed: returns were crediting customers too much
+
+Reported: the return isn't fully wired.
+
+Correct, and it was my omission. When per-item discounts and the GST inclusive/exclusive choice
+were added to invoices, credit notes were not updated to match — so a return calculated the credit
+the old way and **gave the customer back more than they ever paid**. Two separate ways:
+
+- **A part sold at a discount was credited at full price.** Your invoices use this — an item at
+  ₹7,170 discounted to ₹6,094.50 would have been credited the full ₹7,170.
+- **On a GST-included invoice the tax was added a second time**, on top of an amount that already
+  contained it.
+
+Both now credit exactly what was charged:
+
+                            invoice total   credited BEFORE   credited NOW
+    GST extra (18%)              2,124.00         2,360.00       2,124.00
+    GST included (18%)           1,800.00         2,360.00       1,800.00
+
+Returning an entire invoice now leaves exactly zero owing, whichever way it was priced. Checked
+against the live database with both kinds of invoice and undone immediately.
+
+**Part-returns are right too.** Returning 2 of 5 credits two units at the discounted rate, not the
+list rate.
+
+**The confirmation screen was showing the same wrong figure**, so you would have approved a number
+that was never going to be the credit. It now shows what each line was actually charged — and says
+"discounted from ₹7,170" where a line carried a discount — and the note underneath explains that
+the invoice's own discount and GST are applied on top, mentioning when GST comes out of the amount
+rather than being added to it.
+
+Nothing already recorded was altered. Existing credit notes keep the figures they were issued with;
+this changes what happens from now on.
+
+## 2026-09-01 — Fixed: a backup-AI hiccup showing you a raw error instead of just working
+
+Reported: "Groq 400: Failed to validate JSON. Please adjust your prompt."
+
+Two things were wrong, and the second is the one that actually reached you.
+
+**The backup AI service occasionally garbles its answer.** When reading a photo, it was being asked
+for JSON by *describing* the required shape in the instructions and hoping for the best, rather than
+being told the shape formally — which the service does support, and which stops it producing a bad
+answer in the first place. It now gets the shape properly. (Tested directly: it reads the same
+photo correctly either way, but only the formal method makes a bad answer impossible rather than
+unlikely.)
+
+**And when it did garble one, everything stopped instead of falling back.** This is the real fault.
+The app treats that kind of refusal as "we asked for something impossible" — which is a sensible
+rule, because a genuinely malformed request fails the same way everywhere, so trying a second
+service would just waste time. But a garbled *answer* is not a malformed request. It says nothing
+about whether Google's AI could do the job — and it could, easily. So the app gave up and showed
+you the backup service's raw complaint while a perfectly good alternative sat untried.
+
+Now that specific refusal is treated as "this service failed at this task", which means the next one
+is asked and you simply get your result. A genuinely malformed request still stops immediately, as
+before — that rule was right, it was just being applied to the wrong thing.
+
+Covered by five new automated tests, including one that fails a provider exactly the way this
+happened and checks the answer still comes back from the next one.
+
+**If you see a raw error naming an AI service again, tell me** — you should never see one. Every one
+of these is either something that should have failed over quietly, or something worth explaining in
+plain words. Being shown the machinery is a bug in itself.
+
+## 2026-09-01 — Inventory now reads a photo of a parts list
+
+Reported by dropping a WhatsApp photo onto Inventory and being told to go and use Purchases instead.
+
+That was a poor answer. Purchases reads a *supplier invoice* and records a purchase — it is not
+where you go to get a parts list into Inventory. So Inventory now reads photos and PDFs itself.
+
+**Drop a photo of a parts list, a stock sheet, a supplier's price list or a page from a register,
+and it reads it.** What comes back goes into exactly the same preview you already get from a
+spreadsheet: the list of rows, what will happen to each one, tick boxes to choose, and the same
+choice between updating the cost of parts you already have and adding new ones. Nothing is saved
+until you press the button.
+
+Tested on a deliberately awkward photo — camera noise, uneven lighting, an off-white page — of a
+four-row stock list. It read every row correctly: item code, description, brand, quantity and rate.
+Matched against your real inventory, three were recognised as parts you already stock (offered as
+cost updates) and the fourth as genuinely new. It worked out on its own which column was the cost
+and which identified the part.
+
+This is a different job from the invoice scan and is read differently. A price list often has no
+supplier, no date and no totals — it is a list of parts, and the useful columns are the ones
+Inventory actually keeps: code, name, brand, category, HSN, quantity, cost, selling price, MRP. It
+is told to leave anything blank that the page does not actually show, rather than carrying a value
+across from the row above.
+
+Practical notes:
+
+- **Photos are shrunk in your browser before being sent**, the same as the invoice scan, because a
+  phone photo is otherwise too large to reach the app at all.
+- **A PDF over 4MB is refused with a reason**, since a PDF cannot be shrunk that way — save it
+  smaller or photograph the page.
+- **If nothing readable is found**, it says so and suggests getting the whole page in frame and in
+  focus, rather than silently doing nothing.
+- Reading a photo takes a few seconds longer than a spreadsheet — it is doing real work.
+
+## 2026-09-01 — Fixed: your file not appearing in the upload box, and drag-and-drop in Inventory
+
+Reported: trying to upload a document, and it doesn't come up.
+
+Your file was almost certainly there — greyed out and unselectable. The upload box was only willing
+to show three kinds of spreadsheet (`.csv`, `.xls`, `.xlsx`), so anything else looked like it did
+not exist. The most common one to hit is `.xlsm`: Excel switches a workbook to that the moment it
+contains a macro, and nothing about the data changes.
+
+**The app could always read far more than it offered to.** Tested by making one file of each kind
+and putting it through the real importer — all ten read perfectly, columns and all:
+
+    .csv  .xls  .xlsx  .xlsm  .xlsb  .ods  .fods  .txt  .tsv  .dif
+
+The upload box now offers exactly that list, and the list is generated from the same place the
+importer checks against, so the two can never drift apart again.
+
+**And you can now drag a file straight onto the Inventory page.** Anywhere on it — no need to find
+the button. The screen shows a "Drop the file to import" panel while you are dragging, and letting
+go opens the same preview you get from the button, so you still choose whether it updates costs or
+adds new parts, and still see exactly what will change before anything is saved.
+
+Two details that make it behave properly rather than just work:
+
+- **Dropping slightly off-target no longer loses your place.** Without this, letting go over the
+  side menu makes the browser abandon the app and open the raw file. A near miss now simply does
+  nothing.
+- **Dropping something it genuinely can't read says so, and says what to do.** A PDF or a photo of
+  a supplier invoice is pointed at Purchases → Import, which is the screen that reads those.
+
+Verified with 12 new automated tests (55 in total) covering every offered format end to end, plus
+odd filenames — capital letters in the extension, dots and spaces in the name, and a `report.xlsx.pdf`
+that must still be refused. The drag-and-drop itself needs a signed-in browser to click through, so
+that part is worth a quick try at your end.
+
+## 2026-09-01 — Quotations get per-item discounts and the GST inclusive/exclusive choice too
+
+Asked for: the same treatment the sales invoice just had.
+
+Quotations now work exactly like sales invoices do:
+
+- **Every quoted line has its own Disc % box**, showing that line's amount underneath — and the
+  original beside it when a discount is applied.
+- **The same two GST buttons beside the rate** — *GST extra* (added on top of the rates you quote)
+  and *GST included* (the rates already contain the tax) — with a line underneath saying which one
+  you are on.
+- **The totals show the working**: item discounts, subtotal, whole-quote discount, the real taxable
+  value, GST, and the quotation total.
+- **Reopening a quotation brings it all back**, and the printed quotation shows a Discount column
+  and the correct tax split — both appearing only when the quotation actually uses them, so
+  anything already saved prints unchanged.
+
+**Converting a quotation into an invoice carries all of it across.** That mattered more than it
+sounds: without it, a quote priced with GST included would have become an invoice priced with GST
+extra — the customer's total would have looked identical while the tax printed on the invoice was
+wrong.
+
+**A difference worth knowing about, behind the scenes.** Unlike a sales invoice, a quotation's
+totals are recalculated by the database itself and the save is refused if the figures don't match
+its lines to the paisa. That check is a good thing — it is why a quotation can never quietly
+disagree with its own line items — but it meant the calculation had to be taught both new ideas in
+lockstep, and rounded in exactly the same order in both places, or every discounted quotation would
+have been rejected. Both sides now round line by line, then total by total.
+
+Checked end to end against the live database and undone immediately: a quotation of 2 x ₹1,000 with
+10% off that line plus 1 x ₹500, a 5% whole-quote discount, priced GST-included at 18%, stored a
+subtotal of ₹2,300.00, discount ₹115.00, GST ₹333.31 and a total of ₹2,185.00 — then converting it
+produced an invoice carrying both the line discounts and the GST-included setting. A quotation saved
+the old way, with neither of the new fields, produced exactly the figures it always did.
+
+There are no saved quotations yet, so nothing existing was affected either way.
+
+## 2026-09-01 — Fixed: editing a draft forced you to turn it into a real invoice
+
+Reported: opening a draft to change it bills it as a final invoice; it should stay a draft until
+you decide otherwise.
+
+That was exactly what happened. Once a draft was reopened, the only way out of the dialog other
+than Cancel was **Confirm Invoice** — so any change you wanted to make came bundled with billing
+the customer. The code had assumed a saved sale was either a draft you were confirming or a live
+invoice you were correcting, and simply didn't allow for the obvious third case: a draft you are
+still working on.
+
+Reopening a draft now offers **Save & Keep as Draft** alongside Confirm Invoice. Use it as often
+as you like — change lines, prices, discounts, the GST setting, the customer — and the sale stays
+parked. Nothing is billed until you press Confirm Invoice, which behaves exactly as it did before.
+
+The footer now also spells this out while a draft is open, since it otherwise describes what
+happens on confirmation: the "stays outstanding on their account" line is followed by a note that
+saving it as a draft changes nothing on any account.
+
+**What stays reserved and what doesn't:** saving a draft again re-reserves stock to match whatever
+the draft now says — increase a quantity from 2 to 3 and the reservation follows — but it still
+puts nothing on the customer's account. Checked against the live database and undone immediately:
+parking a draft, editing and re-saving it as a draft, then confirming it. The customer's balance
+stayed at zero through both draft saves and only moved when it was confirmed; stock went 9 to 7 to
+6 as the quantity changed, and the draft kept a single set of lines rather than accumulating
+copies.
+
+A live invoice deliberately cannot be turned back into a draft. It has already been billed and is
+already on someone's account, so parking it would quietly erase a real debt — correct it or delete
+it instead.
+
+## 2026-09-01 — New: bill with GST included in the price, or added on top
+
+Asked for: GST should work both inclusive and exclusive.
+
+Until now every sale assumed the rates you typed were **before** GST, and the tax was added on top.
+A lot of counter trade works the other way round — the price you quote is the price the customer
+pays, with the tax already inside it — and there was no way to record that.
+
+There are now two buttons beside the GST rate:
+
+- **GST extra** — the rates you type are before tax, and GST is added on top. This is what the app
+  has always done, and it stays the default, so nothing changes unless you choose otherwise.
+- **GST included** — the rates you type are what the customer pays. The tax is taken out of them,
+  and the total is exactly the figure you typed.
+
+A line under the buttons always states in words which one you are on, because that is the part that
+is easy to get wrong. Switching between them never alters a single number you typed — it only
+changes how those numbers are read.
+
+The same sale, priced both ways at 18%:
+
+                          GST extra      GST included
+    Amount after discounts  2,185.00         2,185.00
+    Taxable value           2,185.00         1,851.69
+    GST (18%)                 393.30           333.31
+    Total Payable           2,578.30         2,185.00
+
+Either way, taxable value plus GST comes back to the total exactly.
+
+The choice is saved with the invoice, so reopening it later brings it back, and the printed invoice
+shows the correct split — with "included in the prices above" written next to the GST line when
+that is what happened, so a customer is never left wondering whether tax was added twice.
+
+**Two related fixes:**
+
+- **Reopening an invoice to edit it used to reset GST to 18%**, whatever the invoice was actually
+  saved at. A sale billed at 5% silently became an 18% one the moment you opened it. It now comes
+  back at the rate it was saved with. (Invoices old enough to have no rate recorded still fall back
+  to 18%, since there is nothing else to go on.)
+- **The printed invoice worked its GST out backwards** from the total. That is only correct when
+  tax was added on top, and would have shown zero tax on a GST-included invoice. It now uses the
+  tax figure the sale actually recorded, keeping the old calculation only for invoices saved before
+  that figure was stored — all of which were priced GST-extra.
+
+Every existing invoice is untouched: all 10 read as GST-extra, which is how they were genuinely
+priced, and they print exactly as before.
+
+## 2026-08-30 — New: discount individual items on a sale, not just the whole bill
+
+Reported: the discount applies to the entire invoice value, but it should be possible to discount
+particular items.
+
+An invoice could only carry one discount percentage applied to everything on it. That cannot say
+"10% off the filters, full price on the pump", which is an ordinary thing to want — a customer
+negotiates on one line, not on the bill.
+
+**Every line on a sale now has its own Disc % box**, sitting between Rate and Amount where a
+discount is read on paper. Type a percentage and that line's amount drops immediately, with the
+original price shown struck through above it so the reduction is visible on the line itself rather
+than only in the totals.
+
+The invoice totals now show the work:
+
+    Gross amount                     2,500.00
+    Item discounts                    -200.00
+    Subtotal after item discounts    2,300.00
+    Whole-invoice discount (5%)       -115.00
+    Taxable value                    2,185.00
+    GST (18%)                          393.30
+    Total Payable                    2,578.30
+
+**The whole-invoice discount has not gone away** — it is still there, renamed so the two are not
+confused, and it now applies on top of any per-item discounts. Leave it at 0 to discount items
+only. The order matters and is fixed: each line is discounted first, then the whole-invoice
+discount comes off what remains, and GST is charged on that. Doing it the other way round would
+change the tax.
+
+The lines above only appear when you actually use item discounts, so an invoice without them looks
+and reads exactly as it always has.
+
+**On the printed invoice**, a Discount column appears showing the percentage and the rupees off
+each line, and the summary gains an "Item discounts" line — but only when the invoice uses them, so
+existing invoices print unchanged. Reopening a sale to edit it brings each line's discount back
+with it.
+
+Sales returns and credit notes needed no change and are already correct: they work from the amount
+actually charged for a line, which is now the discounted amount.
+
+Every existing invoice is untouched — all 17 recorded line items read as "no item discount", and
+their whole-invoice discounts behave exactly as before. Checked by saving a real invoice through
+the live database and undoing it immediately: a 10%-off line of 2 x 1,000 stored 1,800 against a
+2,000 gross, and the invoice total matched the arithmetic to the paisa.
+
+## 2026-08-30 — One Import button again, and it now previews everything before saving
+
+The cost-price update arrived as a second button sitting next to Import from File, which was one
+button too many — both take a spreadsheet, and having to know which one to press before seeing
+what is in the file is backwards. There is one **Import from File** button again.
+
+**It reads your file once and works out what you probably want.** If most rows are parts you
+already stock, it opens on "update cost prices". If most are unfamiliar, it opens on "add as new
+parts". Either way it is only a suggestion — there are two buttons at the top of the dialog and you
+can switch between them freely, with the preview following instantly. Nothing is written until you
+press Apply.
+
+Checked against your real inventory statement, which contains 229 rows: opened on your active
+company it proposes updating costs (226 of the 229 are parts you already have), and on the company
+that has almost none of them it proposes adding them as new parts instead.
+
+**Adding parts now gets the same preview and the same tick boxes.** This is the bigger change.
+Importing used to write everything in the file straight into your inventory the moment you picked
+it — no list, no confirmation, and no check for parts you already had. On the file above that would
+have created a second copy of 226 parts you already stock. Now you see every row before anything
+happens, and **any row matching a part you already have starts unticked**, with the existing part
+named next to it. You can still tick it deliberately if you really do want a second entry.
+
+Both jobs work the same way once you are in the dialog: a list of every row, what will happen to
+it, tick boxes to choose which ones, a tick-all box in the header, and a button that counts what is
+actually selected.
+
+## 2026-08-30 — New: update cost prices in bulk from a spreadsheet
+
+Asked for: a spreadsheet holds the cost of each product, and only that column should be used.
+
+Until now the Inventory import could only **add** parts, never update them — so uploading a price
+list would have created a second copy of every part rather than repricing the ones you have. There
+is now an **Update Costs from File** button next to Import, which does one thing only: change the
+cost price of parts you already have.
+
+**You choose which column holds the cost.** The first version tried to work it out from the column
+heading and failed on your actual file — your cost column is headed "unite price", which no list of
+expected names would ever contain, while two columns that *do* say "cost" ("ordering cost",
+"holding cost") are stock-control figures, not what a part costs to buy. Guessing wrong here would
+overwrite every price in the business, so the app now proposes a column and you confirm it. On your
+file it proposes the right one on its own — "unite price", showing its first values (19200, 650,
+8277) so you can check at a glance — and "Item code" for identifying the part. Both are dropdowns
+you can change, and the preview updates instantly when you do.
+
+**Nothing is saved until you have seen exactly what will change.** The preview lists every row: the
+part it matched, the cost now, the new cost, and what will happen. Anything the file couldn't do is
+listed first, because that is the part worth reading:
+
+- **Not found** — no such part in this company. Skipped; never created as a new part.
+- **Unclear** — the row matches more than one part, or two rows give different costs for the same
+  part. Left alone rather than guessed at.
+- **Already correct** — matched, but the cost in the file is the one already stored.
+
+**And you choose which ones to apply.** Every row that would change has a tick box, all ticked to
+begin with, plus a tick-all box in the header to clear them and pick out just the few you want. The
+button counts what is actually selected ("Apply 12 cost update(s)"), unticked rows dim so you can
+see at a glance what is being left out, and nothing you haven't ticked is touched. Rows that can't
+be applied — not found, unclear, already correct — have no tick box at all, so there is never a
+box that does nothing.
+
+If most rows don't match, it now says so directly and asks whether you're on the right company —
+because the usual cause is a price list belonging to a different company, not a bad file.
+
+Details that matter:
+
+- **Only the cost price changes.** Stock, selling price, MRP, location, name — all untouched.
+- **It also corrects the purchase-batch cost**, the same as editing a part by hand does. That is
+  what makes the new figure actually appear in Stock Value, and it is how you would fix the ₹0
+  entries in bulk.
+- **Your part numbers don't have to match exactly.** "JCB-H49", "jcb h49" and "JCBH49" are all read
+  as the same part. If a row has no part number it falls back to the OEM number, then the name.
+- **A price it can't read is never turned into ₹0.** Blank cells, "call for price", "N/A", and zero
+  or negative values are reported as skipped and left alone.
+- **Rupee signs and commas are fine**; a title row above your headings is fine; and the blank
+  trailing columns a spreadsheet export leaves behind are hidden from the picker.
+- If something fails partway through, you are told how many were updated before it stopped, and
+  re-uploading the same file safely retries the rest.
+
+Checked with 25 automated tests, several written directly against your real file's layout, plus a
+dry run of the actual file against the live database: 229 rows read, the right columns chosen
+automatically, and 228 of them matched to parts ready to update — with nothing written.
+
+## 2026-08-26 — Draft an offer for a customer, worded to suit their segment
+
+There's now a tag button beside each customer on the Customers page. It opens a small dialog that
+shows their grade, reminds you what kind of offer suits that group, and drafts the message.
+
+**You decide the offer; the app only writes it.** You type the terms — "5% off on orders above
+₹20,000 through September", or "free delivery on the next order" — and it words them for that
+particular customer. This is deliberate: an offer is a promise you have to honour once you send it,
+so nothing you haven't written yourself will ever be promised. Give it something vague like "a small
+discount" and the message stays vague rather than inventing a number for you.
+
+**Your grades stay private.** The message never tells a customer they're Silver, or a Bargainer, or
+that they're classified at all. The grade only decides the angle — a top customer is thanked and
+offered priority, a discount-driven one is pointed at bundles rather than a deeper price cut, one
+who's gone quiet is invited back warmly without any "we haven't seen you since February".
+
+Every draft lands in an editable box for you to change before sending, and Copy puts it on your
+clipboard for WhatsApp.
+
+Works for any customer, including ungraded new ones — an opening offer to a new customer is often
+exactly the point.
+
+## 2026-08-26 — A sale on credit now has to name a customer
+
+Cash sales are unchanged — pick nothing, it bills to the counter, and it stays as fast as it was.
+
+But a sale that **isn't fully paid** now needs a named customer before it can be saved. Money owed by
+"Walk-in Customer" can never be chased, never appears on anyone's ledger, and never counts towards
+anyone's buying history. The existing **+ New** button beside the customer box adds one without
+leaving the sale, so it costs a few seconds on the sales that actually need it.
+
+You're told at the customer box the moment the sale becomes a credit sale, not after filling
+everything in — and the Save button stays disabled until it's sorted.
+
+This is also what makes the new customer grades work. Every unattributed credit sale was a customer
+insight lost permanently; from now on the ones that matter get recorded against someone.
+
+Worth knowing: six existing part-paid or unpaid walk-in invoices (about ₹18,925 of debt owed by
+nobody identifiable) are all in the **bkgkj** test company, none in your real one. If you ever edit
+one, it will now ask you to name the customer — which is the right fix for it anyway.
+
+## 2026-08-26 — Customers are now graded Diamond / Gold / Silver, with behaviour flags
+
+The Customers page now shows a segment against each customer, so you can tell at a glance who is
+worth protecting and who is quietly costing you margin.
+
+**The grades are cut from profit, not sales value** — and those two disagree. On real data in this
+app, one customer brought in less revenue than the walk-in trade but nearly **twice the profit**.
+Ranking by sales value would have pointed you at exactly the wrong customer to look after. This
+works because every sale here is already traced back to the exact stock batch it came from, so the
+true cost of each sale is known rather than guessed.
+
+- 💎 **Diamond** — between them, the customers who earn the first half of all your profit
+- 🥇 **Gold** — the next chunk, up to 80%
+- 🥈 **Silver** — the remainder
+- **New** — not enough history to grade honestly yet
+
+Separately from the grade, any customer can carry flags, because your best customer can also be
+your worst payer — and that is exactly the combination worth seeing rather than hiding behind one
+label:
+
+- **Defaulter** — has a bill unpaid past 45 days
+- **Bargainer** — takes bigger discounts, or earns you thinner margin, than your house average
+- **Dormant** — used to buy, nothing in 90 days
+
+Every badge has a **"Why?"** link showing the actual numbers behind it — sales count, revenue,
+profit, margin, average discount, last purchase date — plus what to do about it (protect them,
+offer bundles instead of discounts, tighten credit, win them back). There is also a segment filter,
+so "show me every Bargainer" is one click when you want to send that group an offer.
+
+**Honest note on what you'll see today:** grading needs at least 2 recorded sales per customer, and
+your active company has no sales recorded yet — so everyone will read "New" until you start
+invoicing. That is deliberate. A grade invented from a single sale would send you to the wrong
+customer with the wrong offer.
+
+## 2026-08-26 — Fixed: scanning a photo of a supplier invoice did nothing
+
+Reported: the details are not being read out of the picture.
+
+The photo never reached the ERP. A photo from a phone camera is usually 3-10MB, and the way it has
+to be packed up to send makes it about a third bigger again — roughly 5MB for an ordinary invoice
+photo. The hosting platform refuses any request over 4.5MB and throws it away **before** your ERP
+ever sees it. So there was nothing in the server logs to find, because nothing ever arrived. That
+4.5MB ceiling belongs to the platform and can't be raised, so the photo has to be made smaller in
+your browser before it is sent.
+
+Confirmed directly against the live site: a 1MB request gets through; a 6MB one is refused outright.
+And a realistic invoice photo measured 3.67MB, becoming 4.89MB once packed — just over the line,
+which is exactly why it failed every time rather than sometimes.
+
+**Photos are now shrunk in your browser before being sent** — down to 2200 pixels on the longest
+side. The same realistic photo drops from 4.89MB to 1.04MB, comfortably inside the limit. 2200 is
+deliberately larger than the 1600 used for catalogue product photos: part numbers and HSN codes are
+the smallest print on an invoice and are exactly what has to stay readable.
+
+The reading itself was never broken. Tested end to end against a scanned invoice, both AI services
+read it perfectly — supplier name, GSTIN, invoice date, expected delivery, and every line item with
+its part number, quantity, price and HSN code.
+
+Two related things fixed at the same time:
+
+- **PDFs can't be shrunk this way** (there is no picture to resize). A PDF over 4MB now tells you
+  so, and suggests saving it smaller or photographing the invoice instead — rather than failing
+  with nothing useful on screen.
+- **Scanning is the slowest AI job in the app**, and that page had no time limit set, so the
+  platform could cut a working scan short. It now gets the time the scan is actually allowed to
+  take.
+
+Duplicate detection is unaffected: the fingerprint that stops the same invoice being recorded twice
+is still taken from your original file, before any shrinking, so the same document is still
+recognised as the same document.
+
+## 2026-08-26 — Fixed: Dashboard and Inventory showed two different stock values
+
+Reported: Inventory said your stock was worth ₹8,77,964 and the Dashboard said ₹9,05,934 — same
+242 parts, same moment, two different answers.
+
+Both were right about the quantity and disagreed about the price. Inventory valued each part at
+what its oldest unsold purchase batch actually cost; the Dashboard multiplied by the Cost Price
+field typed into the part's record. They only match while those two agree — and on your data, two
+parts had drifted far enough to put ₹27,970 between the same figure on two screens.
+
+**Digging into which two, though, turned up something worth knowing.** Both of them —
+`JCB-H49` (jcb hydraulic oil 20l, 3 in stock) and `SER-E37` (servo engine oil 5l, 8 in stock) —
+have a purchase batch recorded at **₹0**, both entered on 30 July. So Inventory wasn't being more
+accurate; it was treating ₹27,970 of oil sitting on your shelf as worth nothing. A zero there does
+not mean the stock was free — it means nobody recorded what it cost when it was entered.
+
+So the fix is two things:
+
+1. **One shared definition of what stock is worth**, used by both screens, so they can never drift
+   apart again. It values each part at its oldest unsold purchase batch, which is the real recorded
+   purchase history, and falls back to the Cost Price field when there is no usable batch.
+2. **A batch recorded at ₹0 now counts as "price not recorded", not as "free".** Those parts fall
+   back to their Cost Price instead of being valued at nothing.
+
+Both screens now show **₹9,05,436**. That is ₹498 below the Dashboard's old figure, and that ₹498
+is correct: one part was genuinely bought at a different price than the Cost Price typed into its
+record, and the real purchase price is the one that counts.
+
+**Worth doing yourself:** those two oil entries still have no recorded purchase cost. Open each in
+Inventory, edit it, and re-enter the Cost Price — that writes the correct cost back onto the
+purchase batch, not just the part record.
+
+**Also fixed on the Dashboard:** every rupee figure was grouped the international way (905,934)
+rather than the Indian way (9,05,436) used everywhere else in the app. That was because the code
+never said which country's formatting to use, so it followed the browser. All eleven money figures
+on that screen — the KPI tiles, the attention items, the activity timeline and the chart tooltips —
+now group like the rest of the app.
+
+## 2026-08-26 — AI features now run twice a day instead of every time you open a page
+
+Requested: the big AI results should be produced twice a day, not more.
+
+Until now, every one of them regenerated from scratch each time you looked at it. Opening the
+dashboard generated Business Insights and the Stock Reorder Recommendation again. Opening Reports
+and clicking through the five tabs generated five separate summaries. Going back to a tab you had
+already looked at generated it a sixth time. None of that produced anything new — it was the same
+question about the same figures — but each one spent part of a small daily free allowance, so by
+the time you actually wanted an answer, it could already be used up.
+
+**Each AI panel now gets 2 real runs a day, per company.** Everything else shows the saved result,
+instantly and at no cost. The report summaries count separately per report tab, because the P&L and
+the GST summary are genuinely different questions.
+
+How it behaves day to day:
+
+- **Opening a page never uses up a run.** It shows the last saved answer. A new one is produced
+  automatically only if nothing has been saved yet, or the saved one is more than 12 hours old —
+  which naturally spaces the two runs across morning and evening.
+- **The Refresh button still works and is still yours to press.** It deliberately spends one of the
+  two. Once both are used, it tells you plainly that the next update is available tomorrow, instead
+  of appearing to do nothing.
+- **Every panel now shows when its answer was actually produced** ("Generated 9:04 AM", or
+  "Generated yesterday, 7:30 PM"). Previously the time shown was simply whenever your browser had
+  loaded the page, which was harmless when everything regenerated constantly and would have become
+  untrue the moment results were saved.
+- **A failed attempt costs you nothing.** The count only goes up when an answer is actually
+  produced. And if the AI can't be reached, you now keep seeing your last good result with a short
+  note saying it couldn't be refreshed — rather than the whole panel turning into a red error.
+- **A saved report summary is never shown next to figures it wasn't written about.** Each summary
+  remembers the numbers it described; if those have since changed, you are told so instead of being
+  shown wording that no longer matches what's on screen.
+
+Everything is stored per company, so the three companies never share results or allowances.
+
+Checked against the real database with a new one-command test (`npx tsx scripts/ai-cache-check.ts`)
+covering all of the above — including that a forced refresh genuinely cannot exceed the daily limit,
+that the allowance resets on the next Indian calendar day rather than at UTC midnight, and that one
+company's results are invisible to another. All 22 checks pass.
 
 ## 2026-08-26 — Fixed (properly): the AI Stock Reorder Recommendation was sending your whole catalogue
 

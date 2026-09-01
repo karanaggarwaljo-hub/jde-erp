@@ -24,9 +24,11 @@ import {
   MapPin,
   Undo2,
   Wallet,
+  HandCoins,
   History,
 } from 'lucide-react';
-import { saveSalesInvoice, deleteSalesInvoice, deleteCustomerPayment } from '@/lib/client-sales';
+import { saveSalesInvoice, deleteSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance } from '@/lib/client-sales';
+import { invoiceBalanceDue, invoiceWrittenOff, wasSettledShort } from '@/lib/invoice-balance';
 import { createSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem } from '@/lib/client-sales-returns';
 import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } from '@/lib/client-quotations';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -37,15 +39,17 @@ import ReceivePaymentModal from '@/components/ReceivePaymentModal';
 type SalesTab = 'invoices' | 'quotations' | 'ledger';
 type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid' | 'drafts';
-type InvoiceLine = { part: string; qty: number; price: number };
+/** `discount` is a percentage off THIS line only, kept separate from the invoice-wide discount
+ *  below. Optional because quotations reuse this shape and do not offer one — absent means none. */
+type InvoiceLine = { part: string; qty: number; price: number; discount?: number };
 
 type Product = { id: string; company_id: string; part_number: string; name: string; brand: string; hsn_code: string; category: string; sale_price: number; current_stock: number };
 type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
 // gst_percent / gst_amount are on the invoice table but were never filled in by the atomic save,
 // so they are absent on every invoice written before this screen started recording them.
-type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string; discount_percent: number; discount_amount: number; gst_percent?: number | null; gst_amount?: number | null };
+type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; settlement_write_off: number; status: string; mode: string; discount_percent: number; discount_amount: number; gst_percent?: number | null; gst_amount?: number | null; gst_mode?: string | null };
 type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
-type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_price: number; line_total: number };
+type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_price: number; line_total: number; discount_percent?: number; discount_amount?: number };
 type Payment = { id: string; company_id: string; customer_id: string; customer: string; date: string; amount: number; note: string; created_at: string };
 type PaymentAllocation = { id: string; payment_id: string; company_id: string; invoice_id: string; amount: number; created_at: string };
 
@@ -167,6 +171,13 @@ export default function SalesPage() {
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Invoice | null>(null);
+  // Closing what is still owing on an invoice the customer settled by paying less than it was
+  // for. Deliberately separate from recording a payment: no money changes hands here.
+  const [settlingInvoice, setSettlingInvoice] = useState<Invoice | null>(null);
+  const [settleAmount, setSettleAmount] = useState(0);
+  const [settleReason, setSettleReason] = useState('');
+  const [settleError, setSettleError] = useState('');
+  const [savingSettlement, setSavingSettlement] = useState(false);
   const [returnCandidate, setReturnCandidate] = useState<Invoice | null>(null);
   const [returnableItems, setReturnableItems] = useState<ReturnableInvoiceItem[]>([]);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
@@ -197,6 +208,9 @@ export default function SalesPage() {
   const [lines, setLines] = useState<InvoiceLine[]>([]);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [gstPercent, setGstPercent] = useState(18);
+  // Whether the rates typed on the lines are before GST (tax added on top) or already include it
+  // (tax carved out of them). Only ever changes how the same typed numbers are read.
+  const [gstInclusive, setGstInclusive] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('unpaid');
   const [amountPaid, setAmountPaid] = useState(0);
   // Presentation-only view state: which payment slice of the list is on screen, and which page
@@ -216,18 +230,54 @@ export default function SalesPage() {
   const [quoteLines, setQuoteLines] = useState<InvoiceLine[]>([]);
   const [quoteDiscountPercent, setQuoteDiscountPercent] = useState(0);
   const [quoteGstPercent, setQuoteGstPercent] = useState(18);
+  const [quoteGstInclusive, setQuoteGstInclusive] = useState(false);
 
-  const subtotal = lines.reduce((sum, line) => sum + line.qty * line.price, 0);
+  // Two discounts now exist and they stack in a fixed order: each line is discounted on its own
+  // first, and the invoice-wide discount then applies to whatever that leaves. Doing it the other
+  // way round would change the tax base, so the order is not cosmetic.
+  const lineGross = (line: InvoiceLine) => Number(line.qty) * Number(line.price);
+  const lineDiscountPercent = (line: InvoiceLine) => Math.min(100, Math.max(0, Number(line.discount) || 0));
+  const lineNet = (line: InvoiceLine) => lineGross(line) * (1 - lineDiscountPercent(line) / 100);
+
+  const grossSubtotal = lines.reduce((sum, line) => sum + lineGross(line), 0);
+  const subtotal = lines.reduce((sum, line) => sum + lineNet(line), 0);
+  const itemDiscountTotal = grossSubtotal - subtotal;
   const discountAmount = subtotal * (discountPercent / 100);
   const taxableAmount = subtotal - discountAmount;
-  const gstAmount = taxableAmount * (gstPercent / 100);
-  const total = taxableAmount + gstAmount;
+  // `taxableAmount` above is the amount left after both discounts. What it MEANS depends on the
+  // mode: priced exclusive it is the taxable value and tax is added to it; priced inclusive it is
+  // already the amount payable and the tax is inside it. Both are computed from the same figure,
+  // so switching the toggle never re-reads or rewrites anything the owner typed.
+  const gstAmount = gstInclusive
+    ? taxableAmount * (gstPercent / (100 + gstPercent))
+    : taxableAmount * (gstPercent / 100);
+  // The GST taxable value — what the tax is actually charged on — in both modes.
+  const netTaxableValue = gstInclusive ? taxableAmount - gstAmount : taxableAmount;
+  const total = gstInclusive ? taxableAmount : taxableAmount + gstAmount;
   const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
-  const quoteSubtotal = quoteLines.reduce((sum, line) => sum + line.qty * line.price, 0);
-  const quoteDiscountAmount = quoteSubtotal * (quoteDiscountPercent / 100);
+  // Mirrors jde_save_quotation exactly. That function recomputes every figure from the lines and
+  // rejects the save if the numbers sent differ by more than a paisa, so rounding here must match
+  // it step for step: each line rounded, then each total rounded, never one sum rounded at the end.
+  const round2 = (value: number) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+  const quoteLineGross = (line: InvoiceLine) => round2(Number(line.qty) * Number(line.price));
+  const quoteLineDiscount = (line: InvoiceLine) =>
+    round2(quoteLineGross(line) * (Math.min(100, Math.max(0, Number(line.discount) || 0)) / 100));
+  const quoteLineNet = (line: InvoiceLine) => quoteLineGross(line) - quoteLineDiscount(line);
+
+  const quoteGrossSubtotal = quoteLines.reduce((sum, line) => sum + quoteLineGross(line), 0);
+  const quoteSubtotal = quoteLines.reduce((sum, line) => sum + quoteLineNet(line), 0);
+  const quoteItemDiscountTotal = quoteGrossSubtotal - quoteSubtotal;
+  const quoteDiscountAmount = round2(quoteSubtotal * (quoteDiscountPercent / 100));
   const quoteTaxableAmount = quoteSubtotal - quoteDiscountAmount;
-  const quoteGstAmount = quoteTaxableAmount * (quoteGstPercent / 100);
-  const quoteTotal = quoteTaxableAmount + quoteGstAmount;
+  const quoteGstAmount = round2(
+    quoteGstInclusive
+      ? quoteTaxableAmount * (quoteGstPercent / (100 + quoteGstPercent))
+      : quoteTaxableAmount * (quoteGstPercent / 100)
+  );
+  // What the tax is charged on, which stops being the same as the discounted amount once the
+  // quoted rates already contain the tax.
+  const quoteNetTaxableValue = quoteGstInclusive ? quoteTaxableAmount - quoteGstAmount : quoteTaxableAmount;
+  const quoteTotal = round2(quoteGstInclusive ? quoteTaxableAmount : quoteTaxableAmount + quoteGstAmount);
 
   const selectedCustomer = customers.find((c) => c.name === customer);
   const customerLabel = customer.trim() || WALK_IN_CUSTOMER;
@@ -235,8 +285,10 @@ export default function SalesPage() {
   // money: parking it added nothing to the customer's balance, so confirming it has to start from
   // zero outstanding. Starting from its total would reverse a debt that was never recorded.
   const editingDraft = Boolean(editingInvoice && editingInvoice.status === DRAFT_STATUS);
-  const editingOldOutstanding = editingInvoice && !editingDraft ? Number(editingInvoice.total) - Number(editingInvoice.paid) : 0;
+  const editingOldOutstanding = editingInvoice && !editingDraft ? invoiceBalanceDue(editingInvoice) : 0;
   const newOutstanding = total - paidAmount;
+  /** Anything left owing has to be owed by someone nameable — see the check in saveInvoice. */
+  const creditSaleNeedsCustomer = total > 0 && paidAmount < total && !selectedCustomer;
 
   // Place of supply comes from the company's own GSTIN — the first two digits are the statutory
   // state code. No GSTIN on the company means no place of supply to state, so the whole clause
@@ -268,7 +320,7 @@ export default function SalesPage() {
 
   const totalRevenue = liveInvoices.reduce((t, inv) => t + Number(inv.total || 0), 0);
   const avgOrderValue = liveInvoices.length > 0 ? totalRevenue / liveInvoices.length : 0;
-  const outstandingDue = liveInvoices.reduce((t, inv) => t + Math.max(0, Number(inv.total) - Number(inv.paid)), 0);
+  const outstandingDue = liveInvoices.reduce((t, inv) => t + invoiceBalanceDue(inv), 0);
   const productRevenue = new Map<string, number>();
   for (const item of invoiceItems) {
     // Line items belonging to a draft are left out for the same reason: nothing has been sold yet.
@@ -280,7 +332,7 @@ export default function SalesPage() {
 
   // One definition of paid / partly paid / unpaid for the whole screen, so the KPI contexts, the
   // filter tabs and the row badges can never disagree with each other.
-  const balanceOf = (invoice: Invoice) => Number(invoice.total) - Number(invoice.paid);
+  const balanceOf = (invoice: Invoice) => invoiceBalanceDue(invoice);
   const isSettled = (invoice: Invoice) => balanceOf(invoice) <= 0;
   const isPartlyPaid = (invoice: Invoice) => Number(invoice.paid) > 0 && balanceOf(invoice) > 0;
   const isUnpaid = (invoice: Invoice) => Number(invoice.paid) <= 0 && balanceOf(invoice) > 0;
@@ -322,14 +374,22 @@ export default function SalesPage() {
   const selectedReturnItems = returnableItems
     .map((item) => ({ invoice_item_id: item.invoice_item_id, qty: Math.min(item.returnable_qty, Math.max(0, Number(returnQuantities[item.invoice_item_id] ?? 0))) }))
     .filter((item) => Number.isInteger(item.qty) && item.qty > 0);
-  const returnItemValue = returnableItems.reduce((sum, item) => sum + (returnQuantities[item.invoice_item_id] ?? 0) * Number(item.unit_price), 0);
+  /** What one unit of this line was actually charged at — its list price less whatever discount
+   *  the line carried. The credit note is built from this, so the preview must be too. */
+  const returnNetRate = (item: ReturnableInvoiceItem) =>
+    Number(item.sold_qty) > 0 ? Number(item.line_total) / Number(item.sold_qty) : Number(item.unit_price);
+  const returnItemValue = returnableItems.reduce(
+    (sum, item) => sum + (returnQuantities[item.invoice_item_id] ?? 0) * returnNetRate(item),
+    0
+  );
 
   const openInvoice = (presetCustomer?: string) => {
     setEditingInvoice(null);
     setCustomer(presetCustomer ?? '');
-    setLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0 }] : []);
+    setLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0, discount: 0 }] : []);
     setDiscountPercent(0);
     setGstPercent(18);
+    setGstInclusive(false);
     setInvoiceDate(todayIso());
     setPaymentStatus('unpaid');
     setAmountPaid(0);
@@ -343,8 +403,11 @@ export default function SalesPage() {
     setCustomer(invoice.customer === WALK_IN_CUSTOMER ? '' : invoice.customer);
     setInvoiceDate(invoice.date);
     setDiscountPercent(Number(invoice.discount_percent));
-    setGstPercent(18);
-    setLines(items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price) })));
+    // Was hardcoded to 18, which silently changed the tax on any invoice not saved at 18%.
+    // Older invoices have no stored rate at all, so 18 stays the fallback for those only.
+    setGstPercent(invoice.gst_percent == null ? 18 : Number(invoice.gst_percent));
+    setGstInclusive(invoice.gst_mode === 'inclusive');
+    setLines(items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
     const paid = Number(invoice.paid);
     const invoiceTotal = Number(invoice.total);
     setPaymentStatus(paid >= invoiceTotal && invoiceTotal > 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid');
@@ -363,7 +426,9 @@ export default function SalesPage() {
         name: product?.name ?? line.part,
         qty: line.qty,
         unit_price: line.price,
-        line_total: line.qty * line.price,
+        line_total: quoteLineNet(line),
+        discount_percent: Math.min(100, Math.max(0, Number(line.discount) || 0)),
+        discount_amount: quoteLineDiscount(line),
       };
     });
 
@@ -375,9 +440,10 @@ export default function SalesPage() {
     setQuoteCustomer('');
     setQuoteDate(date);
     setQuoteValidity(validity.toISOString().split('T')[0]);
-    setQuoteLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0 }] : []);
+    setQuoteLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0, discount: 0 }] : []);
     setQuoteDiscountPercent(0);
     setQuoteGstPercent(18);
+    setQuoteGstInclusive(false);
     setQuotationError('');
     setShowQuotationModal(true);
   };
@@ -404,9 +470,10 @@ export default function SalesPage() {
       );
       setQuoteDate(detail.date);
       setQuoteValidity(detail.validity);
-      setQuoteLines(detail.items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price) })));
+      setQuoteLines(detail.items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
       setQuoteDiscountPercent(Number(detail.discount_percent ?? 0));
       setQuoteGstPercent(Number(detail.gst_percent ?? 18));
+      setQuoteGstInclusive(detail.gst_mode === 'inclusive');
       setShowQuotationModal(true);
     } catch (error) {
       setQuotationError(error instanceof Error ? error.message : 'Failed to load quotation details.');
@@ -458,6 +525,7 @@ export default function SalesPage() {
         discountAmount: quoteDiscountAmount,
         gstPercent: quoteGstPercent,
         gstAmount: quoteGstAmount,
+        gstMode: quoteGstInclusive ? 'inclusive' : 'exclusive',
         total: quoteTotal,
       });
       await reloadQuotations();
@@ -506,7 +574,12 @@ export default function SalesPage() {
         name: product?.name ?? line.part,
         qty: line.qty,
         unit_price: line.price,
-        line_total: line.qty * line.price,
+        // What is actually charged for the line, already net of its own discount. Everything that
+        // reads line_total later — the printable invoice subtotal, sales returns, credit notes —
+        // therefore needs no knowledge of line discounts at all.
+        line_total: lineNet(line),
+        discount_percent: lineDiscountPercent(line),
+        discount_amount: lineGross(line) - lineNet(line),
       };
     });
 
@@ -516,7 +589,11 @@ export default function SalesPage() {
   // completed sale into an error on screen.
   const rememberGstSplit = async (invoiceId: string, percent: number, amount: number) => {
     try {
-      await updateInvoiceRow(invoiceId, { gst_percent: percent, gst_amount: amount });
+      await updateInvoiceRow(invoiceId, {
+        gst_percent: percent,
+        gst_amount: amount,
+        gst_mode: gstInclusive ? 'inclusive' : 'exclusive',
+      });
     } catch (error) {
       console.error(`Could not record the GST split on ${invoiceId} — the invoice itself is saved.`, error);
     }
@@ -527,7 +604,10 @@ export default function SalesPage() {
   // with nothing received and nothing added to the customer's balance, because nothing is owed
   // until the sale is confirmed.
   const saveDraftInvoice = async () => {
-    if (!activeCompany || editingInvoice) return;
+    // A live invoice is the one case that cannot be parked: it has already been billed and is
+    // already on a customer's account, so turning it back into a draft would silently erase a
+    // real debt. A brand-new sale and an existing draft can both be parked.
+    if (!activeCompany || (editingInvoice && !editingDraft)) return;
 
     const unmatchedLine = lines.find((line) => line.part.trim() && !partOptions.some((part) => part.value === line.part));
     if (unmatchedLine) {
@@ -544,12 +624,19 @@ export default function SalesPage() {
     setInvoiceError('');
     setSavingDraft(true);
     try {
+      // Re-parking an existing draft is an edit of that same record: the atomic save reverses
+      // the stock it had reserved and draws it again for the new lines, so the reservation always
+      // matches what the draft currently says. Both outstandings stay 0 — a draft never put
+      // anything on the customer's account, and it still does not.
+      const editingRow = editingDraft ? editingInvoice : null;
+      const oldCustomerRow = editingRow ? customers.find((c) => c.name === editingRow.customer) : undefined;
+
       const invoice = await saveSalesInvoice({
         companyId: activeCompany.id,
-        invoiceId: null,
-        isEdit: false,
+        invoiceId: editingRow ? editingRow.id : null,
+        isEdit: Boolean(editingRow),
         customerLabel,
-        oldCustomerId: null,
+        oldCustomerId: oldCustomerRow?.id ?? null,
         newCustomerId: selectedCustomer?.id ?? null,
         oldOutstanding: 0,
         newOutstanding: 0,
@@ -568,10 +655,15 @@ export default function SalesPage() {
       // No customer reload: parking a draft leaves every balance exactly as it was.
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadProducts()]);
       setShowInvoiceModal(false);
+      setEditingInvoice(null);
       setActiveTab('invoices');
       setPaymentFilter('drafts');
       setPage(1);
-      setFeedback(`${draftId} parked as a draft for ${customerLabel} — stock is reserved, nothing is billed yet.`);
+      setFeedback(
+        editingRow
+          ? `${draftId} saved — still a draft, nothing billed yet.`
+          : `${draftId} parked as a draft for ${customerLabel} — stock is reserved, nothing is billed yet.`
+      );
     } catch (error) {
       setInvoiceError(error instanceof Error ? error.message : 'Failed to park this sale as a draft — please check Sales and Inventory before retrying.');
     } finally {
@@ -591,6 +683,18 @@ export default function SalesPage() {
 
     const items = invoiceItemPayload(lines);
     const status = paidAmount >= total && total > 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
+
+    // A sale that isn't fully paid is money owed — and money owed by "Walk-in Customer" can never
+    // be chased, shows against no ledger, and lands in no customer's history. A cash sale that
+    // settles on the spot is legitimately anonymous and stays fast; credit is not.
+    // Deliberately the same flag the field hint and the save button read, so the rule can only
+    // ever be stated in one place.
+    if (creditSaleNeedsCustomer) {
+      setInvoiceError(
+        'This sale is not fully paid, so it needs a named customer — an unpaid walk-in sale cannot be chased or tracked. Pick a customer above, or use + New to add one.'
+      );
+      return;
+    }
 
     setInvoiceError('');
     setSavingInvoice(true);
@@ -674,6 +778,38 @@ export default function SalesPage() {
       setInvoiceError(error instanceof Error ? error.message : 'Failed to save this invoice — please check Sales and Inventory before retrying.');
     } finally {
       setSavingInvoice(false);
+    }
+  };
+
+  const openSettleShort = (invoice: Invoice) => {
+    setSettlingInvoice(invoice);
+    // Defaults to forgiving the whole remaining balance, which is what "we're settled" usually
+    // means — still editable when only part of it is being let go.
+    setSettleAmount(invoiceBalanceDue(invoice));
+    setSettleReason('');
+    setSettleError('');
+  };
+
+  const confirmSettleShort = async () => {
+    if (!settlingInvoice || !activeCompany || savingSettlement) return;
+    setSettleError('');
+    setSavingSettlement(true);
+    try {
+      // How much may be written off is decided by the database, which locks the invoice first —
+      // this amount is only a request.
+      const result = await writeOffInvoiceBalance({
+        companyId: activeCompany.id,
+        invoiceId: settlingInvoice.id,
+        amount: settleAmount,
+        reason: settleReason,
+      });
+      await Promise.all([reloadInvoices(), reloadCustomers()]);
+      setFeedback(`₹${money(result.written_off)} written off on ${settlingInvoice.id}${result.remaining_due > 0 ? ` — ₹${money(result.remaining_due)} still owing` : ' — nothing left owing'}.`);
+      setSettlingInvoice(null);
+    } catch (error) {
+      setSettleError(error instanceof Error ? error.message : 'This settlement was not recorded.');
+    } finally {
+      setSavingSettlement(false);
     }
   };
 
@@ -970,7 +1106,8 @@ export default function SalesPage() {
                   </tr>
                 </thead>
                 <tbody>{pagedInvoices.map((invoice) => {
-                  const balance = Number(invoice.total) - Number(invoice.paid);
+                  const balance = invoiceBalanceDue(invoice);
+                  const writtenOff = invoiceWrittenOff(invoice);
                   const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
                   const productLabel = items[0]?.name ?? (invoice.items > 0 ? 'Legacy sale' : '—');
                   const customerRow = customers.find((c) => c.name === invoice.customer);
@@ -1013,11 +1150,15 @@ export default function SalesPage() {
                         <div className={`meter${balance <= 0 ? '' : Number(invoice.paid) <= 0 ? ' meter--out' : ' meter--low'}`} aria-hidden="true">
                           <i style={{ width: `${receivedPercent}%` }} />
                         </div>
+                        {/* Said out loud rather than folded into "paid": this money never arrived. */}
+                        {writtenOff > 0 && <div className="text-muted text-sm" style={{ marginTop: '2px' }}>₹{money(writtenOff)} written off</div>}
                       </div>
                     </td>
                     <td>
                       {balance <= 0
-                        ? <span className="badge badge-success"><CheckCircle2 size={12} />Paid</span>
+                        ? writtenOff > 0
+                          ? <span className="badge badge-success"><CheckCircle2 size={12} />Settled</span>
+                          : <span className="badge badge-success"><CheckCircle2 size={12} />Paid</span>
                         : Number(invoice.paid) > 0
                           ? <span className="badge badge-warning"><AlertTriangle size={12} />Due ₹{money(balance)}</span>
                           : <span className="badge badge-danger"><XCircle size={12} />Unpaid</span>}
@@ -1027,10 +1168,12 @@ export default function SalesPage() {
                       <button
                         className="btn btn-ghost btn-sm"
                         aria-label={`Edit ${invoice.id}`}
-                        title={items.length > 0 ? 'Edit invoice' : "Edit unavailable — this invoice predates line-item tracking"}
-                        disabled={items.length === 0}
-                        style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
-                        onClick={() => items.length > 0 && openEditInvoice(invoice)}
+                        title={writtenOff > 0
+                          ? 'Edit unavailable — this invoice was settled short, so its amounts are fixed'
+                          : items.length > 0 ? 'Edit invoice' : "Edit unavailable — this invoice predates line-item tracking"}
+                        disabled={items.length === 0 || writtenOff > 0}
+                        style={items.length === 0 || writtenOff > 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+                        onClick={() => items.length > 0 && writtenOff === 0 && openEditInvoice(invoice)}
                       ><Pencil size={14} /></button>
                       <button
                         className="btn btn-ghost btn-sm"
@@ -1040,6 +1183,14 @@ export default function SalesPage() {
                         style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         onClick={() => items.length > 0 && openSalesReturn(invoice)}
                       ><Undo2 size={14} /></button>
+                      {balance > 0 && !isDraft(invoice) && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          aria-label={`Settle ${invoice.id} for less`}
+                          title={`Customer paid less and this is settled — write off the remaining ₹${money(balance)}`}
+                          onClick={() => openSettleShort(invoice)}
+                        ><HandCoins size={14} /></button>
+                      )}
                       <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={() => window.open(`/sales/invoice/${invoice.id}`, '_blank')}><Printer size={14} /></button>
                       <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`} title="Delete invoice" style={{ color: 'var(--color-danger)' }} onClick={() => setDeleteCandidate(invoice)}><Trash2 size={14} /></button>
                     </div></td>
@@ -1252,7 +1403,7 @@ export default function SalesPage() {
         <div className="modal-body flex flex-col gap-4">
           <div className="form-grid-2"><div><small className="text-muted">Customer</small><div style={{ fontWeight: 600 }}>{viewingQuotation.customer}</div></div><div><small className="text-muted">Quote date</small><div style={{ fontWeight: 600 }}>{viewingQuotation.date}</div></div><div><small className="text-muted">Valid until</small><div style={{ fontWeight: 600 }}>{viewingQuotation.validity}</div></div><div><small className="text-muted">Status</small><div style={{ fontWeight: 600 }}>{viewingQuotation.status.toUpperCase()}</div></div></div>
           <div className="table-wrap"><table className="erp-table"><thead><tr><th>Part</th><th className="text-right">Qty</th><th className="text-right">Unit Price</th><th className="text-right">Line Total</th></tr></thead><tbody>{viewingQuotation.items.map((item, index) => <tr key={`${item.part_number}-${index}`}><td><div style={{ fontWeight: 600 }}>{item.name}</div><small className="text-muted">{item.part_number}</small></td><td className="text-right">{item.qty}</td><td className="text-right">₹{Number(item.unit_price).toLocaleString()}</td><td className="text-right">₹{Number(item.line_total).toLocaleString()}</td></tr>)}</tbody></table></div>
-          <div className="report-summary"><div className="report-line"><span>Subtotal</span><span>₹{Number(viewingQuotation.subtotal ?? viewingQuotation.total).toLocaleString()}</span></div>{Number(viewingQuotation.discount_amount) > 0 && <div className="report-line"><span>Discount ({Number(viewingQuotation.discount_percent).toFixed(1)}%)</span><span className="text-danger">-₹{Number(viewingQuotation.discount_amount).toLocaleString()}</span></div>}<div className="report-line"><span>GST ({Number(viewingQuotation.gst_percent ?? 0).toFixed(1)}%)</span><span>₹{Number(viewingQuotation.gst_amount ?? 0).toLocaleString()}</span></div><div className="report-line report-strong"><span>Quotation Total</span><strong>₹{Number(viewingQuotation.total).toLocaleString()}</strong></div></div>
+          <div className="report-summary"><div className="report-line"><span>Subtotal{viewingQuotation.items.some((item) => Number(item.discount_percent) > 0) ? ' after item discounts' : ''}</span><span>₹{Number(viewingQuotation.subtotal ?? viewingQuotation.total).toLocaleString()}</span></div>{Number(viewingQuotation.discount_amount) > 0 && <div className="report-line"><span>Whole-quote discount ({Number(viewingQuotation.discount_percent).toFixed(1)}%)</span><span className="text-danger">-₹{Number(viewingQuotation.discount_amount).toLocaleString()}</span></div>}<div className="report-line"><span>GST ({Number(viewingQuotation.gst_percent ?? 0).toFixed(1)}%){viewingQuotation.gst_mode === 'inclusive' ? ' — included in the rates' : ''}</span><span>₹{Number(viewingQuotation.gst_amount ?? 0).toLocaleString()}</span></div><div className="report-line report-strong"><span>Quotation Total</span><strong>₹{Number(viewingQuotation.total).toLocaleString()}</strong></div></div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/quotation/${viewingQuotation.id}`, '_blank')}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingQuotation(null)}>Close</button></div>
       </div></div>}
@@ -1262,9 +1413,9 @@ export default function SalesPage() {
         <div className="modal-body flex flex-col gap-4">
           {quotationError && <div className="alert alert-danger" role="alert">{quotationError}</div>}
           <div className="form-grid-2"><div className="form-group"><label className="form-label">Customer</label><select required className="form-input form-select" value={quoteCustomer} onChange={(event) => setQuoteCustomer(event.target.value)}><option value="">Select customer…</option>{customers.map((entry) => <option key={entry.id} value={entry.name}>{entry.name}</option>)}</select></div><div className="form-group"><label className="form-label">Quote Date</label><input required type="date" className="form-input" value={quoteDate} onChange={(event) => setQuoteDate(event.target.value)} /></div><div className="form-group"><label className="form-label">Valid Until</label><input required type="date" min={quoteDate} className="form-input" value={quoteValidity} onChange={(event) => setQuoteValidity(event.target.value)} /></div></div>
-          <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Quoted Parts</h4>{partOptions.length === 0 && <p className="text-muted text-sm">Add parts in Inventory before creating a quotation.</p>}<datalist id="quotation-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>{quoteLines.map((line, index) => { const matched = partOptions.find((part) => part.value === line.part); return <div key={index} className="form-grid-4 mb-2"><div className="form-group"><label className="form-label">Part</label><input list="quotation-part-options" className="form-input" placeholder="Type to search a part…" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateQuoteLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }} />{line.part.trim() && !matched && <small className="text-danger">No matching part in Inventory</small>}</div><div className="form-group"><label className="form-label">Category</label><input className="form-input" value={matched?.category ?? '—'} disabled /></div><div className="form-group"><label className="form-label">Qty</label><input required type="number" min="1" className="form-input" value={line.qty} onChange={(event) => updateQuoteLine(index, { qty: Number(event.target.value) })} /></div><div className="form-group"><label className="form-label">Unit Price (₹)</label><input required type="number" min="0" className="form-input" value={line.price} onChange={(event) => updateQuoteLine(index, { price: Number(event.target.value) })} /></div></div>; })}{partOptions.length > 0 && <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setQuoteLines((current) => [...current, { part: '', qty: 1, price: 0 }])}>+ Add Item Row</button>}</div>
-          <div className="form-grid-2"><div className="form-group"><label className="form-label">Discount (%)</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={quoteDiscountPercent} onChange={(event) => setQuoteDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} /></div><div className="form-group"><label className="form-label">Discount Amount (₹)</label><input className="form-input" value={quoteDiscountAmount.toFixed(2)} disabled /></div><div className="form-group"><label className="form-label">GST Rate (%)</label><input type="number" min="0" max="28" step="0.1" className="form-input" value={quoteGstPercent} onChange={(event) => setQuoteGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} /></div><div className="form-group"><label className="form-label">GST Amount (₹)</label><input className="form-input" value={quoteGstAmount.toFixed(2)} disabled /></div></div>
-          <div className="flex justify-between items-center invoice-summary"><div><span className="text-muted">Subtotal: </span><strong>₹{quoteSubtotal.toLocaleString()}</strong></div>{quoteDiscountAmount > 0 && <div><span className="text-muted">Discount: </span><strong className="text-danger">-₹{quoteDiscountAmount.toFixed(2)}</strong></div>}<div><span className="text-muted">GST ({quoteGstPercent}%): </span><strong>₹{quoteGstAmount.toFixed(2)}</strong></div><div><strong>Quote Total: </strong><span className="invoice-total">₹{quoteTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div></div>
+          <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Quoted Parts</h4>{partOptions.length === 0 && <p className="text-muted text-sm">Add parts in Inventory before creating a quotation.</p>}<datalist id="quotation-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>{quoteLines.map((line, index) => { const matched = partOptions.find((part) => part.value === line.part); return <div key={index} className="form-grid-5 mb-2"><div className="form-group"><label className="form-label">Part</label><input list="quotation-part-options" className="form-input" placeholder="Type to search a part…" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateQuoteLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }} />{line.part.trim() && !matched && <small className="text-danger">No matching part in Inventory</small>}</div><div className="form-group"><label className="form-label">Category</label><input className="form-input" value={matched?.category ?? '—'} disabled /></div><div className="form-group"><label className="form-label">Qty</label><input required type="number" min="1" className="form-input" value={line.qty} onChange={(event) => updateQuoteLine(index, { qty: Number(event.target.value) })} /></div><div className="form-group"><label className="form-label">Unit Price (₹)</label><input required type="number" min="0" className="form-input" value={line.price} onChange={(event) => updateQuoteLine(index, { price: Number(event.target.value) })} /></div><div className="form-group"><label className="form-label">Disc %</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={line.discount ?? 0} onChange={(event) => updateQuoteLine(index, { discount: Math.min(100, Math.max(0, Number(event.target.value))) })} /><small className="text-muted">{quoteLineDiscount(line) > 0 ? `Line: ₹${quoteLineNet(line).toFixed(2)} (was ₹${quoteLineGross(line).toFixed(2)})` : `Line: ₹${quoteLineNet(line).toFixed(2)}`}</small></div></div>; })}{partOptions.length > 0 && <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setQuoteLines((current) => [...current, { part: '', qty: 1, price: 0, discount: 0 }])}>+ Add Item Row</button>}</div>
+          <div className="form-grid-2"><div className="form-group"><label className="form-label">Discount (%)</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={quoteDiscountPercent} onChange={(event) => setQuoteDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} /></div><div className="form-group"><label className="form-label">Discount Amount (₹)</label><input className="form-input" value={quoteDiscountAmount.toFixed(2)} disabled /></div><div className="form-group"><label className="form-label">GST Rate (%)</label><input type="number" min="0" max="28" step="0.1" className="form-input" value={quoteGstPercent} onChange={(event) => setQuoteGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} /><div className="flex gap-2 mt-2" role="group" aria-label="How the quoted rates are priced"><button type="button" className={'btn btn-sm ' + (quoteGstInclusive ? 'btn-secondary' : 'btn-primary')} onClick={() => setQuoteGstInclusive(false)}>GST extra</button><button type="button" className={'btn btn-sm ' + (quoteGstInclusive ? 'btn-primary' : 'btn-secondary')} onClick={() => setQuoteGstInclusive(true)}>GST included</button></div><small className="text-muted">{quoteGstInclusive ? 'Quoted rates already include GST — the tax is taken out of them.' : 'Quoted rates are before GST — the tax is added on top.'}</small></div><div className="form-group"><label className="form-label">GST Amount (₹)</label><input className="form-input" value={quoteGstAmount.toFixed(2)} disabled /></div></div>
+          <div className="flex justify-between items-center invoice-summary">{quoteItemDiscountTotal > 0 && <div><span className="text-muted">Item discounts: </span><strong className="text-danger">-₹{quoteItemDiscountTotal.toFixed(2)}</strong></div>}<div><span className="text-muted">Subtotal: </span><strong>₹{quoteSubtotal.toLocaleString()}</strong></div>{quoteDiscountAmount > 0 && <div><span className="text-muted">Whole-quote discount: </span><strong className="text-danger">-₹{quoteDiscountAmount.toFixed(2)}</strong></div>}<div><span className="text-muted">Taxable value: </span><strong>₹{quoteNetTaxableValue.toFixed(2)}</strong></div><div><span className="text-muted">GST ({quoteGstPercent}%){quoteGstInclusive ? ' incl.' : ''}: </span><strong>₹{quoteGstAmount.toFixed(2)}</strong></div><div><strong>Quote Total: </strong><span className="invoice-total">₹{quoteTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div></div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowQuotationModal(false); setEditingQuotation(null); }}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!quoteTotal || savingQuotation}>{savingQuotation ? 'Saving…' : editingQuotation ? 'Save Changes' : 'Save Quotation'}</button></div>
       </form></div></div>}
@@ -1288,17 +1439,58 @@ export default function SalesPage() {
             {Number(viewingInvoice.discount_amount) > 0 && <div className="report-line"><span>Discount ({Number(viewingInvoice.discount_percent).toFixed(0)}%)</span><span className="text-danger">-₹{money(Number(viewingInvoice.discount_amount))}</span></div>}
             <div className="report-line report-strong"><span>Total</span><strong>₹{money(Number(viewingInvoice.total))}</strong></div>
             <div className="report-line"><span>Paid</span><strong className="text-success">₹{money(Number(viewingInvoice.paid))}</strong></div>
-            <div className="report-line"><span>Balance</span><strong className="text-danger">₹{money(Number(viewingInvoice.total) - Number(viewingInvoice.paid))}</strong></div>
+            {wasSettledShort(viewingInvoice) && (
+              <div className="report-line"><span>Written off (settled short)</span><strong className="text-muted">₹{money(invoiceWrittenOff(viewingInvoice))}</strong></div>
+            )}
+            <div className="report-line"><span>Balance</span><strong className={invoiceBalanceDue(viewingInvoice) > 0 ? 'text-danger' : 'text-muted'}>₹{money(invoiceBalanceDue(viewingInvoice))}</strong></div>
           </div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/invoice/${viewingInvoice.id}`, '_blank')}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingInvoice(null)}>Close</button></div>
+      </div></div>}
+
+      {settlingInvoice && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '460px' }} role="dialog" aria-modal="true" aria-labelledby="settle-short-title">
+        <div className="modal-header">
+          <div>
+            <h3 id="settle-short-title" className="modal-title flex items-center gap-2"><HandCoins size={16} /> Settle for less</h3>
+            <p className="text-muted text-sm">For when the customer pays less and you agree that closes it.</p>
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingSettlement} onClick={() => setSettlingInvoice(null)}>✕</button>
+        </div>
+        <div className="modal-body flex flex-col gap-3">
+          {settleError && <div className="alert alert-danger" role="alert">{settleError}</div>}
+          <div className="report-summary">
+            <div className="report-line"><span>{settlingInvoice.id} — {settlingInvoice.customer}</span><span className="text-muted">{settlingInvoice.date}</span></div>
+            <div className="report-line"><span>Invoice total</span><strong>₹{money(Number(settlingInvoice.total))}</strong></div>
+            <div className="report-line"><span>Received</span><strong className="text-success">₹{money(Number(settlingInvoice.paid))}</strong></div>
+            <div className="report-line report-strong"><span>Still owing</span><strong className="text-danger">₹{money(invoiceBalanceDue(settlingInvoice))}</strong></div>
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="settle-amount">Amount to write off (₹)</label>
+            <input id="settle-amount" type="number" min="0.01" step="0.01" max={invoiceBalanceDue(settlingInvoice)} className="form-input"
+              value={settleAmount} disabled={savingSettlement} onChange={(event) => setSettleAmount(Number(event.target.value))} autoFocus />
+          </div>
+          <div className="form-group">
+            <label className="form-label" htmlFor="settle-reason">Why (optional)</label>
+            <input id="settle-reason" type="text" className="form-input" placeholder="e.g. rounded off in cash, agreed discount for late delivery"
+              value={settleReason} disabled={savingSettlement} onChange={(event) => setSettleReason(event.target.value)} />
+          </div>
+          <p className="text-muted" style={{ fontSize: '12px' }}>
+            {settlingInvoice.customer} stops owing this, and the invoice keeps the total it was issued for.
+            It is <strong>not</strong> counted as money received — it will show as written off, so your
+            takings stay honest. Record any cash the customer actually handed over as a payment first.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-secondary" disabled={savingSettlement} onClick={() => setSettlingInvoice(null)}>Cancel</button>
+          <button type="button" className="btn btn-primary" disabled={savingSettlement || !(settleAmount > 0)} onClick={confirmSettleShort}>{savingSettlement ? 'Recording…' : 'Write It Off'}</button>
+        </div>
       </div></div>}
 
       {deleteCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="delete-invoice-title">
         <div className="modal-header"><h3 id="delete-invoice-title" className="modal-title">Delete invoice?</h3></div>
         <div className="modal-body flex flex-col gap-3">
           {deleteError && <div className="alert alert-danger" role="alert">{deleteError}</div>}
-          <p>This will delete <strong>{deleteCandidate.id}</strong> and add its items back to stock{customers.some((c) => c.name === deleteCandidate.customer) ? ` and reduce ${deleteCandidate.customer}'s balance by the outstanding ₹${(Number(deleteCandidate.total) - Number(deleteCandidate.paid)).toLocaleString()}` : ''}.</p>
+          <p>This will delete <strong>{deleteCandidate.id}</strong> and add its items back to stock{customers.some((c) => c.name === deleteCandidate.customer) ? ` and reduce ${deleteCandidate.customer}'s balance by the outstanding ₹${invoiceBalanceDue(deleteCandidate).toLocaleString()}` : ''}.</p>
         </div>
         <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setDeleteCandidate(null)} disabled={deletingInvoice}>Cancel</button><button className="btn btn-danger" onClick={confirmDeleteInvoice} disabled={deletingInvoice}>{deletingInvoice ? 'Deleting…' : 'Delete Invoice'}</button></div>
       </div></div>}
@@ -1314,7 +1506,7 @@ export default function SalesPage() {
           <div className="table-wrap"><table className="erp-table">
             <thead><tr><th>Item</th><th className="text-right">Sold</th><th className="text-right">Previously returned</th><th className="text-right">Available</th><th className="text-right">Return now</th></tr></thead>
             <tbody>{returnableItems.map((item) => <tr key={item.invoice_item_id}>
-              <td><strong>{item.name}</strong><div className="text-muted text-sm">{item.part_number} · ₹{Number(item.unit_price).toLocaleString()} each</div></td>
+              <td><strong>{item.name}</strong><div className="text-muted text-sm">{item.part_number} · ₹{returnNetRate(item).toLocaleString(undefined, { maximumFractionDigits: 2 })} each{Math.abs(returnNetRate(item) - Number(item.unit_price)) > 0.005 ? ` (discounted from ₹${Number(item.unit_price).toLocaleString()})` : ''}</div></td>
               <td className="text-right">{Number(item.sold_qty)}</td>
               <td className="text-right">{Number(item.returned_qty)}</td>
               <td className="text-right" style={{ fontWeight: 700 }}>{Number(item.returnable_qty)}</td>
@@ -1322,7 +1514,7 @@ export default function SalesPage() {
             </tr>)}</tbody>
           </table></div>
           <div className="form-group"><label className="form-label" htmlFor="sales-return-reason">Reason for return</label><input id="sales-return-reason" className="form-input" maxLength={500} placeholder="For example: damaged, wrong part, customer changed mind" value={returnReason} disabled={savingReturn} onChange={(event) => setReturnReason(event.target.value)} /></div>
-          <div className="alert alert-warning" role="status">The final credit note is calculated from the original invoice, including its discount and GST. The selected item value before those adjustments is ₹{returnItemValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}. Stock and customer balance will change only after confirmation.</div>
+          <div className="alert alert-warning" role="status">The selected items were charged ₹{returnItemValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}, after any discount on those lines. The credit note then applies this invoice&apos;s own discount and GST exactly as they were charged{returnCandidate.gst_mode === 'inclusive' ? ', with GST taken out of that amount rather than added to it' : ''}. Stock and customer balance will change only after confirmation.</div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingReturn} onClick={() => setReturnCandidate(null)}>Cancel</button><button type="button" className="btn btn-danger" disabled={savingReturn || selectedReturnItems.length === 0 || !returnReason.trim()} onClick={saveSalesReturn}>{savingReturn ? 'Creating credit note…' : 'Confirm Return & Credit'}</button></div>
       </div></div>}
@@ -1364,6 +1556,10 @@ export default function SalesPage() {
                         <span className="text-muted text-sm truncate" style={{ maxWidth: '260px' }}>{selectedCustomer.address}</span>
                       )}
                     </div>
+                  ) : creditSaleNeedsCustomer ? (
+                    // Said here, next to the field that fixes it, rather than only on save —
+                    // being told at the end that the whole form is invalid is the worse version.
+                    <span className="text-warning text-sm">Not fully paid — this sale needs a named customer before it can be saved.</span>
                   ) : (
                     <span className="text-muted text-sm">Walk-in sale — billed to the counter, no customer account.</span>
                   )}
@@ -1393,7 +1589,8 @@ export default function SalesPage() {
                         <th style={{ width: '96px' }}>HSN</th>
                         <th className="text-right" style={{ width: '168px' }}>Qty</th>
                         <th className="text-right" style={{ width: '132px' }}>Rate</th>
-                        <th className="text-right" style={{ width: '130px' }}>Amount</th>
+                        <th className="text-right" style={{ width: '104px' }}>Disc %</th>
+                        <th className="text-right" style={{ width: '150px' }}>Amount</th>
                         <th style={{ width: '54px' }} aria-label="Remove line"></th>
                       </tr>
                     </thead>
@@ -1465,7 +1662,27 @@ export default function SalesPage() {
                                 onChange={(event) => updateLine(index, { price: Number(event.target.value) })}
                               />
                             </td>
-                            <td className="text-right font-semibold">₹{paise(line.qty * line.price)}</td>
+                            <td>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.1"
+                                className="form-input"
+                                style={{ textAlign: 'right' }}
+                                aria-label={`Discount percent on line ${index + 1}`}
+                                value={line.discount ?? 0}
+                                onChange={(event) => updateLine(index, { discount: Math.min(100, Math.max(0, Number(event.target.value))) })}
+                              />
+                            </td>
+                            <td className="text-right font-semibold">
+                              {lineDiscountPercent(line) > 0 && (
+                                <div style={{ fontSize: '11px', fontWeight: 400, color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+                                  ₹{paise(lineGross(line))}
+                                </div>
+                              )}
+                              ₹{paise(lineNet(line))}
+                            </td>
                             <td className="text-center">
                               <button
                                 type="button"
@@ -1480,7 +1697,7 @@ export default function SalesPage() {
                         );
                       })}
                       {lines.length === 0 && (
-                        <tr><td colSpan={6}><div className="empty-state" style={{ padding: '28px 20px' }}>
+                        <tr><td colSpan={7}><div className="empty-state" style={{ padding: '28px 20px' }}>
                           <p className="empty-state-title">{partOptions.length === 0 ? 'No parts to sell yet' : 'No lines on this invoice'}</p>
                           <p className="empty-state-desc">{partOptions.length === 0 ? 'Add parts in Inventory before creating an invoice.' : 'Add a line below to start billing.'}</p>
                         </div></td></tr>
@@ -1491,7 +1708,7 @@ export default function SalesPage() {
 
                 <div className="pager">
                   {partOptions.length > 0
-                    ? <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLines((current) => [...current, { part: '', qty: 1, price: 0 }])}><Plus size={14} /> Add line — type or scan a part number</button>
+                    ? <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLines((current) => [...current, { part: '', qty: 1, price: 0, discount: 0 }])}><Plus size={14} /> Add line — type or scan a part number</button>
                     : <span className="pager-info">Add parts in Inventory before creating an invoice.</span>}
                   <div className="pager-info"><strong>{lines.length}</strong> {lines.length === 1 ? 'line' : 'lines'}</div>
                 </div>
@@ -1501,13 +1718,33 @@ export default function SalesPage() {
                 <div className="flex flex-col gap-4">
                   <div className="form-grid-2">
                     <div className="form-group">
-                      <label className="form-label">Discount (%)</label>
+                      <label className="form-label">Whole-invoice discount (%)</label>
                       <input type="number" min="0" max="100" step="0.1" className="form-input" value={discountPercent} onChange={(event) => setDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} />
+                      <small className="text-muted">Applied on top of any per-item discounts. Leave at 0 to discount items only.</small>
                       <span className="text-muted text-sm">Applied on the subtotal</span>
                     </div>
                     <div className="form-group">
                       <label className="form-label">GST Rate (%)</label>
                       <input type="number" min="0" max="28" step="0.1" className="form-input" value={gstPercent} onChange={(event) => setGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} />
+                      <div className="flex gap-2 mt-2" role="group" aria-label="How the rates on the lines are priced">
+                        <button
+                          type="button"
+                          className={'btn btn-sm ' + (gstInclusive ? 'btn-secondary' : 'btn-primary')}
+                          onClick={() => setGstInclusive(false)}
+                        >GST extra</button>
+                        <button
+                          type="button"
+                          className={'btn btn-sm ' + (gstInclusive ? 'btn-primary' : 'btn-secondary')}
+                          onClick={() => setGstInclusive(true)}
+                        >GST included</button>
+                      </div>
+                      {/* States what the typed rates mean, which is the part that is easy to get
+                          wrong — the arithmetic below follows from it. */}
+                      <span className="text-muted text-sm">
+                        {gstInclusive
+                          ? 'Line rates already include GST — the tax is taken out of them, and the total is what you typed.'
+                          : 'Line rates are before GST — the tax is added on top of them.'}
+                      </span>
                       {/* Only claims intra/inter-state when both GSTINs are on file to compare. */}
                       <span className="text-muted text-sm">
                         {supplyKind === 'intra'
@@ -1539,15 +1776,32 @@ export default function SalesPage() {
                     of the same gstAmount, never a second sum. */}
                 <div className="card" style={{ background: 'var(--surface-2)' }}>
                   <div className="report-summary" style={{ maxWidth: 'none', margin: 0, padding: 0, gap: '0' }}>
-                    <div className="report-line"><span className="text-muted">Subtotal</span><strong>₹{paise(subtotal)}</strong></div>
+                    {/* Shown only when line discounts are actually in use, so an invoice without
+                        them reads exactly as it always did. */}
+                    {itemDiscountTotal > 0 && (
+                      <>
+                        <div className="report-line"><span className="text-muted">Gross amount</span><strong>₹{paise(grossSubtotal)}</strong></div>
+                        <div className="report-line">
+                          <span className="text-muted">Item discounts</span>
+                          <strong className="text-danger">-₹{paise(itemDiscountTotal)}</strong>
+                        </div>
+                      </>
+                    )}
+                    <div className="report-line"><span className="text-muted">Subtotal{itemDiscountTotal > 0 ? ' after item discounts' : ''}</span><strong>₹{paise(subtotal)}</strong></div>
                     <div className="report-line">
-                      <span className="text-muted">Discount ({discountPercent}%)</span>
+                      <span className="text-muted">Whole-invoice discount ({discountPercent}%)</span>
                       {discountAmount > 0
                         ? <strong className="text-danger">-₹{paise(discountAmount)}</strong>
                         : <strong>₹{paise(0)}</strong>}
                     </div>
-                    <div className="report-line report-strong"><span>Taxable value</span><strong>₹{paise(taxableAmount)}</strong></div>
-                    <div className="report-line"><span className="text-muted">GST ({gstPercent}%)</span><strong>₹{paise(gstAmount)}</strong></div>
+                    {gstInclusive && (
+                      <div className="report-line"><span className="text-muted">Amount after discounts (GST included)</span><strong>₹{paise(taxableAmount)}</strong></div>
+                    )}
+                    <div className="report-line report-strong"><span>Taxable value</span><strong>₹{paise(netTaxableValue)}</strong></div>
+                    <div className="report-line">
+                      <span className="text-muted">GST ({gstPercent}%){gstInclusive ? ' — included above' : ''}</span>
+                      <strong>₹{paise(gstAmount)}</strong>
+                    </div>
                   </div>
 
                   <div className="flex gap-2 mt-2" style={{ flexWrap: 'wrap' }}>
@@ -1581,22 +1835,27 @@ export default function SalesPage() {
                   : newOutstanding > 0
                     ? <>₹{paise(paidAmount)} received now · <strong>₹{paise(newOutstanding)}</strong> stays outstanding{selectedCustomer ? ` on ${selectedCustomer.name}'s account` : ' on this invoice'}.</>
                     : 'Settled in full — nothing will be added to any outstanding balance.'}
+                {editingDraft && (
+                  <div style={{ marginTop: '4px' }}>
+                    That applies when you confirm it. <strong>Save &amp; Keep as Draft</strong> changes nothing on any account.
+                  </div>
+                )}
               </div>
               <button type="button" className="btn btn-secondary" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>Cancel</button>
-              {/* Parking is only offered on a new sale. An invoice that already exists is either
-                  a draft being confirmed or a live invoice being corrected — neither is something
-                  you park again. */}
-              {!editingInvoice && (
+              {/* Offered on a new sale and on a draft being edited, so a draft can be worked on
+                  over several sittings. Not offered on a live invoice: that is already billed and
+                  on a customer's account, and un-billing it here would erase a real debt. */}
+              {(!editingInvoice || editingDraft) && (
                 <button
                   type="button"
                   className="btn btn-secondary"
                   disabled={!total || savingInvoice || savingDraft}
                   onClick={saveDraftInvoice}
                 >
-                  {savingDraft ? 'Parking…' : 'Save as Draft'}
+                  {savingDraft ? 'Saving…' : editingDraft ? 'Save & Keep as Draft' : 'Save as Draft'}
                 </button>
               )}
-              <button type="submit" className="btn btn-primary" disabled={!total || savingInvoice || savingDraft}>
+              <button type="submit" className="btn btn-primary" disabled={!total || savingInvoice || savingDraft || creditSaleNeedsCustomer}>
                 {savingInvoice
                   ? 'Saving…'
                   : editingInvoice

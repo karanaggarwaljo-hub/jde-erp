@@ -384,5 +384,317 @@ export async function hashFile(file: File): Promise<string> {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export const SPREADSHEET_EXTENSIONS = ['.csv', '.xls', '.xlsx'];
+/** Every spreadsheet format the bundled reader actually handles — verified by writing one of each
+ *  and reading it back through parseInventoryFile and readSheetForCostUpdate, all nine succeeding.
+ *
+ *  The list used to be just .csv/.xls/.xlsx, which is what the file picker offered, so a perfectly
+ *  readable file in any other format was greyed out in the dialog and appeared not to exist. The
+ *  reader was never the limitation; the filter was.
+ *
+ *  .xlsm is the common one to miss: Excel switches a workbook to it the moment it contains a macro,
+ *  and nothing about the data changes. */
+export const SPREADSHEET_EXTENSIONS = [
+  '.csv', '.xls', '.xlsx', '.xlsm', '.xlsb', '.ods', '.fods', '.txt', '.tsv', '.dif',
+];
+
+/** The `accept` attribute for a spreadsheet picker, derived from the list above so the dialog can
+ *  never again offer less than the app can read. */
+export const SPREADSHEET_ACCEPT = SPREADSHEET_EXTENSIONS.join(',');
+
+/** True when the reader is expected to cope with this file, judged on its name. Used both to filter
+ *  a dropped file and to explain a rejection, so the two can never disagree. */
+export function isSpreadsheetFileName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return SPREADSHEET_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
 export const SCANNABLE_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/webp'];
+
+/* ---------------------------------------------------------------------------------------------
+ * Cost-price-only import
+ *
+ * Separate from parseInventoryFile on purpose. That one builds whole products to CREATE; this one
+ * reads exactly two things per row — which part, and what it now costs — to UPDATE parts that
+ * already exist. Nothing else in a supplier price list should be allowed to overwrite inventory.
+ *
+ * The column is CHOSEN, not guessed. A real inventory statement used here heads its cost column
+ * "unite price" — a typo no alias list will ever hold — while also carrying "ordering cost" and
+ * "holding cost", which are stock-control formula inputs that merely contain the word. Guessing
+ * wrong overwrites every price in the business, so this proposes a column and the owner confirms
+ * it against sample values before anything is written.
+ * ------------------------------------------------------------------------------------------- */
+
+export type CostUpdateRow = {
+  /** 1-based position among the data rows, so a problem row can be pointed at. */
+  rowNumber: number;
+  partNumber: string;
+  oemNumber: string;
+  name: string;
+  cost: number;
+};
+
+export type CostUpdateParse = {
+  rows: CostUpdateRow[];
+  skippedNoCost: number;
+  skippedNoIdentifier: number;
+};
+
+export type SheetForCostUpdate = {
+  /** Data rows keyed by header, read once so changing a column choice costs nothing. */
+  rows: Array<Record<string, unknown>>;
+  /** Headers worth offering: real, non-blank columns only. */
+  columns: string[];
+  /** Best guess at the cost column, or undefined when nothing is convincing. */
+  suggestedCostColumn?: string;
+  /** Best guess at the column naming which part each row is. */
+  suggestedIdColumn?: string;
+};
+
+/** Reads "₹1,250.50", "1250", " 1,250 " — and refuses anything else.
+ *
+ *  Returns null rather than 0 for junk. This matters more here than anywhere else in the file:
+ *  the number is written directly over a real cost price, and a silent 0 would both destroy the
+ *  figure and, because a zero-cost batch counts as "price not recorded", quietly distort the
+ *  stock valuation. A row that cannot be read is reported and skipped, never guessed. */
+function parseCost(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? raw : null;
+  const text = String(raw ?? '').trim();
+  if (!text) return null;
+  // Strip currency symbols, thousands separators and stray spaces, but nothing else — a value
+  // with letters in it ("call for price", "N/A") must not survive as a number.
+  const cleaned = text.replace(/[₹$€£,\s]/g, '');
+  if (!/^\d+(\.\d+)?$/.test(cleaned)) return null;
+  const value = Number(cleaned);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** Columns XLSX invents for blank spreadsheet columns, plus anything with no heading at all.
+ *  A real statement can trail a dozen of these; they are noise in a column picker. */
+function isJunkColumn(header: string): boolean {
+  return !header.trim() || /^__EMPTY(_\d+)?$/.test(header.trim());
+}
+
+/** Headings carrying a price word that are never what a part costs to buy.
+ *
+ *  "ordering cost" and "holding cost" are stock-control formula inputs — the cost of placing an
+ *  order, and of keeping one unit on the shelf for a year. Both appear on the real sheet this was
+ *  built against, and both would otherwise look like strong candidates. */
+const NOT_A_PURCHASE_COST = ['ordering cost', 'holding cost', 'carrying cost', 'shipping cost', 'freight', 'total cost'];
+
+/** Ranked candidates. Explicit purchase-cost wording first; then the generic unit-price family,
+ *  which is usually the cost on a stock-valuation sheet but is guessy enough that it stays a
+ *  suggestion the owner confirms. */
+const COST_COLUMN_RANKS: readonly (readonly string[])[] = [
+  ['cost price', 'purchase price', 'purchase rate', 'net rate', 'net price', 'buying price', 'dealer price', 'landing cost'],
+  ['unit price', 'unit rate', 'unit cost', 'rate', 'price', 'cost'],
+];
+
+/** Matches a candidate against a heading tolerantly enough to survive a typo: every word of the
+ *  candidate must appear somewhere in the heading. That is what lets "unit price" recognise
+ *  "unite price", since "unite" contains "unit". */
+function headingMatches(heading: string, candidate: string): boolean {
+  const normalized = normalizeHeader(heading);
+  if (normalized.includes(candidate)) return true;
+  return candidate.split(' ').every((word) => normalized.includes(word));
+}
+
+function suggestCostColumn(columns: string[], rows: Array<Record<string, unknown>>): string | undefined {
+  const usable = columns.filter((column) => {
+    const normalized = normalizeHeader(column);
+    if (NOT_A_PURCHASE_COST.some((bad) => normalized.includes(bad))) return false;
+    if (looksLikeDerivedColumn(column)) return false; // "inventory value" is qty x price
+    // Must actually hold readable money somewhere, so an empty column can never be suggested —
+    // which is what keeps a blank "ordering cost" from winning on its name alone.
+    return rows.some((row) => parseCost(row[column]) !== null);
+  });
+
+  for (const rank of COST_COLUMN_RANKS) {
+    const found = usable.find((column) => rank.some((candidate) => headingMatches(column, candidate)));
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function suggestIdColumn(columns: string[]): string | undefined {
+  const ordered = [...PRODUCT_KEYS.part_number, ...PRODUCT_KEYS.oem_number, ...PRODUCT_KEYS.name];
+  for (const candidate of ordered) {
+    const found = columns.find((column) => normalizeHeader(column).includes(candidate));
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/** First few readable values from a column, so the owner can confirm a choice by looking at it
+ *  rather than trusting the heading. */
+export function sampleColumnValues(sheet: SheetForCostUpdate, column: string, limit = 3): string[] {
+  const values: string[] = [];
+  for (const row of sheet.rows) {
+    const raw = String(row[column] ?? '').trim();
+    if (!raw) continue;
+    values.push(raw);
+    if (values.length >= limit) break;
+  }
+  return values;
+}
+
+export async function readSheetForCostUpdate(file: File): Promise<SheetForCostUpdate> {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: 'array' });
+  const firstSheetName = workbook.SheetNames[0];
+  const sheet = firstSheetName ? workbook.Sheets[firstSheetName] : undefined;
+  if (!sheet) {
+    throw new Error('This file has no readable sheet — it may be empty, corrupted, or not a valid CSV/Excel file.');
+  }
+
+  const rows = sheetToRowsWithDetectedHeader(sheet);
+  if (rows.length === 0) {
+    throw new Error('This sheet has no data rows under its headings.');
+  }
+
+  // Union of keys across all rows, not just the first — a column left blank on row 1 still exists.
+  const seen = new Set<string>();
+  for (const row of rows) for (const key of Object.keys(row)) seen.add(key);
+  const columns = [...seen].filter((column) => !isJunkColumn(column));
+  if (columns.length === 0) {
+    throw new Error('Couldn’t read any column headings from this file.');
+  }
+
+  return {
+    rows,
+    columns,
+    suggestedCostColumn: suggestCostColumn(columns, rows),
+    suggestedIdColumn: suggestIdColumn(columns),
+  };
+}
+
+/** Turns the chosen columns into rows ready for matching. Both column names are the owner's
+ *  confirmed choice, so nothing here second-guesses them.
+ *
+ *  The chosen identifier is offered as a part number first; planCostUpdates falls back to OEM
+ *  number and then to name on its own, so a sheet keyed by description still matches without the
+ *  owner having to know that. */
+export function extractCostRows(sheet: SheetForCostUpdate, costColumn: string, idColumn: string): CostUpdateParse {
+  const sample = sheet.rows[0] ?? {};
+  const nameKey = findKey(sample, PRODUCT_KEYS.name);
+  const oemKey = findKey(sample, PRODUCT_KEYS.oem_number);
+
+  const text = (row: Record<string, unknown>, key: string | undefined) => (key ? String(row[key] ?? '').trim() : '');
+
+  const rows: CostUpdateRow[] = [];
+  let skippedNoCost = 0;
+  let skippedNoIdentifier = 0;
+
+  sheet.rows.forEach((row, index) => {
+    const chosen = text(row, idColumn);
+    const name = text(row, nameKey);
+    const oemNumber = text(row, oemKey);
+    if (!chosen && !name && !oemNumber) {
+      skippedNoIdentifier += 1;
+      return;
+    }
+    const cost = parseCost(row[costColumn]);
+    if (cost === null) {
+      skippedNoCost += 1;
+      return;
+    }
+    rows.push({ rowNumber: index + 1, partNumber: chosen, oemNumber, name, cost });
+  });
+
+  return { rows, skippedNoCost, skippedNoIdentifier };
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Scanned parts lists (a photo or PDF, rather than a spreadsheet)
+ *
+ * The AI returns rows; the import dialog already knows how to preview, match and apply rows. So
+ * rather than build a second dialog, a scan is turned into the SAME two shapes a spreadsheet
+ * produces — a sheet with named columns, and a list of products — and everything downstream
+ * (column pickers, cost matching, duplicate detection, tick boxes) works with no changes at all.
+ * ------------------------------------------------------------------------------------------- */
+
+export type ScannedPart = {
+  name: string;
+  part_number: string | null;
+  oem_number: string | null;
+  brand: string | null;
+  category: string | null;
+  hsn_code: string | null;
+  qty: number | null;
+  cost_price: number | null;
+  sale_price: number | null;
+  mrp: number | null;
+};
+
+/** Column headings for the synthetic sheet. Deliberately worded so the existing detection picks
+ *  them up unaided — "Cost Price" and "Part No" are already the strongest candidates it knows. */
+const SCAN_COLUMNS = {
+  part: 'Part No',
+  oem: 'OEM Number',
+  name: 'Name',
+  brand: 'Brand',
+  category: 'Category',
+  hsn: 'HSN Code',
+  qty: 'Qty',
+  cost: 'Cost Price',
+  sale: 'Sale Price',
+  mrp: 'MRP',
+} as const;
+
+const text = (value: string | null | undefined) => (value ?? '').toString().trim();
+const num = (value: number | null | undefined) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+
+export function sheetFromScannedParts(items: ScannedPart[]): {
+  sheet: SheetForCostUpdate;
+  products: ImportedProduct[];
+} {
+  const usable = items.filter((item) => text(item.name) || text(item.part_number));
+
+  const rows = usable.map((item) => ({
+    [SCAN_COLUMNS.part]: text(item.part_number),
+    [SCAN_COLUMNS.oem]: text(item.oem_number),
+    [SCAN_COLUMNS.name]: text(item.name),
+    [SCAN_COLUMNS.brand]: text(item.brand),
+    [SCAN_COLUMNS.category]: text(item.category),
+    [SCAN_COLUMNS.hsn]: text(item.hsn_code),
+    [SCAN_COLUMNS.qty]: item.qty ?? '',
+    [SCAN_COLUMNS.cost]: item.cost_price ?? '',
+    [SCAN_COLUMNS.sale]: item.sale_price ?? '',
+    [SCAN_COLUMNS.mrp]: item.mrp ?? '',
+  }));
+
+  // Identify by part number only when the scan actually read some; a list photographed without a
+  // code column would otherwise be matched on an empty column and find nothing.
+  const anyPartNumber = usable.some((item) => text(item.part_number));
+
+  const sheet: SheetForCostUpdate = {
+    rows,
+    columns: Object.values(SCAN_COLUMNS),
+    suggestedCostColumn: usable.some((item) => item.cost_price != null) ? SCAN_COLUMNS.cost : undefined,
+    suggestedIdColumn: anyPartNumber ? SCAN_COLUMNS.part : SCAN_COLUMNS.name,
+  };
+
+  const products: ImportedProduct[] = usable.map((item) => ({
+    part_number: text(item.part_number),
+    oem_number: text(item.oem_number),
+    hsn_code: text(item.hsn_code),
+    name: text(item.name) || text(item.part_number),
+    brand: text(item.brand),
+    category: text(item.category),
+    compatibility: '',
+    cost_price: num(item.cost_price),
+    mrp: num(item.mrp),
+    sale_price: num(item.sale_price),
+    current_stock: num(item.qty),
+    min_stock: 0,
+    location: '',
+  }));
+
+  return { sheet, products };
+}
+
+export const SCANNABLE_IMPORT_ACCEPT = 'application/pdf,image/*';
+
+/** True when this file should go to the scanner rather than the spreadsheet reader. */
+export function isScannableFileName(name: string, type: string): boolean {
+  if (type === 'application/pdf' || type.startsWith('image/')) return true;
+  return /\.(pdf|png|jpe?g|webp|heic|heif)$/i.test(name);
+}

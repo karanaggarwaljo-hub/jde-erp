@@ -4,10 +4,11 @@ import { FormEvent, useMemo, useState } from 'react';
 import { IndianRupee, Wand2 } from 'lucide-react';
 import { useCompany } from './CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
-import { receiveCustomerPayment } from '@/lib/client-sales';
+import { receiveCustomerPayment, writeOffInvoiceBalance } from '@/lib/client-sales';
+import { invoiceBalanceDue, isInvoiceOpen } from '@/lib/invoice-balance';
 
 type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
-type Invoice = { id: string; company_id: string; customer: string; date: string; total: number; paid: number; status: string };
+type Invoice = { id: string; company_id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; };
 type Payment = { id: string; company_id: string; customer_id: string; customer: string; date: string; amount: number; note: string; created_at: string };
 
 function todayIso() {
@@ -51,6 +52,9 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
   const [amount, setAmount] = useState(0);
   const [note, setNote] = useState('');
   const [allocations, setAllocations] = useState<Record<string, number>>({});
+  // Invoices the customer is settling by paying less than the balance: whatever is left after
+  // this payment is forgiven rather than carried forward.
+  const [settleShort, setSettleShort] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -59,17 +63,23 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
   const openInvoices = useMemo(() => {
     if (!selectedCustomer) return [];
     return invoices
-      .filter((invoice) => invoice.customer === selectedCustomer.name && Number(invoice.total) - Number(invoice.paid) > 0.01)
+      .filter((invoice) => invoice.customer === selectedCustomer.name && isInvoiceOpen(invoice))
       .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   }, [invoices, selectedCustomer]);
 
-  const balanceOf = (invoice: Invoice) => Number(invoice.total) - Number(invoice.paid);
+  const balanceOf = (invoice: Invoice) => invoiceBalanceDue(invoice);
 
   const changeCustomer = (id: string) => {
     setSelectedCustomerId(id);
     setAllocations({});
+    setSettleShort({});
     setError('');
   };
+
+  /** What would be forgiven on this invoice if it is marked settled: its balance less whatever
+   *  of this payment is being applied to it. */
+  const shortfallOn = (invoice: Invoice) =>
+    Math.round((balanceOf(invoice) - (allocations[invoice.id] ?? 0)) * 100) / 100;
 
   const setAllocation = (invoiceId: string, value: number, cap: number) => {
     const clamped = Number.isFinite(value) ? Math.min(Math.max(value, 0), cap) : 0;
@@ -97,6 +107,8 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
     setAllocations(next);
   };
 
+  const settledShortInvoices = openInvoices.filter((invoice) => settleShort[invoice.id] && shortfallOn(invoice) > 0.01);
+  const totalWriteOff = settledShortInvoices.reduce((sum, invoice) => sum + shortfallOn(invoice), 0);
   const totalAllocated = Object.values(allocations).reduce((sum, value) => sum + value, 0);
   const remainder = Math.round((amount - totalAllocated) * 100) / 100;
   const balanced = amount > 0 && Math.abs(remainder) <= 0.01 && Object.keys(allocations).length > 0;
@@ -122,7 +134,31 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
         note,
         allocations: Object.entries(allocations).map(([invoiceId, value]) => ({ invoiceId, amount: value })),
       });
+      const failed: string[] = [];
+      for (const invoice of settledShortInvoices) {
+        try {
+          await writeOffInvoiceBalance({
+            companyId: activeCompany.id,
+            invoiceId: invoice.id,
+            amount: shortfallOn(invoice),
+            reason: note.trim() ? `Settled short — ${note.trim()}` : 'Settled short',
+            date,
+          });
+        } catch {
+          failed.push(invoice.id);
+        }
+      }
+
       await Promise.all([reloadInvoices(), reloadCustomers(), reloadPayments()]);
+
+      if (failed.length > 0) {
+        // The payment itself is safely recorded; say plainly what still needs doing rather than
+        // letting the owner believe those invoices are closed.
+        setError(`Payment recorded, but ${failed.join(', ')} could not be settled short — use "Settle for less" on ${failed.length === 1 ? 'it' : 'them'} in Sales.`);
+        setSaving(false);
+        return;
+      }
+
       onRecorded({ paymentId: result.payment_id, customerName: selectedCustomer.name, appliedTotal: result.applied_total });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'This payment was not saved.');
@@ -189,7 +225,7 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
                 ) : (
                   <div className="table-wrap">
                     <table className="erp-table">
-                      <thead><tr><th>Invoice</th><th>Date</th><th className="text-right">Balance</th><th className="text-right" style={{ width: '140px' }}>Apply (₹)</th></tr></thead>
+                      <thead><tr><th>Invoice</th><th>Date</th><th className="text-right">Balance</th><th className="text-right" style={{ width: '140px' }}>Apply (₹)</th><th style={{ width: '150px' }}>Settle for less</th></tr></thead>
                       <tbody>
                         {openInvoices.map((invoice) => {
                           const due = balanceOf(invoice);
@@ -205,6 +241,16 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
                                   onChange={(event) => setAllocation(invoice.id, Number(event.target.value), due)}
                                 />
                               </td>
+                              <td>
+                                {/* Only offered where something would actually be left over. */}
+                                {shortfallOn(invoice) > 0.01 ? (
+                                  <label className="flex items-center gap-2 text-sm" style={{ cursor: saving ? 'default' : 'pointer' }}>
+                                    <input type="checkbox" disabled={saving} checked={Boolean(settleShort[invoice.id])}
+                                      onChange={(event) => setSettleShort((current) => ({ ...current, [invoice.id]: event.target.checked }))} />
+                                    <span>Write off ₹{money(shortfallOn(invoice))}</span>
+                                  </label>
+                                ) : <span className="text-muted text-sm">—</span>}
+                              </td>
                             </tr>
                           );
                         })}
@@ -217,6 +263,13 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
                   <p className={`text-sm ${balanced ? 'text-success' : 'text-muted'}`} style={{ marginTop: '8px' }}>
                     Applied ₹{money(totalAllocated)} of ₹{money(amount)}
                     {!balanced && remainder > 0 ? ` — ₹${money(remainder)} left to apply` : ''}
+                  </p>
+                )}
+
+                {totalWriteOff > 0 && (
+                  <p className="text-muted text-sm" style={{ marginTop: '4px' }}>
+                    ₹{money(totalWriteOff)} on {settledShortInvoices.length === 1 ? '1 invoice' : `${settledShortInvoices.length} invoices`} will be
+                    written off — {selectedCustomer.name} stops owing it, and it is recorded as forgiven, never as money received.
                   </p>
                 )}
               </div>

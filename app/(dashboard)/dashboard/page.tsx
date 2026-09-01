@@ -19,12 +19,14 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { totalStockValue, type StockLayerLike } from '@/lib/stock-value';
+import { invoiceBalanceDue, isInvoiceOpen } from '@/lib/invoice-balance';
 import { useCompany } from '@/components/CompanyProvider';
 
 type Product = { id: string; part_number: string; name: string; brand: string; category: string; cost_price: number; current_stock: number; min_stock: number; location: string };
 type Customer = { id: string; balance: number };
 type Supplier = { id: string; name: string; balance: number };
-type Invoice = { id: string; customer: string; date: string; total: number; paid: number };
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; settlement_write_off: number; };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number };
 type Grn = { id: string; po_number: string; supplier: string; received_at: string };
 type Quotation = { id: string; customer: string; date: string; total: number };
@@ -62,6 +64,9 @@ export default function DashboardPage() {
   const { rows: purchaseOrders } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const { rows: grns } = useCompanyTable<Grn>('grns');
   const { rows: quotations } = useCompanyTable<Quotation>('quotations');
+  // Needed to value stock the same way Inventory does — at each part's oldest open
+  // purchase batch rather than its static cost_price field.
+  const { rows: stockLayers } = useCompanyTable<StockLayerLike>('stock_layers');
 
   const [activePeriod, setActivePeriod] = useState<TrendPeriod>('7 Days');
 
@@ -85,7 +90,7 @@ export default function DashboardPage() {
   const spendPrev30 = sumInRange(purchaseOrders, isoDate(daysAgoDate(59)), isoDate(daysAgoDate(30)));
 
   const lowStockProducts = products.filter((p) => Number(p.min_stock) > 0 && Number(p.current_stock) <= Number(p.min_stock));
-  const inventoryValue = products.reduce((t, p) => t + Number(p.current_stock || 0) * Number(p.cost_price || 0), 0);
+  const inventoryValue = totalStockValue(products, stockLayers);
   const totalReceivables = customers.reduce((t, c) => t + Number(c.balance || 0), 0);
   const totalPayables = suppliers.reduce((t, s) => t + Number(s.balance || 0), 0);
   const overdueCustomerCount = customers.filter((c) => Number(c.balance) > 0).length;
@@ -96,14 +101,18 @@ export default function DashboardPage() {
   const revenueChange = pctChange(revenue30, revenuePrev30);
   const spendChange = pctChange(spend30, spendPrev30);
 
+  // Indian grouping (8,77,964 — not 905,934). Every other screen already formats money this
+  // way; the dashboard was calling toLocaleString() with no locale and following the browser.
+  const money = (value: number) => Math.round(Number(value) || 0).toLocaleString('en-IN');
+
   const kpis = [
-    { title: "Today's Sales", value: `₹${todaySales.toLocaleString()}`, change: salesChange.label, context: 'vs yesterday', positive: salesChange.positive, icon: ShoppingCart, color: 'var(--chart-amber)', colorBg: 'var(--amber-tint)' },
-    { title: "Today's Purchases", value: `₹${todayPurchases.toLocaleString()}`, change: purchasesChange.label, context: 'vs yesterday', positive: purchasesChange.positive, icon: ShoppingBag, color: 'var(--chart-blue)', colorBg: 'var(--color-info-bg)' },
-    { title: 'Revenue (30 Days)', value: `₹${revenue30.toLocaleString()}`, change: revenueChange.label, context: 'vs prior 30 days', positive: revenueChange.positive, icon: TrendingUp, color: 'var(--chart-green)', colorBg: 'var(--em-tint)' },
-    { title: 'Purchase Spend (30 Days)', value: `₹${spend30.toLocaleString()}`, change: spendChange.label, context: 'vs prior 30 days', positive: spend30 <= spendPrev30, icon: ShoppingBag, color: 'var(--chart-violet)', colorBg: 'rgba(109,40,217,0.1)' },
-    { title: 'Inventory Value', value: `₹${inventoryValue.toLocaleString()}`, change: `${products.length} parts`, context: 'at cost price', positive: true, icon: PackageCheck, color: 'var(--chart-pink)', colorBg: 'rgba(190,24,93,0.1)' },
-    { title: 'Total Receivables', value: `₹${totalReceivables.toLocaleString()}`, change: `${overdueCustomerCount} outstanding`, context: 'follow up soon', positive: overdueCustomerCount === 0, icon: Users, color: 'var(--chart-orange)', colorBg: 'rgba(194,65,12,0.1)' },
-    { title: 'Total Payables', value: `₹${totalPayables.toLocaleString()}`, change: `${payableSupplierCount} outstanding`, context: 'to suppliers', positive: payableSupplierCount === 0, icon: Clock, color: 'var(--chart-teal)', colorBg: 'rgba(14,116,144,0.1)' },
+    { title: "Today's Sales", value: `₹${money(todaySales)}`, change: salesChange.label, context: 'vs yesterday', positive: salesChange.positive, icon: ShoppingCart, color: 'var(--chart-amber)', colorBg: 'var(--amber-tint)' },
+    { title: "Today's Purchases", value: `₹${money(todayPurchases)}`, change: purchasesChange.label, context: 'vs yesterday', positive: purchasesChange.positive, icon: ShoppingBag, color: 'var(--chart-blue)', colorBg: 'var(--color-info-bg)' },
+    { title: 'Revenue (30 Days)', value: `₹${money(revenue30)}`, change: revenueChange.label, context: 'vs prior 30 days', positive: revenueChange.positive, icon: TrendingUp, color: 'var(--chart-green)', colorBg: 'var(--em-tint)' },
+    { title: 'Purchase Spend (30 Days)', value: `₹${money(spend30)}`, change: spendChange.label, context: 'vs prior 30 days', positive: spend30 <= spendPrev30, icon: ShoppingBag, color: 'var(--chart-violet)', colorBg: 'rgba(109,40,217,0.1)' },
+    { title: 'Inventory Value', value: `₹${money(inventoryValue)}`, change: `${products.length} parts`, context: 'at purchase-batch cost', positive: true, icon: PackageCheck, color: 'var(--chart-pink)', colorBg: 'rgba(190,24,93,0.1)' },
+    { title: 'Total Receivables', value: `₹${money(totalReceivables)}`, change: `${overdueCustomerCount} outstanding`, context: 'follow up soon', positive: overdueCustomerCount === 0, icon: Users, color: 'var(--chart-orange)', colorBg: 'rgba(194,65,12,0.1)' },
+    { title: 'Total Payables', value: `₹${money(totalPayables)}`, change: `${payableSupplierCount} outstanding`, context: 'to suppliers', positive: payableSupplierCount === 0, icon: Clock, color: 'var(--chart-teal)', colorBg: 'rgba(14,116,144,0.1)' },
     { title: 'Low Stock Items', value: `${lowStockProducts.length} parts`, change: lowStockProducts.length > 0 ? 'Action required' : 'All stocked', context: `${lowStockProducts.length} at or below minimum`, positive: lowStockProducts.length === 0, icon: AlertTriangle, color: 'var(--chart-red)', colorBg: 'var(--rose-tint)' },
   ];
 
@@ -114,9 +123,9 @@ export default function DashboardPage() {
   // mockup's GST filing reminder is left out entirely because no filing dates are stored.
   const unpaidAgeCutoff = isoDate(daysAgoDate(30));
   const agedUnpaidInvoices = invoices
-    .filter((inv) => Number(inv.total || 0) - Number(inv.paid || 0) > 0 && inv.date < unpaidAgeCutoff)
+    .filter((inv) => isInvoiceOpen(inv) && inv.date < unpaidAgeCutoff)
     .sort((a, b) => a.date.localeCompare(b.date));
-  const agedUnpaidAmount = agedUnpaidInvoices.reduce((t, inv) => t + (Number(inv.total || 0) - Number(inv.paid || 0)), 0);
+  const agedUnpaidAmount = agedUnpaidInvoices.reduce((t, inv) => t + invoiceBalanceDue(inv), 0);
   const agedUnpaidCustomers = Array.from(new Set(agedUnpaidInvoices.map((inv) => inv.customer).filter(Boolean)));
   const outOfStockProducts = products.filter((p) => Number(p.current_stock || 0) <= 0);
   // Parts that still have stock but have fallen to or under their own reorder level. Split out
@@ -138,7 +147,7 @@ export default function DashboardPage() {
           severity: 'Urgent',
           icon: Clock,
           title: `${plural(agedUnpaidInvoices.length, 'invoice')} unpaid for more than 30 days`,
-          detail: `₹${agedUnpaidAmount.toLocaleString()} still to collect from ${nameList(agedUnpaidCustomers)} · oldest is #${agedUnpaidInvoices[0].id} dated ${agedUnpaidInvoices[0].date}`,
+          detail: `₹${money(agedUnpaidAmount)} still to collect from ${nameList(agedUnpaidCustomers)} · oldest is #${agedUnpaidInvoices[0].id} dated ${agedUnpaidInvoices[0].date}`,
           href: '/customers',
           action: 'Follow up',
         }
@@ -173,9 +182,9 @@ export default function DashboardPage() {
           tone: 'info',
           severity: 'Outstanding',
           icon: Wallet,
-          title: `₹${totalPayables.toLocaleString()} owed to ${plural(payableSupplierCount, 'supplier')}`,
+          title: `₹${money(totalPayables)} owed to ${plural(payableSupplierCount, 'supplier')}`,
           detail: largestPayable
-            ? `Largest balance is ${largestPayable.name} at ₹${Number(largestPayable.balance || 0).toLocaleString()}`
+            ? `Largest balance is ${largestPayable.name} at ₹${money(Number(largestPayable.balance || 0))}`
             : 'Supplier balances carried forward on the purchases ledger',
           href: '/suppliers',
           action: 'Ledger',
@@ -185,10 +194,10 @@ export default function DashboardPage() {
 
   const recentActivities = useMemo(() => {
     const events: Array<{ date: string; title: string; desc: string; type: string }> = [];
-    for (const inv of invoices) events.push({ date: inv.date, title: `Invoice #${inv.id} generated`, desc: `${inv.customer} - ₹${Number(inv.total).toLocaleString()}`, type: 'sale' });
+    for (const inv of invoices) events.push({ date: inv.date, title: `Invoice #${inv.id} generated`, desc: `${inv.customer} - ₹${money(Number(inv.total))}`, type: 'sale' });
     for (const grn of grns) events.push({ date: grn.received_at.split(' ')[0] || grn.received_at, title: `Goods Received Note #${grn.id}`, desc: `${grn.supplier} - Ref ${grn.po_number}`, type: 'purchase' });
-    for (const po of purchaseOrders) events.push({ date: po.date, title: `Purchase Order #${po.id} sent`, desc: `${po.supplier} - ₹${Number(po.total).toLocaleString()}`, type: 'purchase' });
-    for (const q of quotations) events.push({ date: q.date, title: `Quotation #${q.id}`, desc: `${q.customer} - ₹${Number(q.total).toLocaleString()}`, type: 'quotation' });
+    for (const po of purchaseOrders) events.push({ date: po.date, title: `Purchase Order #${po.id} sent`, desc: `${po.supplier} - ₹${money(Number(po.total))}`, type: 'purchase' });
+    for (const q of quotations) events.push({ date: q.date, title: `Quotation #${q.id}`, desc: `${q.customer} - ₹${money(Number(q.total))}`, type: 'quotation' });
     for (const p of lowStockProducts) events.push({ date: today, title: 'Low Stock Alert', desc: `${p.name} (${p.part_number}) - ${p.current_stock} units left`, type: 'alert' });
     return events.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
   }, [invoices, grns, purchaseOrders, quotations, lowStockProducts, today]);
@@ -323,8 +332,8 @@ export default function DashboardPage() {
             {chartData.map((item, index) => (
               <div key={`${item.day}-${index}`} className="chart-column">
                 <div className="chart-bars">
-                  <div className="chart-bar sales-bar" style={{ height: `${(item.sale / chartMax) * 100}%` }} title={`Sales: ₹${item.sale.toLocaleString()}`} />
-                  <div className="chart-bar purchases-bar" style={{ height: `${(item.pur / chartMax) * 100}%` }} title={`Purchases: ₹${item.pur.toLocaleString()}`} />
+                  <div className="chart-bar sales-bar" style={{ height: `${(item.sale / chartMax) * 100}%` }} title={`Sales: ₹${money(item.sale)}`} />
+                  <div className="chart-bar purchases-bar" style={{ height: `${(item.pur / chartMax) * 100}%` }} title={`Purchases: ₹${money(item.pur)}`} />
                 </div>
                 <span>{item.day}</span>
               </div>
