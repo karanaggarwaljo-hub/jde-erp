@@ -2,6 +2,53 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-02 — Closed a side door into the database
+
+Nothing was broken and nothing was stolen. This is a lock that should have been on a door that
+was already bolted shut another way.
+
+The app talks to the database through a set of named operations — "save this invoice", "record
+this expense", "adjust this stock". Fifteen of those, including the main *save a sales invoice*
+one, were left open in a way that let anyone on the internet **call** them without signing in,
+using the public key that the shop website has to publish in its own pages.
+
+**They could call them, but they could not achieve anything.** Each one ran with the caller's own
+permissions, and the tables themselves refused every read and write from an unknown visitor. That
+was checked directly rather than assumed: an attempt to insert an invoice as an anonymous visitor
+was rejected by the database, and an anonymous visitor could see zero invoices. So no invoice
+could have been forged, no stock moved, no balance changed.
+
+What was wrong was that a *single* protection was doing all the work. If any one table ever had
+that protection switched off or loosened by mistake, there was nothing behind it. Now there are
+two independent locks instead of one, which is how the newer operations in the app were already
+set up — this brings the older ones in line with them.
+
+The sweep also turned up leftovers nobody knew were there: three old unused versions of *save a
+purchase* and two of *receive purchase stock*, still callable, plus a helper that exists in no
+project file at all. All are now closed off too.
+
+**The same was then done for the data tables themselves.** Eighteen of them — invoices, customers,
+products, suppliers, stock, expenses, purchase orders and the rest — were also still listed as
+readable and writable by an anonymous visitor on paper, again with the table's own protection
+being the only thing actually refusing them. Those listings are now removed too. The difference is
+visible from outside: asking the database for your invoices without signing in used to be turned
+away by the protection layer, and is now turned away one step earlier, for not being allowed to
+ask at all.
+
+The shop website is unaffected — the one operation and the one table it depends on were
+deliberately left alone, and the catalogue was confirmed afterwards still returning all five
+published parts. Saving invoices in the ERP is unaffected: the app signs in with a privileged key
+that keeps full access, confirmed by running the invoice-saving operation through that key and
+undoing it immediately.
+
+Two things were found and deliberately **not** changed, because they need a decision first: a set
+of twenty older `erp_` tables that appear to be built for a different kind of sign-in, and six
+unused tables left over from the template this project started from. Neither is referenced
+anywhere in the app.
+
+Recorded in `scripts/lock-down-jde-function-grants.sql` and
+`scripts/revoke-leftover-anon-table-grants.sql`.
+
 ## 2026-09-01 — When a customer settles by paying less
 
 Reported: sometimes a customer settles their payment by giving a lesser amount.
