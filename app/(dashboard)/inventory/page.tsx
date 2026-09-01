@@ -22,11 +22,12 @@ import {
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { useCompany } from '@/components/CompanyProvider';
-import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, isSpreadsheetFileName, type SheetForCostUpdate, type ImportedProduct } from '@/lib/client-import';
+import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, sheetFromScannedParts, fileToBase64, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
 import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { fifoCostLookup } from '@/lib/stock-value';
+import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
 
 type Product = {
   id: string;
@@ -473,10 +474,11 @@ export default function InventoryPage() {
   const beginImport = async (file: File) => {
     // A dropped file bypasses the picker's filter entirely, so the check has to happen here —
     // and say what IS accepted rather than just refusing.
-    if (!isSpreadsheetFileName(file.name)) {
+    const scannable = isScannableFileName(file.name, file.type);
+    if (!scannable && !isSpreadsheetFileName(file.name)) {
       setImportError(
-        `"${file.name}" isn't a spreadsheet this can read. Accepted formats: ${SPREADSHEET_EXTENSIONS.join(', ')}. ` +
-          'If it is a PDF or a photo of a supplier invoice, use Purchases → Import instead.'
+        `"${file.name}" can't be read. Drop a spreadsheet (${SPREADSHEET_EXTENSIONS.join(', ')}), ` +
+          'or a photo or PDF of a parts list.'
       );
       return;
     }
@@ -486,11 +488,45 @@ export default function InventoryPage() {
     try {
       // Read the file once, both ways. Neither reading writes anything, and having both up front
       // is what lets the dialog offer either job — and switch between them — without re-uploading.
-      const sheet = await readSheetForCostUpdate(file);
-      const { products: newParts, guessedFields } = await parseInventoryFile(file).catch(() => ({
-        products: [] as ImportedProduct[],
-        guessedFields: [] as string[],
-      }));
+      let sheet: SheetForCostUpdate;
+      let newParts: ImportedProduct[];
+      let guessedFields: string[] = [];
+
+      if (scannable) {
+        // Same size problem as the purchase-invoice scan: a phone photo is far past the platform's
+        // request limit once encoded, and is rejected before it reaches the app. Shrink first.
+        let base64: string;
+        let mimeType: string;
+        if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+          if (file.size > 4_000_000) {
+            throw new Error('This PDF is too large to read (over 4MB). Save it smaller, or photograph the page instead.');
+          }
+          base64 = await fileToBase64(file);
+          mimeType = 'application/pdf';
+        } else {
+          ({ base64, mimeType } = await resizeImageForUpload(file, { maxDimension: DOCUMENT_SCAN_DIMENSION }));
+        }
+
+        const res = await fetch('/api/inventory/scan-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ base64, mimeType }),
+        });
+        const body = (await parseJsonOrThrow(res, 'Could not read this document.')) as { items?: ScannedPart[] };
+        const items = Array.isArray(body.items) ? body.items : [];
+        if (items.length === 0) {
+          throw new Error('No parts could be read from this image. Make sure the list is in focus and the whole page is in frame.');
+        }
+        // Turned into the shapes a spreadsheet produces, so the preview, the column pickers, the
+        // matching and the tick boxes all work on a photo exactly as they do on a file.
+        ({ sheet, products: newParts } = sheetFromScannedParts(items));
+      } else {
+        sheet = await readSheetForCostUpdate(file);
+        ({ products: newParts, guessedFields } = await parseInventoryFile(file).catch(() => ({
+          products: [] as ImportedProduct[],
+          guessedFields: [] as string[],
+        })));
+      }
 
       const costColumnGuess = sheet.suggestedCostColumn ?? '';
       const idColumnGuess = sheet.suggestedIdColumn ?? sheet.columns[0] ?? '';
@@ -679,7 +715,8 @@ export default function InventoryPage() {
             <Upload size={28} />
             <p className="dropzone-title">Drop the file to import</p>
             <p className="dropzone-hint">
-              Spreadsheets only — {SPREADSHEET_EXTENSIONS.join(', ')}. You choose what it does next; nothing is saved yet.
+              A spreadsheet ({SPREADSHEET_EXTENSIONS.slice(0, 4).join(', ')}…), or a photo or PDF of a parts list.
+              You choose what it does next; nothing is saved yet.
             </p>
           </div>
         </div>
@@ -695,12 +732,12 @@ export default function InventoryPage() {
         <div className="flex gap-2">
           <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
             <Upload size={16} /> {importing ? 'Reading…' : 'Import from File'}
-            <input type="file" accept={SPREADSHEET_ACCEPT} hidden disabled={importing} onChange={handleFileImport} />
+            <input type="file" accept={`${SPREADSHEET_ACCEPT},${SCANNABLE_IMPORT_ACCEPT}`} hidden disabled={importing} onChange={handleFileImport} />
           </label>
           <button className="btn btn-primary" onClick={handleOpenAdd}>
             <Plus size={16} /> Add New Part
           </button>
-          <span className="text-muted text-sm" style={{ alignSelf: 'center' }}>or drop a file anywhere on this page</span>
+          <span className="text-muted text-sm" style={{ alignSelf: 'center' }}>or drop a spreadsheet, photo or PDF anywhere on this page</span>
         </div>
       </div>
 
