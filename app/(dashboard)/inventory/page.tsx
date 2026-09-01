@@ -21,6 +21,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { money, wholeMoney } from '@/lib/money';
 import { useCompany } from '@/components/CompanyProvider';
 import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, sheetFromScannedParts, fileToBase64, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
 import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatch } from '@/lib/cost-import';
@@ -74,8 +75,6 @@ const brandChipColor = (brand: string) => {
   return BRAND_CHIP_COLORS[hash % BRAND_CHIP_COLORS.length];
 };
 
-const money = (value: number) => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
-const wholeMoney = (value: number) => Math.round(Number(value || 0)).toLocaleString('en-IN');
 
 // One definition of "low" and "out" for the whole screen, so the KPI cards, the reorder alert,
 // the filter tabs and the row badges can never disagree with each other.

@@ -7,14 +7,8 @@ import { ArrowLeft, Printer } from 'lucide-react';
 import { useCompany } from '@/components/CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { getQuotation, type QuotationDetail } from '@/lib/client-quotations';
-
-// Copied from app/(dashboard)/sales/page.tsx (search `type Customer =` there) — that file is the
-// source of truth for this shape and doesn't export it.
-type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
-
-// Same Indian digit-grouping convention as the `money` helper in app/(dashboard)/sales/page.tsx and
-// the invoice print page, so every figure here reads identically to the rest of the app.
-const money = (value: number) => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+import { money } from '@/lib/money';
+import { type Customer } from '@/lib/sales-types';
 
 const STATUS_LABEL: Record<string, string> = {
   draft: 'Draft',
