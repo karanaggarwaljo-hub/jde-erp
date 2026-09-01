@@ -2,6 +2,40 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-01 — Fixed: returns were crediting customers too much
+
+Reported: the return isn't fully wired.
+
+Correct, and it was my omission. When per-item discounts and the GST inclusive/exclusive choice
+were added to invoices, credit notes were not updated to match — so a return calculated the credit
+the old way and **gave the customer back more than they ever paid**. Two separate ways:
+
+- **A part sold at a discount was credited at full price.** Your invoices use this — an item at
+  ₹7,170 discounted to ₹6,094.50 would have been credited the full ₹7,170.
+- **On a GST-included invoice the tax was added a second time**, on top of an amount that already
+  contained it.
+
+Both now credit exactly what was charged:
+
+                            invoice total   credited BEFORE   credited NOW
+    GST extra (18%)              2,124.00         2,360.00       2,124.00
+    GST included (18%)           1,800.00         2,360.00       1,800.00
+
+Returning an entire invoice now leaves exactly zero owing, whichever way it was priced. Checked
+against the live database with both kinds of invoice and undone immediately.
+
+**Part-returns are right too.** Returning 2 of 5 credits two units at the discounted rate, not the
+list rate.
+
+**The confirmation screen was showing the same wrong figure**, so you would have approved a number
+that was never going to be the credit. It now shows what each line was actually charged — and says
+"discounted from ₹7,170" where a line carried a discount — and the note underneath explains that
+the invoice's own discount and GST are applied on top, mentioning when GST comes out of the amount
+rather than being added to it.
+
+Nothing already recorded was altered. Existing credit notes keep the figures they were issued with;
+this changes what happens from now on.
+
 ## 2026-09-01 — Fixed: a backup-AI hiccup showing you a raw error instead of just working
 
 Reported: "Groq 400: Failed to validate JSON. Please adjust your prompt."

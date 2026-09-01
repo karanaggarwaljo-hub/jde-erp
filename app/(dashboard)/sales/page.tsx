@@ -365,7 +365,14 @@ export default function SalesPage() {
   const selectedReturnItems = returnableItems
     .map((item) => ({ invoice_item_id: item.invoice_item_id, qty: Math.min(item.returnable_qty, Math.max(0, Number(returnQuantities[item.invoice_item_id] ?? 0))) }))
     .filter((item) => Number.isInteger(item.qty) && item.qty > 0);
-  const returnItemValue = returnableItems.reduce((sum, item) => sum + (returnQuantities[item.invoice_item_id] ?? 0) * Number(item.unit_price), 0);
+  /** What one unit of this line was actually charged at — its list price less whatever discount
+   *  the line carried. The credit note is built from this, so the preview must be too. */
+  const returnNetRate = (item: ReturnableInvoiceItem) =>
+    Number(item.sold_qty) > 0 ? Number(item.line_total) / Number(item.sold_qty) : Number(item.unit_price);
+  const returnItemValue = returnableItems.reduce(
+    (sum, item) => sum + (returnQuantities[item.invoice_item_id] ?? 0) * returnNetRate(item),
+    0
+  );
 
   const openInvoice = (presetCustomer?: string) => {
     setEditingInvoice(null);
@@ -1402,7 +1409,7 @@ export default function SalesPage() {
           <div className="table-wrap"><table className="erp-table">
             <thead><tr><th>Item</th><th className="text-right">Sold</th><th className="text-right">Previously returned</th><th className="text-right">Available</th><th className="text-right">Return now</th></tr></thead>
             <tbody>{returnableItems.map((item) => <tr key={item.invoice_item_id}>
-              <td><strong>{item.name}</strong><div className="text-muted text-sm">{item.part_number} · ₹{Number(item.unit_price).toLocaleString()} each</div></td>
+              <td><strong>{item.name}</strong><div className="text-muted text-sm">{item.part_number} · ₹{returnNetRate(item).toLocaleString(undefined, { maximumFractionDigits: 2 })} each{Math.abs(returnNetRate(item) - Number(item.unit_price)) > 0.005 ? ` (discounted from ₹${Number(item.unit_price).toLocaleString()})` : ''}</div></td>
               <td className="text-right">{Number(item.sold_qty)}</td>
               <td className="text-right">{Number(item.returned_qty)}</td>
               <td className="text-right" style={{ fontWeight: 700 }}>{Number(item.returnable_qty)}</td>
@@ -1410,7 +1417,7 @@ export default function SalesPage() {
             </tr>)}</tbody>
           </table></div>
           <div className="form-group"><label className="form-label" htmlFor="sales-return-reason">Reason for return</label><input id="sales-return-reason" className="form-input" maxLength={500} placeholder="For example: damaged, wrong part, customer changed mind" value={returnReason} disabled={savingReturn} onChange={(event) => setReturnReason(event.target.value)} /></div>
-          <div className="alert alert-warning" role="status">The final credit note is calculated from the original invoice, including its discount and GST. The selected item value before those adjustments is ₹{returnItemValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}. Stock and customer balance will change only after confirmation.</div>
+          <div className="alert alert-warning" role="status">The selected items were charged ₹{returnItemValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}, after any discount on those lines. The credit note then applies this invoice&apos;s own discount and GST exactly as they were charged{returnCandidate.gst_mode === 'inclusive' ? ', with GST taken out of that amount rather than added to it' : ''}. Stock and customer balance will change only after confirmation.</div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingReturn} onClick={() => setReturnCandidate(null)}>Cancel</button><button type="button" className="btn btn-danger" disabled={savingReturn || selectedReturnItems.length === 0 || !returnReason.trim()} onClick={saveSalesReturn}>{savingReturn ? 'Creating credit note…' : 'Confirm Return & Credit'}</button></div>
       </div></div>}
