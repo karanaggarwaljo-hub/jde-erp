@@ -2,6 +2,52 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-08-30 — New: discount individual items on a sale, not just the whole bill
+
+Reported: the discount applies to the entire invoice value, but it should be possible to discount
+particular items.
+
+An invoice could only carry one discount percentage applied to everything on it. That cannot say
+"10% off the filters, full price on the pump", which is an ordinary thing to want — a customer
+negotiates on one line, not on the bill.
+
+**Every line on a sale now has its own Disc % box**, sitting between Rate and Amount where a
+discount is read on paper. Type a percentage and that line's amount drops immediately, with the
+original price shown struck through above it so the reduction is visible on the line itself rather
+than only in the totals.
+
+The invoice totals now show the work:
+
+    Gross amount                     2,500.00
+    Item discounts                    -200.00
+    Subtotal after item discounts    2,300.00
+    Whole-invoice discount (5%)       -115.00
+    Taxable value                    2,185.00
+    GST (18%)                          393.30
+    Total Payable                    2,578.30
+
+**The whole-invoice discount has not gone away** — it is still there, renamed so the two are not
+confused, and it now applies on top of any per-item discounts. Leave it at 0 to discount items
+only. The order matters and is fixed: each line is discounted first, then the whole-invoice
+discount comes off what remains, and GST is charged on that. Doing it the other way round would
+change the tax.
+
+The lines above only appear when you actually use item discounts, so an invoice without them looks
+and reads exactly as it always has.
+
+**On the printed invoice**, a Discount column appears showing the percentage and the rupees off
+each line, and the summary gains an "Item discounts" line — but only when the invoice uses them, so
+existing invoices print unchanged. Reopening a sale to edit it brings each line's discount back
+with it.
+
+Sales returns and credit notes needed no change and are already correct: they work from the amount
+actually charged for a line, which is now the discounted amount.
+
+Every existing invoice is untouched — all 17 recorded line items read as "no item discount", and
+their whole-invoice discounts behave exactly as before. Checked by saving a real invoice through
+the live database and undoing it immediately: a 10%-off line of 2 x 1,000 stored 1,800 against a
+2,000 gross, and the invoice total matched the arithmetic to the paisa.
+
 ## 2026-08-30 — One Import button again, and it now previews everything before saving
 
 The cost-price update arrived as a second button sitting next to Import from File, which was one
