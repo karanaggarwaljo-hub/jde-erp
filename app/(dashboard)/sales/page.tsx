@@ -564,7 +564,10 @@ export default function SalesPage() {
   // with nothing received and nothing added to the customer's balance, because nothing is owed
   // until the sale is confirmed.
   const saveDraftInvoice = async () => {
-    if (!activeCompany || editingInvoice) return;
+    // A live invoice is the one case that cannot be parked: it has already been billed and is
+    // already on a customer's account, so turning it back into a draft would silently erase a
+    // real debt. A brand-new sale and an existing draft can both be parked.
+    if (!activeCompany || (editingInvoice && !editingDraft)) return;
 
     const unmatchedLine = lines.find((line) => line.part.trim() && !partOptions.some((part) => part.value === line.part));
     if (unmatchedLine) {
@@ -581,12 +584,19 @@ export default function SalesPage() {
     setInvoiceError('');
     setSavingDraft(true);
     try {
+      // Re-parking an existing draft is an edit of that same record: the atomic save reverses
+      // the stock it had reserved and draws it again for the new lines, so the reservation always
+      // matches what the draft currently says. Both outstandings stay 0 — a draft never put
+      // anything on the customer's account, and it still does not.
+      const editingRow = editingDraft ? editingInvoice : null;
+      const oldCustomerRow = editingRow ? customers.find((c) => c.name === editingRow.customer) : undefined;
+
       const invoice = await saveSalesInvoice({
         companyId: activeCompany.id,
-        invoiceId: null,
-        isEdit: false,
+        invoiceId: editingRow ? editingRow.id : null,
+        isEdit: Boolean(editingRow),
         customerLabel,
-        oldCustomerId: null,
+        oldCustomerId: oldCustomerRow?.id ?? null,
         newCustomerId: selectedCustomer?.id ?? null,
         oldOutstanding: 0,
         newOutstanding: 0,
@@ -605,10 +615,15 @@ export default function SalesPage() {
       // No customer reload: parking a draft leaves every balance exactly as it was.
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadProducts()]);
       setShowInvoiceModal(false);
+      setEditingInvoice(null);
       setActiveTab('invoices');
       setPaymentFilter('drafts');
       setPage(1);
-      setFeedback(`${draftId} parked as a draft for ${customerLabel} — stock is reserved, nothing is billed yet.`);
+      setFeedback(
+        editingRow
+          ? `${draftId} saved — still a draft, nothing billed yet.`
+          : `${draftId} parked as a draft for ${customerLabel} — stock is reserved, nothing is billed yet.`
+      );
     } catch (error) {
       setInvoiceError(error instanceof Error ? error.message : 'Failed to park this sale as a draft — please check Sales and Inventory before retrying.');
     } finally {
@@ -1692,19 +1707,24 @@ export default function SalesPage() {
                   : newOutstanding > 0
                     ? <>₹{paise(paidAmount)} received now · <strong>₹{paise(newOutstanding)}</strong> stays outstanding{selectedCustomer ? ` on ${selectedCustomer.name}'s account` : ' on this invoice'}.</>
                     : 'Settled in full — nothing will be added to any outstanding balance.'}
+                {editingDraft && (
+                  <div style={{ marginTop: '4px' }}>
+                    That applies when you confirm it. <strong>Save &amp; Keep as Draft</strong> changes nothing on any account.
+                  </div>
+                )}
               </div>
               <button type="button" className="btn btn-secondary" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>Cancel</button>
-              {/* Parking is only offered on a new sale. An invoice that already exists is either
-                  a draft being confirmed or a live invoice being corrected — neither is something
-                  you park again. */}
-              {!editingInvoice && (
+              {/* Offered on a new sale and on a draft being edited, so a draft can be worked on
+                  over several sittings. Not offered on a live invoice: that is already billed and
+                  on a customer's account, and un-billing it here would erase a real debt. */}
+              {(!editingInvoice || editingDraft) && (
                 <button
                   type="button"
                   className="btn btn-secondary"
                   disabled={!total || savingInvoice || savingDraft}
                   onClick={saveDraftInvoice}
                 >
-                  {savingDraft ? 'Parking…' : 'Save as Draft'}
+                  {savingDraft ? 'Saving…' : editingDraft ? 'Save & Keep as Draft' : 'Save as Draft'}
                 </button>
               )}
               <button type="submit" className="btn btn-primary" disabled={!total || savingInvoice || savingDraft || creditSaleNeedsCustomer}>
