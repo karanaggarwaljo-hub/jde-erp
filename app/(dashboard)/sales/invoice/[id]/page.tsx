@@ -5,57 +5,10 @@ import { useParams } from 'next/navigation';
 import { ArrowLeft, Printer } from 'lucide-react';
 import { useCompany } from '@/components/CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { money } from '@/lib/money';
+import { type Customer, type Invoice, type InvoiceItem } from '@/lib/sales-types';
 import { invoiceBalanceDue, invoiceWrittenOff } from '@/lib/invoice-balance';
 
-// Copied verbatim from app/(dashboard)/sales/page.tsx (search `type Invoice =` / `type InvoiceItem =`
-// / `type Customer =` there) — that file is the source of truth for these shapes and doesn't export
-// them, so they're redeclared here rather than imported. Keep in sync if that file's shapes change.
-type Invoice = {
-  id: string;
-  company_id: string;
-  customer: string;
-  date: string;
-  items: number;
-  total: number;
-  paid: number;
-  /** What the customer was let off when they settled for less than the invoice. Kept apart from
-   *  `paid` so this document never claims money arrived that didn't. */
-  settlement_write_off: number;
-  status: string;
-  mode: string;
-  discount_percent: number;
-  discount_amount: number;
-  gst_percent?: number | null;
-  gst_amount?: number | null;
-  gst_mode?: string | null;
-};
-type InvoiceItem = {
-  id: string;
-  invoice_id: string;
-  product_id: string | null;
-  part_number: string;
-  name: string;
-  qty: number;
-  unit_price: number;
-  line_total: number;
-  discount_percent?: number;
-  discount_amount?: number;
-};
-type Customer = {
-  id: string;
-  company_id: string;
-  name: string;
-  phone: string;
-  email: string;
-  gstin: string;
-  address: string;
-  type: string;
-  balance: number;
-};
-
-// Same Indian digit-grouping convention as the `money` helper in app/(dashboard)/sales/page.tsx,
-// so every figure on the printed invoice reads identically to the rest of the app.
-const money = (value: number) => Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
 export default function SalesInvoicePrintPage() {
   const { id } = useParams<{ id: string }>();
