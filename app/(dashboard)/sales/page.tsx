@@ -45,7 +45,7 @@ type Product = { id: string; company_id: string; part_number: string; name: stri
 type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
 // gst_percent / gst_amount are on the invoice table but were never filled in by the atomic save,
 // so they are absent on every invoice written before this screen started recording them.
-type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string; discount_percent: number; discount_amount: number; gst_percent?: number | null; gst_amount?: number | null };
+type Invoice = { id: string; company_id: string; customer: string; date: string; items: number; total: number; paid: number; status: string; mode: string; discount_percent: number; discount_amount: number; gst_percent?: number | null; gst_amount?: number | null; gst_mode?: string | null };
 type Quotation = { id: string; company_id: string; customer: string; date: string; validity: string; total: number; status: string };
 type InvoiceItem = { id: string; invoice_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_price: number; line_total: number; discount_percent?: number; discount_amount?: number };
 type Payment = { id: string; company_id: string; customer_id: string; customer: string; date: string; amount: number; note: string; created_at: string };
@@ -199,6 +199,9 @@ export default function SalesPage() {
   const [lines, setLines] = useState<InvoiceLine[]>([]);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [gstPercent, setGstPercent] = useState(18);
+  // Whether the rates typed on the lines are before GST (tax added on top) or already include it
+  // (tax carved out of them). Only ever changes how the same typed numbers are read.
+  const [gstInclusive, setGstInclusive] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('unpaid');
   const [amountPaid, setAmountPaid] = useState(0);
   // Presentation-only view state: which payment slice of the list is on screen, and which page
@@ -231,8 +234,16 @@ export default function SalesPage() {
   const itemDiscountTotal = grossSubtotal - subtotal;
   const discountAmount = subtotal * (discountPercent / 100);
   const taxableAmount = subtotal - discountAmount;
-  const gstAmount = taxableAmount * (gstPercent / 100);
-  const total = taxableAmount + gstAmount;
+  // `taxableAmount` above is the amount left after both discounts. What it MEANS depends on the
+  // mode: priced exclusive it is the taxable value and tax is added to it; priced inclusive it is
+  // already the amount payable and the tax is inside it. Both are computed from the same figure,
+  // so switching the toggle never re-reads or rewrites anything the owner typed.
+  const gstAmount = gstInclusive
+    ? taxableAmount * (gstPercent / (100 + gstPercent))
+    : taxableAmount * (gstPercent / 100);
+  // The GST taxable value — what the tax is actually charged on — in both modes.
+  const netTaxableValue = gstInclusive ? taxableAmount - gstAmount : taxableAmount;
+  const total = gstInclusive ? taxableAmount : taxableAmount + gstAmount;
   const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
   const quoteSubtotal = quoteLines.reduce((sum, line) => sum + line.qty * line.price, 0);
   const quoteDiscountAmount = quoteSubtotal * (quoteDiscountPercent / 100);
@@ -343,6 +354,7 @@ export default function SalesPage() {
     setLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0, discount: 0 }] : []);
     setDiscountPercent(0);
     setGstPercent(18);
+    setGstInclusive(false);
     setInvoiceDate(todayIso());
     setPaymentStatus('unpaid');
     setAmountPaid(0);
@@ -356,7 +368,10 @@ export default function SalesPage() {
     setCustomer(invoice.customer === WALK_IN_CUSTOMER ? '' : invoice.customer);
     setInvoiceDate(invoice.date);
     setDiscountPercent(Number(invoice.discount_percent));
-    setGstPercent(18);
+    // Was hardcoded to 18, which silently changed the tax on any invoice not saved at 18%.
+    // Older invoices have no stored rate at all, so 18 stays the fallback for those only.
+    setGstPercent(invoice.gst_percent == null ? 18 : Number(invoice.gst_percent));
+    setGstInclusive(invoice.gst_mode === 'inclusive');
     setLines(items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
     const paid = Number(invoice.paid);
     const invoiceTotal = Number(invoice.total);
@@ -534,7 +549,11 @@ export default function SalesPage() {
   // completed sale into an error on screen.
   const rememberGstSplit = async (invoiceId: string, percent: number, amount: number) => {
     try {
-      await updateInvoiceRow(invoiceId, { gst_percent: percent, gst_amount: amount });
+      await updateInvoiceRow(invoiceId, {
+        gst_percent: percent,
+        gst_amount: amount,
+        gst_mode: gstInclusive ? 'inclusive' : 'exclusive',
+      });
     } catch (error) {
       console.error(`Could not record the GST split on ${invoiceId} — the invoice itself is saved.`, error);
     }
@@ -1564,6 +1583,25 @@ export default function SalesPage() {
                     <div className="form-group">
                       <label className="form-label">GST Rate (%)</label>
                       <input type="number" min="0" max="28" step="0.1" className="form-input" value={gstPercent} onChange={(event) => setGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} />
+                      <div className="flex gap-2 mt-2" role="group" aria-label="How the rates on the lines are priced">
+                        <button
+                          type="button"
+                          className={'btn btn-sm ' + (gstInclusive ? 'btn-secondary' : 'btn-primary')}
+                          onClick={() => setGstInclusive(false)}
+                        >GST extra</button>
+                        <button
+                          type="button"
+                          className={'btn btn-sm ' + (gstInclusive ? 'btn-primary' : 'btn-secondary')}
+                          onClick={() => setGstInclusive(true)}
+                        >GST included</button>
+                      </div>
+                      {/* States what the typed rates mean, which is the part that is easy to get
+                          wrong — the arithmetic below follows from it. */}
+                      <span className="text-muted text-sm">
+                        {gstInclusive
+                          ? 'Line rates already include GST — the tax is taken out of them, and the total is what you typed.'
+                          : 'Line rates are before GST — the tax is added on top of them.'}
+                      </span>
                       {/* Only claims intra/inter-state when both GSTINs are on file to compare. */}
                       <span className="text-muted text-sm">
                         {supplyKind === 'intra'
@@ -1613,8 +1651,14 @@ export default function SalesPage() {
                         ? <strong className="text-danger">-₹{paise(discountAmount)}</strong>
                         : <strong>₹{paise(0)}</strong>}
                     </div>
-                    <div className="report-line report-strong"><span>Taxable value</span><strong>₹{paise(taxableAmount)}</strong></div>
-                    <div className="report-line"><span className="text-muted">GST ({gstPercent}%)</span><strong>₹{paise(gstAmount)}</strong></div>
+                    {gstInclusive && (
+                      <div className="report-line"><span className="text-muted">Amount after discounts (GST included)</span><strong>₹{paise(taxableAmount)}</strong></div>
+                    )}
+                    <div className="report-line report-strong"><span>Taxable value</span><strong>₹{paise(netTaxableValue)}</strong></div>
+                    <div className="report-line">
+                      <span className="text-muted">GST ({gstPercent}%){gstInclusive ? ' — included above' : ''}</span>
+                      <strong>₹{paise(gstAmount)}</strong>
+                    </div>
                   </div>
 
                   <div className="flex gap-2 mt-2" style={{ flexWrap: 'wrap' }}>

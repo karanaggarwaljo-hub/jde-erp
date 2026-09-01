@@ -21,6 +21,9 @@ type Invoice = {
   mode: string;
   discount_percent: number;
   discount_amount: number;
+  gst_percent?: number | null;
+  gst_amount?: number | null;
+  gst_mode?: string | null;
 };
 type InvoiceItem = {
   id: string;
@@ -92,7 +95,18 @@ export default function SalesInvoicePrintPage() {
   // Only worth a column when the invoice actually uses per-line discounts.
   const anyLineDiscount = items.some((item) => Number(item.discount_percent) > 0);
   const lineDiscountTotal = items.reduce((sum, item) => sum + Number(item.discount_amount || 0), 0);
-  const gstAmount = items.length > 0 ? Number(invoice.total) - (subtotal - discountAmount) : 0;
+  const gstInclusive = invoice.gst_mode === 'inclusive';
+  // Prefer the tax figure the sale actually recorded. The subtraction below only reconstructs the
+  // tax correctly for GST-EXCLUSIVE pricing, where total = taxable + tax; on a GST-inclusive
+  // invoice the tax is already inside the total and that subtraction yields zero. Every invoice
+  // predating the stored split was priced exclusive, so the fallback stays right for those.
+  const storedGst = invoice.gst_amount == null ? null : Number(invoice.gst_amount);
+  const gstAmount = storedGst != null
+    ? storedGst
+    : items.length > 0 ? Number(invoice.total) - (subtotal - discountAmount) : 0;
+  // What the tax was charged on. Priced exclusive that is the discounted amount; priced inclusive
+  // it is that amount with the tax taken back out.
+  const netTaxableValue = (subtotal - discountAmount) - (gstInclusive ? gstAmount : 0);
 
   return (
     <div>
@@ -180,7 +194,15 @@ export default function SalesInvoicePrintPage() {
             <div className="report-line"><span>Discount ({Number(invoice.discount_percent).toFixed(0)}%)</span><span className="text-danger">-₹{money(discountAmount)}</span></div>
           )}
           {items.length > 0 && gstAmount > 0.005 && (
-            <div className="report-line"><span>GST</span><span>₹{money(gstAmount)}</span></div>
+            <>
+              <div className="report-line">
+                <span>Taxable value</span><span>₹{money(netTaxableValue)}</span>
+              </div>
+              <div className="report-line">
+                <span>GST{invoice.gst_percent == null ? '' : ` (${Number(invoice.gst_percent)}%)`}{gstInclusive ? ' — included in the prices above' : ''}</span>
+                <span>₹{money(gstAmount)}</span>
+              </div>
+            </>
           )}
           <div className="report-line report-strong"><span>Total</span><strong>₹{money(Number(invoice.total))}</strong></div>
           <div className="report-line"><span>Paid</span><strong className="text-success">₹{money(Number(invoice.paid))}</strong></div>
