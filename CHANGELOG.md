@@ -2,6 +2,44 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-01 — Supplier payments, and showing what a scan actually read
+
+Reported: the HSN code isn't being extracted from the invoice, and there's no way to say whether
+the supplier has been paid.
+
+**The HSN code was being read — you just couldn't see it.** Checked against your own data: the
+part from that KRISHNA HYDRAULICS invoice was created with part number 331/34392, HSN 84129090 and
+brand JCB, all read off the photo. None of it appeared on the review screen, so there was no way
+to tell it had worked, and no way to type it in on the occasions it doesn't.
+
+The review screen now shows all four — part no, HSN, OEM no and brand — under each item, and each
+one can be edited before you save. Correcting a part number there can also turn a "new part" into
+a match against something you already stock.
+
+**Payment to the supplier is now asked when you record a purchase from a file.** It never was: the
+dialog silently recorded every scanned invoice as unpaid credit, which added the whole amount to
+that supplier's balance even if you had paid on the spot. It now has the same Paid in Full /
+Partially Paid / Unpaid choice the manual purchase form has, with the balance shown before you
+commit.
+
+**And any purchase can now be paid afterwards.** Each order with money still owing has a Record
+Payment button. Until now the only payment control was on the Suppliers screen and it worked on
+the supplier as a whole — it spread your money across their oldest unpaid orders automatically,
+with no way to settle one particular invoice.
+
+The order's paid amount and what you owe that supplier now move together, in one step that either
+fully happens or doesn't happen at all. The old Suppliers-screen route updated each order and then
+the balance in separate calls, so an interruption partway could leave orders marked paid against a
+balance that was never reduced. It also refuses, with a plain message, to accept more than the
+order still owes, an amount of zero, or a second payment on something already settled.
+
+Checked against the live database with real orders and undone immediately: a part payment, a full
+payment, an over-payment, a zero, a negative, another company's order, and a double payment — the
+first two accepted with both numbers correct, the rest refused.
+
+**One thing to correct yourself:** PO-1009 (KRISHNA HYDRAULICS, ₹4,440.70) was recorded before
+this, so it is filed as unpaid. If you have paid it, use Record Payment on that row.
+
 ## 2026-09-01 — Fixed: returns were crediting customers too much
 
 Reported: the return isn't fully wired.
