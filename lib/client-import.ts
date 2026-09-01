@@ -601,3 +601,100 @@ export function extractCostRows(sheet: SheetForCostUpdate, costColumn: string, i
 
   return { rows, skippedNoCost, skippedNoIdentifier };
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * Scanned parts lists (a photo or PDF, rather than a spreadsheet)
+ *
+ * The AI returns rows; the import dialog already knows how to preview, match and apply rows. So
+ * rather than build a second dialog, a scan is turned into the SAME two shapes a spreadsheet
+ * produces — a sheet with named columns, and a list of products — and everything downstream
+ * (column pickers, cost matching, duplicate detection, tick boxes) works with no changes at all.
+ * ------------------------------------------------------------------------------------------- */
+
+export type ScannedPart = {
+  name: string;
+  part_number: string | null;
+  oem_number: string | null;
+  brand: string | null;
+  category: string | null;
+  hsn_code: string | null;
+  qty: number | null;
+  cost_price: number | null;
+  sale_price: number | null;
+  mrp: number | null;
+};
+
+/** Column headings for the synthetic sheet. Deliberately worded so the existing detection picks
+ *  them up unaided — "Cost Price" and "Part No" are already the strongest candidates it knows. */
+const SCAN_COLUMNS = {
+  part: 'Part No',
+  oem: 'OEM Number',
+  name: 'Name',
+  brand: 'Brand',
+  category: 'Category',
+  hsn: 'HSN Code',
+  qty: 'Qty',
+  cost: 'Cost Price',
+  sale: 'Sale Price',
+  mrp: 'MRP',
+} as const;
+
+const text = (value: string | null | undefined) => (value ?? '').toString().trim();
+const num = (value: number | null | undefined) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+
+export function sheetFromScannedParts(items: ScannedPart[]): {
+  sheet: SheetForCostUpdate;
+  products: ImportedProduct[];
+} {
+  const usable = items.filter((item) => text(item.name) || text(item.part_number));
+
+  const rows = usable.map((item) => ({
+    [SCAN_COLUMNS.part]: text(item.part_number),
+    [SCAN_COLUMNS.oem]: text(item.oem_number),
+    [SCAN_COLUMNS.name]: text(item.name),
+    [SCAN_COLUMNS.brand]: text(item.brand),
+    [SCAN_COLUMNS.category]: text(item.category),
+    [SCAN_COLUMNS.hsn]: text(item.hsn_code),
+    [SCAN_COLUMNS.qty]: item.qty ?? '',
+    [SCAN_COLUMNS.cost]: item.cost_price ?? '',
+    [SCAN_COLUMNS.sale]: item.sale_price ?? '',
+    [SCAN_COLUMNS.mrp]: item.mrp ?? '',
+  }));
+
+  // Identify by part number only when the scan actually read some; a list photographed without a
+  // code column would otherwise be matched on an empty column and find nothing.
+  const anyPartNumber = usable.some((item) => text(item.part_number));
+
+  const sheet: SheetForCostUpdate = {
+    rows,
+    columns: Object.values(SCAN_COLUMNS),
+    suggestedCostColumn: usable.some((item) => item.cost_price != null) ? SCAN_COLUMNS.cost : undefined,
+    suggestedIdColumn: anyPartNumber ? SCAN_COLUMNS.part : SCAN_COLUMNS.name,
+  };
+
+  const products: ImportedProduct[] = usable.map((item) => ({
+    part_number: text(item.part_number),
+    oem_number: text(item.oem_number),
+    hsn_code: text(item.hsn_code),
+    name: text(item.name) || text(item.part_number),
+    brand: text(item.brand),
+    category: text(item.category),
+    compatibility: '',
+    cost_price: num(item.cost_price),
+    mrp: num(item.mrp),
+    sale_price: num(item.sale_price),
+    current_stock: num(item.qty),
+    min_stock: 0,
+    location: '',
+  }));
+
+  return { sheet, products };
+}
+
+export const SCANNABLE_IMPORT_ACCEPT = 'application/pdf,image/*';
+
+/** True when this file should go to the scanner rather than the spreadsheet reader. */
+export function isScannableFileName(name: string, type: string): boolean {
+  if (type === 'application/pdf' || type.startsWith('image/')) return true;
+  return /\.(pdf|png|jpe?g|webp|heic|heif)$/i.test(name);
+}

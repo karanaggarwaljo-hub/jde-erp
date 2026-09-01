@@ -2,6 +2,41 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-01 — Inventory now reads a photo of a parts list
+
+Reported by dropping a WhatsApp photo onto Inventory and being told to go and use Purchases instead.
+
+That was a poor answer. Purchases reads a *supplier invoice* and records a purchase — it is not
+where you go to get a parts list into Inventory. So Inventory now reads photos and PDFs itself.
+
+**Drop a photo of a parts list, a stock sheet, a supplier's price list or a page from a register,
+and it reads it.** What comes back goes into exactly the same preview you already get from a
+spreadsheet: the list of rows, what will happen to each one, tick boxes to choose, and the same
+choice between updating the cost of parts you already have and adding new ones. Nothing is saved
+until you press the button.
+
+Tested on a deliberately awkward photo — camera noise, uneven lighting, an off-white page — of a
+four-row stock list. It read every row correctly: item code, description, brand, quantity and rate.
+Matched against your real inventory, three were recognised as parts you already stock (offered as
+cost updates) and the fourth as genuinely new. It worked out on its own which column was the cost
+and which identified the part.
+
+This is a different job from the invoice scan and is read differently. A price list often has no
+supplier, no date and no totals — it is a list of parts, and the useful columns are the ones
+Inventory actually keeps: code, name, brand, category, HSN, quantity, cost, selling price, MRP. It
+is told to leave anything blank that the page does not actually show, rather than carrying a value
+across from the row above.
+
+Practical notes:
+
+- **Photos are shrunk in your browser before being sent**, the same as the invoice scan, because a
+  phone photo is otherwise too large to reach the app at all.
+- **A PDF over 4MB is refused with a reason**, since a PDF cannot be shrunk that way — save it
+  smaller or photograph the page.
+- **If nothing readable is found**, it says so and suggests getting the whole page in frame and in
+  focus, rather than silently doing nothing.
+- Reading a photo takes a few seconds longer than a spreadsheet — it is doing real work.
+
 ## 2026-09-01 — Fixed: your file not appearing in the upload box, and drag-and-drop in Inventory
 
 Reported: trying to upload a document, and it doesn't come up.
