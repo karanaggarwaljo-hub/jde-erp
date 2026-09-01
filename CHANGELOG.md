@@ -2,6 +2,53 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-01 — New: bill with GST included in the price, or added on top
+
+Asked for: GST should work both inclusive and exclusive.
+
+Until now every sale assumed the rates you typed were **before** GST, and the tax was added on top.
+A lot of counter trade works the other way round — the price you quote is the price the customer
+pays, with the tax already inside it — and there was no way to record that.
+
+There are now two buttons beside the GST rate:
+
+- **GST extra** — the rates you type are before tax, and GST is added on top. This is what the app
+  has always done, and it stays the default, so nothing changes unless you choose otherwise.
+- **GST included** — the rates you type are what the customer pays. The tax is taken out of them,
+  and the total is exactly the figure you typed.
+
+A line under the buttons always states in words which one you are on, because that is the part that
+is easy to get wrong. Switching between them never alters a single number you typed — it only
+changes how those numbers are read.
+
+The same sale, priced both ways at 18%:
+
+                          GST extra      GST included
+    Amount after discounts  2,185.00         2,185.00
+    Taxable value           2,185.00         1,851.69
+    GST (18%)                 393.30           333.31
+    Total Payable           2,578.30         2,185.00
+
+Either way, taxable value plus GST comes back to the total exactly.
+
+The choice is saved with the invoice, so reopening it later brings it back, and the printed invoice
+shows the correct split — with "included in the prices above" written next to the GST line when
+that is what happened, so a customer is never left wondering whether tax was added twice.
+
+**Two related fixes:**
+
+- **Reopening an invoice to edit it used to reset GST to 18%**, whatever the invoice was actually
+  saved at. A sale billed at 5% silently became an 18% one the moment you opened it. It now comes
+  back at the rate it was saved with. (Invoices old enough to have no rate recorded still fall back
+  to 18%, since there is nothing else to go on.)
+- **The printed invoice worked its GST out backwards** from the total. That is only correct when
+  tax was added on top, and would have shown zero tax on a GST-included invoice. It now uses the
+  tax figure the sale actually recorded, keeping the old calculation only for invoices saved before
+  that figure was stored — all of which were priced GST-extra.
+
+Every existing invoice is untouched: all 10 read as GST-extra, which is how they were genuinely
+priced, and they print exactly as before.
+
 ## 2026-08-30 — New: discount individual items on a sale, not just the whole bill
 
 Reported: the discount applies to the entire invoice value, but it should be possible to discount
