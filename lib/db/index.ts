@@ -63,6 +63,13 @@ export async function getActiveCompanyId(): Promise<string | undefined> {
   return (data as { id: string } | null)?.id;
 }
 
+/** Server-only existence check; never returns another company's record. */
+export async function companyExists(id: string): Promise<boolean> {
+  const { data, error } = await getClient().from(supaTable('companies')).select('id').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data !== null;
+}
+
 export async function activateCompany(id: string): Promise<Record<string, unknown> | undefined> {
   const { error } = await getClient().rpc('jde_activate_company', { target_id: id });
   if (error) throw error;

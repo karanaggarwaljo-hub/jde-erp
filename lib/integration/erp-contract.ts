@@ -37,16 +37,7 @@ export function parseErpIntegrationRequest(
   request: Request,
   environment: ErpIntegrationEnvironment = process.env,
 ): ErpIntegrationQuery {
-  const configuredTokens = [environment.ERP_INTEGRATION_TOKEN, environment.ERP_INTEGRATION_PREVIOUS_TOKEN]
-    .filter((value): value is string => typeof value === 'string' && value.length > 0);
-  if (configuredTokens.length === 0 || configuredTokens.some((token) => token.length < MINIMUM_TOKEN_LENGTH)) {
-    throw new ErpIntegrationError(503, 'ERP integration authentication is not configured.');
-  }
-
-  const authorization = request.headers.get('authorization') ?? '';
-  const bearer = /^Bearer ([^\s,]{1,512})$/u.exec(authorization)?.[1];
-  const authenticated = bearer !== undefined && configuredTokens.some((token) => constantTimeEqual(bearer, token));
-  if (!authenticated) throw new ErpIntegrationError(401, 'Authentication required.');
+  authenticateErpIntegration(request, environment);
 
   const configuredWarehouseId = environment.ERP_INTEGRATION_WAREHOUSE_ID?.trim() || 'default';
   const unitOfMeasure = environment.ERP_INTEGRATION_UNIT_OF_MEASURE?.trim() || 'EA';
@@ -74,6 +65,22 @@ export function parseErpIntegrationRequest(
   }
 
   return { organizationId, productId, warehouseId, from, to, correlationId, unitOfMeasure };
+}
+
+export function authenticateErpIntegration(
+  request: Request,
+  environment: ErpIntegrationEnvironment = process.env,
+): void {
+  const configuredTokens = [environment.ERP_INTEGRATION_TOKEN, environment.ERP_INTEGRATION_PREVIOUS_TOKEN]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0);
+  if (configuredTokens.length === 0 || configuredTokens.some((token) => token.length < MINIMUM_TOKEN_LENGTH)) {
+    throw new ErpIntegrationError(503, 'ERP integration authentication is not configured.');
+  }
+
+  const authorization = request.headers.get('authorization') ?? '';
+  const bearer = /^Bearer ([^\s,]{1,512})$/u.exec(authorization)?.[1];
+  const authenticated = bearer !== undefined && configuredTokens.some((token) => constantTimeEqual(bearer, token));
+  if (!authenticated) throw new ErpIntegrationError(401, 'Authentication required.');
 }
 
 export function erpIntegrationHeaders(correlationId?: string): HeadersInit {
