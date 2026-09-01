@@ -1,0 +1,44 @@
+-- Applied to the live Supabase project on 2026-09-01 as migration
+--   sales_return_honours_line_discounts_and_gst_mode
+--
+-- A credit note was calculated from each line's LIST price and always added GST on top:
+--
+--   v_subtotal := sum(round(unit_price * qty, 2))
+--   v_gst      := round((v_subtotal - v_discount) * gst_percent / 100, 2)
+--   v_credit   := v_subtotal - v_discount + v_gst
+--
+-- Both assumptions stopped being true when invoices gained per-line discounts and GST-inclusive
+-- pricing, and both over-credit the customer:
+--
+--   line discounts  a part sold at 10% off was credited at its full price
+--   GST inclusive   tax already inside the line amount was added a second time
+--
+-- Measured on a 2 x 1000 line sold at 10% off (line_total 1800):
+--
+--                        invoice total   credit BEFORE   credit AFTER
+--   GST extra (18%)           2124.00        2360.00        2124.00
+--   GST included (18%)        1800.00        2360.00        1800.00
+--
+-- The fix credits what was actually CHARGED. line_total is already net of the line's own discount,
+-- so a proportional share of it is correct for a partial return as well:
+--
+--   v_net_rate := case when v_item.qty > 0 then v_item.line_total / v_item.qty else 0 end;
+--   v_subtotal := v_subtotal + round(v_net_rate * v_line.qty, 2);
+--
+-- and reads the tax the way the invoice was priced:
+--
+--   exclusive:  gst = round(after * r/100, 2)        credit = after + gst
+--   inclusive:  gst = round(after * r/(100+r), 2)    credit = after
+--
+-- jde_sales_return_items keeps unit_price as the price sold at, with line_total as the amount
+-- credited — mirroring how an invoice line already records both.
+--
+-- jde_get_sales_returnable_items needed no change: it already returns line_total, so the browser
+-- derives the real per-unit rate as line_total / sold_qty rather than showing the list price.
+--
+-- Verified against the live database, rolled back: two invoices with identical discounted lines,
+-- one priced GST-extra and one GST-inclusive, each returned in full. Both credits came back equal
+-- to their invoice total, leaving 0.00 owing.
+--
+-- The full function body is in the migration; only the arithmetic above changed. Grants were
+-- preserved by CREATE OR REPLACE (signature unchanged): postgres | service_role.
