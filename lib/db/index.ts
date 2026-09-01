@@ -114,6 +114,39 @@ export async function listRows(table: TableName, companyId?: string): Promise<Ar
   return (data as Array<Record<string, unknown>>) ?? [];
 }
 
+/** Every row of a table, across all companies, fetched in pages.
+ *
+ *  `listRows` above deliberately does a single unpaginated `select('*')`, which is silently
+ *  capped by Supabase's API "Max rows" setting (1000 by default) — fine for the screens that
+ *  use it, which never approach that, but not fine for a backup: a snapshot that quietly stops
+ *  at row 1000 looks complete and isn't. `jde_products` is already at 934 rows, so that cap is
+ *  close, not theoretical. Pages explicitly with `.range()` until a short page comes back.
+ *
+ *  Ordered by primary key so the page boundaries are stable — without an explicit order,
+ *  Postgres makes no promise that two `.range()` calls see rows in the same sequence, and a
+ *  concurrent write between pages could shuffle a row across a boundary and drop or double it. */
+export async function listAllRows(table: TableName): Promise<Array<Record<string, unknown>>> {
+  const pageSize = 1000;
+  const rows: Array<Record<string, unknown>> = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await getClient()
+      .from(supaTable(table))
+      .select('*')
+      .order(TABLES[table].primaryKey, { ascending: true })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    const page = (data as Array<Record<string, unknown>>) ?? [];
+    rows.push(...page);
+    // Advance by what actually came back, and stop only on a genuinely empty page — never on a
+    // short one. The server is free to return fewer rows than asked for (that "Max rows" setting
+    // again, which an owner can lower), and treating a short page as the last page would end the
+    // loop early and hand back a partial table that looks whole.
+    if (page.length === 0) return rows;
+    offset += page.length;
+  }
+}
+
 export async function insertRow(table: TableName, row: Record<string, unknown>): Promise<Record<string, unknown>> {
   const def = TABLES[table];
   const primaryKeyValue = row[def.primaryKey] ?? randomUUID();
@@ -739,6 +772,56 @@ export async function uploadCatalogImage(catalogId: string, base64: string, mime
   if (error) throw error;
   const { data } = getClient().storage.from(CATALOG_IMAGE_BUCKET).getPublicUrl(path);
   return data.publicUrl;
+}
+
+/** Where daily database snapshots live. Deliberately a PRIVATE bucket, unlike jde-catalog-images
+ *  next to it — a snapshot is every row of every table, so a public URL would be the whole
+ *  business readable by anyone who guessed a filename. Nothing here is ever served directly;
+ *  downloads go through a short-lived signed URL minted for an owner who already authenticated. */
+const BACKUP_BUCKET = 'jde-backups';
+
+/** `created_at` is whatever Storage recorded, which its own types allow to be null — callers
+ *  decide what to do about that rather than having a made-up timestamp handed to them. */
+export type StoredBackup = { name: string; size_bytes: number; created_at: string | null };
+
+export async function listBackupObjects(): Promise<StoredBackup[]> {
+  const { data, error } = await getClient()
+    .storage.from(BACKUP_BUCKET)
+    .list('', { limit: 1000, sortBy: { column: 'created_at', order: 'desc' } });
+  if (error) throw error;
+  return (data ?? [])
+    // Supabase returns a zero-byte `.emptyFolderPlaceholder` entry for an empty bucket, and any
+    // sub-prefix would appear as a metadata-less row — both are filtered out by this check.
+    .filter((object) => object.name.endsWith('.json') && object.metadata)
+    .map((object) => ({
+      name: object.name,
+      size_bytes: Number(object.metadata?.size ?? 0),
+      created_at: object.created_at,
+    }));
+}
+
+export async function uploadBackupObject(name: string, contents: string): Promise<void> {
+  const { error } = await getClient()
+    .storage.from(BACKUP_BUCKET)
+    .upload(name, contents, { contentType: 'application/json', upsert: true });
+  if (error) throw error;
+}
+
+export async function removeBackupObjects(names: string[]): Promise<void> {
+  if (names.length === 0) return;
+  const { error } = await getClient().storage.from(BACKUP_BUCKET).remove(names);
+  if (error) throw error;
+}
+
+/** A one-off URL the browser can download a snapshot from, valid for `expiresInSeconds`.
+ *  Short-lived on purpose: the URL itself is the only credential once it exists, so it should
+ *  outlive the click that created it by as little as possible. */
+export async function createBackupSignedUrl(name: string, expiresInSeconds: number): Promise<string> {
+  const { data, error } = await getClient()
+    .storage.from(BACKUP_BUCKET)
+    .createSignedUrl(name, expiresInSeconds, { download: name });
+  if (error) throw error;
+  return data.signedUrl;
 }
 
 /* ---------------------------------------------------------------------------------------------
