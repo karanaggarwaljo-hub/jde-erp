@@ -21,7 +21,7 @@ import {
   ChevronRight,
   ArrowRight,
 } from 'lucide-react';
-import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_EXTENSIONS, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
+import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_ACCEPT, isSpreadsheetFileName, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
 import { matchImportedLine, normalizeImportText, planFieldUpdates, type LineMatch, type MatchableProduct } from '@/lib/import-matching';
 import { savePurchase, receivePurchaseStock } from '@/lib/client-purchases';
 import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-purchase-returns';
@@ -101,7 +101,7 @@ function todayIso() {
 }
 
 function isSpreadsheetFile(file: File) {
-  return SPREADSHEET_EXTENSIONS.some((ext) => file.name.toLowerCase().endsWith(ext));
+  return isSpreadsheetFileName(file.name);
 }
 
 function isScannableFile(file: File) {
@@ -718,7 +718,7 @@ export default function PurchasesPage() {
         <div className="flex gap-2">
           <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
             <Upload size={16} /> {importing ? 'Reading file…' : 'Import from File'}
-            <input type="file" accept=".csv,.xls,.xlsx,.pdf,image/*" hidden disabled={importing} onChange={handleImportFile} />
+            <input type="file" accept={`${SPREADSHEET_ACCEPT},.pdf,image/*`} hidden disabled={importing} onChange={handleImportFile} />
           </label>
           <button className="btn btn-primary" onClick={openPurchaseModal}><Plus size={16} /> Record Purchase</button>
         </div>

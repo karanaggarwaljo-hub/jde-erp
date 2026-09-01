@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ChangeEvent, useRef, useState } from 'react';
+import { ChangeEvent, DragEvent, useEffect, useRef, useState } from 'react';
 import {
   Plus,
   Search,
@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { useCompany } from '@/components/CompanyProvider';
-import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, type SheetForCostUpdate, type ImportedProduct } from '@/lib/client-import';
+import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, isSpreadsheetFileName, type SheetForCostUpdate, type ImportedProduct } from '@/lib/client-import';
 import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
@@ -155,6 +155,8 @@ export default function InventoryPage() {
   // Row numbers the owner has unticked. Storing exclusions rather than selections means a row
   // that appears after changing a column is included by default instead of silently skipped.
   const [excludedRows, setExcludedRows] = useState<Set<number>>(new Set());
+  const [draggingFile, setDraggingFile] = useState(false);
+  const dragDepth = useRef(0);
   const [applyingCosts, setApplyingCosts] = useState(false);
   const [costProgress, setCostProgress] = useState(0);
   const [suggesting, setSuggesting] = useState(false);
@@ -466,10 +468,18 @@ export default function InventoryPage() {
     }
   };
 
-  const handleFileImport = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
+  /** Everything a chosen file goes through, shared by the picker and by drag-and-drop so the two
+   *  can never behave differently. */
+  const beginImport = async (file: File) => {
+    // A dropped file bypasses the picker's filter entirely, so the check has to happen here —
+    // and say what IS accepted rather than just refusing.
+    if (!isSpreadsheetFileName(file.name)) {
+      setImportError(
+        `"${file.name}" isn't a spreadsheet this can read. Accepted formats: ${SPREADSHEET_EXTENSIONS.join(', ')}. ` +
+          'If it is a PDF or a photo of a supplier invoice, use Purchases → Import instead.'
+      );
+      return;
+    }
     setImportError('');
     setFeedback('');
     setImporting(true);
@@ -517,6 +527,73 @@ export default function InventoryPage() {
       setImporting(false);
     }
   };
+
+  const handleFileImport = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Cleared before the await so picking the same file twice in a row still fires onChange.
+    event.target.value = '';
+    if (file) void beginImport(file);
+  };
+
+  // Only react to an actual file being dragged in — dragging selected text or a link across the
+  // page should not put the screen into a drop state.
+  const dragCarriesFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files');
+
+  const onDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragCarriesFiles(event)) return;
+    event.preventDefault();
+    dragDepth.current += 1;
+    setDraggingFile(true);
+  };
+
+  const onDragOver = (event: DragEvent<HTMLDivElement>) => {
+    // Without preventDefault here the browser refuses the drop and opens the file instead.
+    if (dragCarriesFiles(event)) event.preventDefault();
+  };
+
+  const onDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragCarriesFiles(event)) return;
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setDraggingFile(false);
+    }
+  };
+
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!dragCarriesFiles(event)) return;
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDraggingFile(false);
+    if (importing) return;
+    const file = event.dataTransfer?.files?.[0];
+    if (file) void beginImport(file);
+  };
+
+  // A file dropped just outside the zone — on the sidebar, or the margin beside it — would
+  // otherwise make the browser navigate away to that file, losing whatever was on screen. Swallow
+  // those so a near miss simply does nothing. The zone's own handlers still run first and are
+  // unaffected, because they stop the event before it reaches the window.
+  useEffect(() => {
+    const swallow = (event: globalThis.DragEvent) => {
+      if (!Array.from(event.dataTransfer?.types ?? []).includes('Files')) return;
+      event.preventDefault();
+    };
+    const clear = () => {
+      dragDepth.current = 0;
+      setDraggingFile(false);
+    };
+    window.addEventListener('dragover', swallow);
+    window.addEventListener('drop', swallow);
+    window.addEventListener('drop', clear);
+    window.addEventListener('dragend', clear);
+    return () => {
+      window.removeEventListener('dragover', swallow);
+      window.removeEventListener('drop', swallow);
+      window.removeEventListener('drop', clear);
+      window.removeEventListener('dragend', clear);
+    };
+  }, []);
 
   const applyNewParts = async (chosen: ImportedProduct[]) => {
     if (!costSheet) return;
@@ -589,7 +666,25 @@ export default function InventoryPage() {
     : '';
 
   return (
-    <div>
+    <div
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      style={{ position: 'relative', minHeight: '60vh' }}
+    >
+      {draggingFile && (
+        <div className="dropzone-overlay" role="status" aria-live="polite">
+          <div className="dropzone-card">
+            <Upload size={28} />
+            <p className="dropzone-title">Drop the file to import</p>
+            <p className="dropzone-hint">
+              Spreadsheets only — {SPREADSHEET_EXTENSIONS.join(', ')}. You choose what it does next; nothing is saved yet.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="page-header">
         <div>
@@ -599,12 +694,13 @@ export default function InventoryPage() {
         </div>
         <div className="flex gap-2">
           <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
-            <Upload size={16} /> {importing ? 'Importing…' : 'Import from File'}
-            <input type="file" accept=".csv,.xls,.xlsx" hidden disabled={importing} onChange={handleFileImport} />
+            <Upload size={16} /> {importing ? 'Reading…' : 'Import from File'}
+            <input type="file" accept={SPREADSHEET_ACCEPT} hidden disabled={importing} onChange={handleFileImport} />
           </label>
           <button className="btn btn-primary" onClick={handleOpenAdd}>
             <Plus size={16} /> Add New Part
           </button>
+          <span className="text-muted text-sm" style={{ alignSelf: 'center' }}>or drop a file anywhere on this page</span>
         </div>
       </div>
 

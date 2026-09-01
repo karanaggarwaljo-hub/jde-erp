@@ -2,6 +2,41 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-01 — Fixed: your file not appearing in the upload box, and drag-and-drop in Inventory
+
+Reported: trying to upload a document, and it doesn't come up.
+
+Your file was almost certainly there — greyed out and unselectable. The upload box was only willing
+to show three kinds of spreadsheet (`.csv`, `.xls`, `.xlsx`), so anything else looked like it did
+not exist. The most common one to hit is `.xlsm`: Excel switches a workbook to that the moment it
+contains a macro, and nothing about the data changes.
+
+**The app could always read far more than it offered to.** Tested by making one file of each kind
+and putting it through the real importer — all ten read perfectly, columns and all:
+
+    .csv  .xls  .xlsx  .xlsm  .xlsb  .ods  .fods  .txt  .tsv  .dif
+
+The upload box now offers exactly that list, and the list is generated from the same place the
+importer checks against, so the two can never drift apart again.
+
+**And you can now drag a file straight onto the Inventory page.** Anywhere on it — no need to find
+the button. The screen shows a "Drop the file to import" panel while you are dragging, and letting
+go opens the same preview you get from the button, so you still choose whether it updates costs or
+adds new parts, and still see exactly what will change before anything is saved.
+
+Two details that make it behave properly rather than just work:
+
+- **Dropping slightly off-target no longer loses your place.** Without this, letting go over the
+  side menu makes the browser abandon the app and open the raw file. A near miss now simply does
+  nothing.
+- **Dropping something it genuinely can't read says so, and says what to do.** A PDF or a photo of
+  a supplier invoice is pointed at Purchases → Import, which is the screen that reads those.
+
+Verified with 12 new automated tests (55 in total) covering every offered format end to end, plus
+odd filenames — capital letters in the extension, dots and spaces in the name, and a `report.xlsx.pdf`
+that must still be refused. The drag-and-drop itself needs a signed-in browser to click through, so
+that part is worth a quick try at your end.
+
 ## 2026-09-01 — Quotations get per-item discounts and the GST inclusive/exclusive choice too
 
 Asked for: the same treatment the sales invoice just had.
