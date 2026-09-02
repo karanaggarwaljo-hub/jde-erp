@@ -11,6 +11,7 @@ import { buildCatalogImagePrompt } from '@/lib/catalogPrompt';
 import { canPublish, catalogDisplayStatus, checkInventoryDrift, computeAvailabilityFromStock, missingRequiredFields, type CatalogProduct, type ReferenceCandidate } from '@/lib/catalogTypes';
 
 type Product = { id: string; name: string; current_stock: number; cost_price: number; sale_price: number };
+type UploadedReference = { base64: string; mimeType: string; name: string };
 
 const AVAILABILITY_LABEL: Record<CatalogProduct['availability'], string> = {
   in_stock: 'In Stock', out_of_stock: 'Out of Stock', contact_for_availability: 'Contact for Availability',
@@ -47,6 +48,7 @@ export default function CatalogAdminDetailPage() {
   const [promptCopyError, setPromptCopyError] = useState('');
   const [imageBusy, setImageBusy] = useState(false);
   const [imageError, setImageError] = useState('');
+  const [uploadedReference, setUploadedReference] = useState<UploadedReference | null>(null);
 
   const [descBusy, setDescBusy] = useState(false);
   const [descError, setDescError] = useState('');
@@ -73,7 +75,10 @@ export default function CatalogAdminDetailPage() {
       description: row.description || '',
     });
     setReferenceQuery(row.reference_query || [row.title, row.brand, row.part_number, row.oem_number].filter(Boolean).join(' '));
-    setPromptText(row.generated_prompt || '');
+    setPromptText(buildCatalogImagePrompt({
+      name: row.title || '', part_number: row.part_number || '', oem_number: row.oem_number || '',
+      brand: row.brand || '', category: row.category || '', compatibility: row.compatibility || '',
+    }));
     setReviewer(row.reviewer || '');
     if (row.generated_description) {
       setDescDraft({
@@ -174,15 +179,37 @@ export default function CatalogAdminDetailPage() {
     setImageBusy(true);
     setImageError('');
     try {
+      if (!uploadedReference) throw new Error('Select a real product reference photo first.');
       const res = await fetch('/api/ai-catalog-generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ catalogId: row.id, prompt: promptText, referenceImageUrl: row.selected_reference_url }),
+        body: JSON.stringify({
+          catalogId: row.id,
+          prompt: promptText,
+          referenceImage: { base64: uploadedReference.base64, mimeType: uploadedReference.mimeType },
+        }),
       });
       await parseJsonOrThrow(res, 'Image generation failed.');
       await reload();
     } catch (err) {
       setImageError(err instanceof Error ? err.message : 'Image generation failed.');
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
+  const selectProductReference = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setImageBusy(true);
+    setImageError('');
+    try {
+      const { base64, mimeType } = await resizeImageForUpload(file);
+      setUploadedReference({ base64, mimeType, name: file.name });
+    } catch (err) {
+      setUploadedReference(null);
+      setImageError(err instanceof Error ? err.message : 'Could not prepare the reference photo.');
     } finally {
       setImageBusy(false);
     }
@@ -402,6 +429,9 @@ export default function CatalogAdminDetailPage() {
       <div className="card mb-6">
         <div className="card-header"><h3 className="card-title">Product Image</h3></div>
         <div className="p-4 flex flex-col gap-4">
+          <div className="alert alert-info" role="status">
+            <strong>Jai Durga Catalogue Style</strong> — every image gets a different clean-workshop background while keeping the same metal-workbench, neutral-lighting and 16:9 visual style.
+          </div>
           <div className="form-group">
             <label className="form-label">Image Prompt</label>
             <textarea className="form-input" rows={8} style={{ fontFamily: 'monospace', fontSize: '12px' }} value={promptText} onChange={(e) => setPromptText(e.target.value)} />
@@ -427,16 +457,18 @@ export default function CatalogAdminDetailPage() {
               <div className="empty-state" style={{ width: '160px', height: '160px' }}><p className="empty-state-desc">No image yet</p></div>
             )}
             <div className="flex flex-col gap-2">
-              <button className="btn btn-primary" disabled={imageBusy || !promptText.trim()} onClick={generateImageWithAi}>
+              <label className="btn btn-secondary" style={{ cursor: imageBusy ? 'not-allowed' : 'pointer' }}>
+                <Upload size={16} /> Select Product Reference Photo
+                <input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={imageBusy} onChange={selectProductReference} />
+              </label>
+              <span style={{ fontSize: '12px', color: uploadedReference ? 'var(--color-success)' : 'var(--text-muted)' }}>
+                {uploadedReference ? `${uploadedReference.name} is ready.` : 'Required for AI generation. The product will be preserved and placed on the fixed workshop background.'}
+              </span>
+              <button className="btn btn-primary" disabled={imageBusy || !promptText.trim() || !uploadedReference} onClick={generateImageWithAi}>
                 <Sparkles size={16} /> {imageBusy ? 'Working…' : 'Generate with AI'}
               </button>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                {row.selected_reference_url
-                  ? 'Will use your selected reference photo as a visual guide.'
-                  : 'No reference photo selected — pick one above for a closer match, or it\'ll generate from the text description alone.'}
-              </span>
               <label className="btn btn-secondary" style={{ cursor: imageBusy ? 'not-allowed' : 'pointer' }}>
-                <Upload size={16} /> Upload Real Photo
+                <Upload size={16} /> Use Real Photo Without AI
                 <input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={imageBusy} onChange={uploadImage} />
               </label>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Uploading a real photo is always the most accurate option.</span>

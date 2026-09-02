@@ -11,12 +11,21 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const MAX_REFERENCE_IMAGE_BYTES = 8 * 1024 * 1024;
+const SUPPORTED_REFERENCE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
-/** Best-effort fetch of a reference image found via ai-catalog-reference-search, so it can be
- *  passed to Gemini as visual grounding instead of generating blind from text alone. Never
- *  throws — a broken/oversized/non-image link just means generation falls back to text-only,
- *  same as if no reference had been selected. The fetched bytes are used for this one request
- *  and never stored — only the newly generated image gets uploaded/published. */
+type ReferenceImagePayload = { base64?: unknown; mimeType?: unknown };
+
+function referenceImageFromPayload(value: unknown): { base64: string; mimeType: string } | null {
+  if (!value || typeof value !== 'object') return null;
+  const { base64, mimeType } = value as ReferenceImagePayload;
+  if (typeof base64 !== 'string' || typeof mimeType !== 'string' || !SUPPORTED_REFERENCE_TYPES.has(mimeType)) return null;
+  const bytes = Buffer.from(base64, 'base64');
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_REFERENCE_IMAGE_BYTES) return null;
+  return { base64, mimeType };
+}
+
+/** Best-effort fetch for legacy references selected through web search. Generation now fails
+ *  closed if this cannot be fetched instead of silently switching to text-only generation. */
 async function fetchReferenceImageAsBase64(url: string): Promise<{ base64: string; mimeType: string } | null> {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
@@ -44,7 +53,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { catalogId, prompt, referenceImageUrl } = await request.json();
+  const { catalogId, prompt, referenceImage, referenceImageUrl } = await request.json();
   if (typeof catalogId !== 'string' || !catalogId) {
     return Response.json({ error: 'catalogId is required' }, { status: 400 });
   }
@@ -54,33 +63,35 @@ export async function POST(request: Request) {
 
   try {
     const ai = new GoogleGenAI({ apiKey });
-    const reference = typeof referenceImageUrl === 'string' && referenceImageUrl
+    const uploadedReference = referenceImageFromPayload(referenceImage);
+    const reference = uploadedReference || (typeof referenceImageUrl === 'string' && referenceImageUrl
       ? await fetchReferenceImageAsBase64(referenceImageUrl)
-      : null;
-
+      : null);
+    if (!reference) {
+      const reason = 'Upload a real product reference photo before generating the catalogue image.';
+      await updateRow('catalog_products', catalogId, { image_status: 'failed', generation_error: reason });
+      return Response.json({ error: reason }, { status: 422 });
+    }
     // The dedicated Imagen models/generateImages() API is being retired (shutting down
     // 2026-08-17) — Google's migration guidance is gemini-2.5-flash-image ("Nano Banana") via
     // the regular generateContent() call instead, which returns the image as an inline part
     // rather than a generatedImages[] response. Free tier, same GEMINI_API_KEY as everything else.
-    // When a reference photo was found and picked in Reference Search, it's attached here so the
-    // model has an actual visual guide for the real part's shape/proportions instead of guessing
-    // from text alone — the photo itself is only ever used for this one request, never stored.
-    const contents = reference
-      ? createUserContent([
-          `${prompt}\n\nA reference photo of a similar real part is attached below — use it as a visual guide for ` +
-            'the actual shape, proportions, and material of this part. Do not copy any text, logos, watermarks, ' +
-            'pricing, or background/props visible in the reference photo itself.',
-          createPartFromBase64(reference.base64, reference.mimeType),
-        ])
-      : prompt;
+    // The exact uploaded product photo is attached for product fidelity. The workshop scene is
+    // intentionally regenerated on every request within the controlled Jai Durga visual style.
+    const contents = createUserContent([
+      `${prompt}\n\nImage 1 is the exact product reference. Change only its surroundings: preserve the product, ` +
+        'including every visible label, logo, marking, colour, component and proportion. Create a newly composed clean ' +
+        'industrial workshop background for this request while following the specified Jai Durga catalogue style. ' +
+        'Do not redraw, reinterpret, substitute or add to the product. Return one finished catalogue photograph only.',
+      createPartFromBase64(reference.base64, reference.mimeType),
+    ]);
 
     const response = await ai.models.generateContent({
       model: process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
       contents,
-      // Catalog photos need a wide banner shape (1600x600, ~8:3) — 21:9 is the closest ratio
-      // the API actually supports (a fixed list, no arbitrary custom ratio), paired with the
-      // literal pixel target already stated in the prompt text itself for extra signal.
-      config: { imageConfig: { aspectRatio: '21:9' } },
+      // The public catalogue cards use a standard landscape crop. Keeping generation at 16:9
+      // avoids the excessive empty space and inconsistent product scale caused by 21:9.
+      config: { imageConfig: { aspectRatio: '16:9' } },
     });
 
     if (response.promptFeedback?.blockReason) {

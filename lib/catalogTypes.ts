@@ -60,18 +60,15 @@ export function missingRequiredFields(row: CatalogProduct): string[] {
   return missing;
 }
 
-/** Computes the PRD's 7-label catalog status from the two stored axes (publication_status,
- *  image_status) plus whether a reference has been picked — see plan decision #1: the DB keeps
- *  two independent axes rather than one flat enum, and this derives the display label from them.
- *  A missing reference is a soft nudge only (not in the PRD's required-fields list), so it's
- *  checked after the image, not before. */
+/** Computes the catalogue status from the two stored axes (publication_status and image_status).
+ *  Product-reference files are intentionally used only for one generation request, so their
+ *  presence is enforced by the generator rather than persisted as catalogue-row state. */
 export function catalogDisplayStatus(row: CatalogProduct): { label: string; cls: string } {
   if (row.publication_status === 'published') return { label: 'Published', cls: 'badge-success' };
   if (row.publication_status === 'unpublished') return { label: 'Unpublished', cls: 'badge-muted' };
   if (row.publication_status === 'archived') return { label: 'Archived', cls: 'badge-muted' };
   if (missingRequiredFields(row).length > 0) return { label: 'Draft', cls: 'badge-muted' };
   if (row.image_status !== 'ready') return { label: 'Needs Image', cls: 'badge-warning' };
-  if (!row.selected_reference_url) return { label: 'Needs Reference', cls: 'badge-warning' };
   return { label: 'Needs Review', cls: 'badge-info' };
 }
 

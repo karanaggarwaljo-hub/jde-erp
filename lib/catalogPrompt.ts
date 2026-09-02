@@ -10,7 +10,7 @@ export function buildCatalogImagePrompt(fields: {
   compatibility: string;
 }): string {
   const fallback = (value: string) => (value && value.trim() ? value.trim() : 'Not specified');
-  return `Create a clean commercial product catalog image of a heavy-machinery spare part.
+  return `Create a clean commercial catalogue image using the exact product shown in the supplied reference photo.
 
 Product name: ${fallback(fields.name)}
 Part number: ${fallback(fields.part_number)}
@@ -19,8 +19,8 @@ Brand: ${fallback(fields.brand)}
 Category: ${fallback(fields.category)}
 Compatible machines: ${fallback(fields.compatibility)}
 
-Show one accurate-looking generic replacement part on a neutral light workshop background.
-Do not add logos, labels, part numbers, text, packaging, people, machinery, or extra components unless they are in approved product data.
-Use a centered, high-resolution product-photo composition suitable for an industrial spare-parts catalog.
-Compose the shot as a wide banner, 1600 x 600 pixels — a short, wide rectangle, not a square. Center the part with even empty margin on the left and right so it stays fully visible even if the image is cropped slightly differently later.`;
+REFERENCE LOCK: Preserve the product's exact shape, proportions, colour, material, openings, fittings, fasteners, labels, logos, printed text, packaging and included components from the supplied product photo. Do not redesign, simplify, replace or invent any part of the product.
+Remove only the product photo's original surroundings. Create a fresh variation of the Jai Durga catalogue setting for this generation: a bright, clean professional service workshop with a softly blurred neutral-grey background and an uncluttered brushed-metal workbench. Vary the workshop layout, cabinet placement and subtle background details on every generation while keeping this same visual family. Place the unchanged product naturally on the workbench with a soft contact shadow.
+Do not add people, vehicles, tools, boxes, text, labels, logos, props or extra components that are not already part of the product in the reference photo.
+Use a centred, high-resolution 16:9 landscape product-photo composition. Keep the complete product visible with even margins on every side. Use soft diffused daylight, neutral white balance and realistic industrial materials while keeping the product itself unchanged. The new background must not duplicate an earlier composition.`;
 }
