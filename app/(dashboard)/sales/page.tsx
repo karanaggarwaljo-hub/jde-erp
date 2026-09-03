@@ -1141,14 +1141,6 @@ export default function SalesPage() {
                         style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         onClick={() => items.length > 0 && openSalesReturn(invoice)}
                       ><Undo2 size={14} /></button>
-                      {balance > 0 && !isDraft(invoice) && (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          aria-label={`Settle ${invoice.id} for less`}
-                          title={`Customer paid less and this is settled — write off the remaining ₹${money(balance)}`}
-                          onClick={() => openSettleShort(invoice)}
-                        ><HandCoins size={14} /></button>
-                      )}
                       <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={() => window.open(`/sales/invoice/${invoice.id}`, '_blank')}><Printer size={14} /></button>
                       <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`} title="Delete invoice" style={{ color: 'var(--color-danger)' }} onClick={() => setDeleteCandidate(invoice)}><Trash2 size={14} /></button>
                     </div></td>
@@ -1403,7 +1395,19 @@ export default function SalesPage() {
             <div className="report-line"><span>Balance</span><strong className={invoiceBalanceDue(viewingInvoice) > 0 ? 'text-danger' : 'text-muted'}>₹{money(invoiceBalanceDue(viewingInvoice))}</strong></div>
           </div>
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/invoice/${viewingInvoice.id}`, '_blank')}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingInvoice(null)}>Close</button></div>
+        <div className="modal-footer">
+          {invoiceBalanceDue(viewingInvoice) > 0 && viewingInvoice.status !== DRAFT_STATUS && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              style={{ marginRight: 'auto' }}
+              title={`Customer paid less and this is settled — write off the remaining ₹${money(invoiceBalanceDue(viewingInvoice))}`}
+              onClick={() => { const invoice = viewingInvoice; setViewingInvoice(null); openSettleShort(invoice); }}
+            ><HandCoins size={14} /> Settle for less</button>
+          )}
+          <button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/invoice/${viewingInvoice.id}`, '_blank')}><Printer size={14} /> Print</button>
+          <button type="button" className="btn btn-primary" onClick={() => setViewingInvoice(null)}>Close</button>
+        </div>
       </div></div>}
 
       {settlingInvoice && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '460px' }} role="dialog" aria-modal="true" aria-labelledby="settle-short-title">
