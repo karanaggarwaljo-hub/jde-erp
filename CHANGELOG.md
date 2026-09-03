@@ -2,6 +2,38 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-02 — Fixed: an AI failure hidden behind "the ERP ran into a problem"
+
+Reported: Reference Search showing *"The ERP ran into a problem and could not finish that."*
+
+**Nothing is broken in the ERP.** Google's AI has run out of free usage on your account. I
+reproduced it against your own key: every request comes back "you exceeded your current quota",
+on every model, not just this feature.
+
+The bug is that the app hid that from you. The message it needed was already written — *"the AI
+service has hit its usage limit"* — but it was being sent back labelled as an unexpected ERP fault,
+and the app deliberately replaces the wording of an unexpected fault with one calm generic
+sentence. So the only useful detail was thrown away, and the sentence you got pointed at the wrong
+thing entirely.
+
+Reference Search and the catalog photo generator now say what actually happened, in words you can
+act on:
+
+- **out of free usage** — says so, and that it works again when the allowance resets or once
+  billing is enabled on the Google AI account
+- **key rejected** — says the key needs checking, rather than blaming the ERP
+- **Google's AI overloaded** — says to try again in a few minutes
+- **request refused** — suggests rewording the part name or picking the photo yourself
+
+A genuine unexplained fault still shows the calm generic sentence, because there it is the honest
+thing to say.
+
+**Worth knowing:** these two features can only use Google's AI — the search and photo work needs
+it specifically — so they have no backup service to fall back on. Anything else in the app that
+can use the backup provider is unaffected.
+
+Nine automated tests cover this, including one built from the exact error your account returned.
+
 ## 2026-09-02 — Tidied: settling an invoice moved into the invoice window
 
 Reported: the customer settlement button wasn't looking good — could it be merged into something.

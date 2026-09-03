@@ -1,5 +1,5 @@
 import { GoogleGenAI, createPartFromBase64, createUserContent } from '@google/genai';
-import { friendlyAiErrorMessage } from '@/lib/ai/friendly-error';
+import { aiFailureResponse, friendlyAiErrorMessage } from '@/lib/ai/friendly-error';
 import { updateRow, uploadCatalogImage } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -117,8 +117,10 @@ export async function POST(request: Request) {
     return Response.json(row);
   } catch (error) {
     console.error('ai-catalog-generate-image route failed:', error);
+    // The same sentence is stored against the product and sent back, but the status now carries
+    // it: a 500 body is replaced by a generic line before the owner ever sees it.
     const message = friendlyAiErrorMessage(error, 'Unknown error generating image.');
     await updateRow('catalog_products', catalogId, { image_status: 'failed', generation_error: message }).catch(() => {});
-    return Response.json({ error: message }, { status: 500 });
+    return aiFailureResponse(error, 'Unknown error generating image.');
   }
 }

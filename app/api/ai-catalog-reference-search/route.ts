@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { DEFAULT_GEMINI_MODEL } from '@/lib/ai/providers/gemini';
-import { friendlyAiErrorMessage } from '@/lib/ai/friendly-error';
+import { aiFailureResponse } from '@/lib/ai/friendly-error';
 
 export const dynamic = 'force-dynamic';
 // The AI layer may legitimately spend ~25s on a slow provider before its own fallback
@@ -62,7 +62,8 @@ export async function POST(request: Request) {
     return Response.json({ query, candidates });
   } catch (error) {
     console.error('ai-catalog-reference-search route failed:', error);
-    const message = friendlyAiErrorMessage(error, 'Unknown error searching for references.');
-    return Response.json({ error: message }, { status: 500 });
+    // Returns 503/501/502 for the situations we can explain, so the explanation reaches the
+    // owner instead of being replaced with the generic 500 sentence. See lib/ai/friendly-error.ts.
+    return aiFailureResponse(error, 'Unknown error searching for references.');
   }
 }
