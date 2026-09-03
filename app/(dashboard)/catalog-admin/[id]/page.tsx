@@ -179,14 +179,18 @@ export default function CatalogAdminDetailPage() {
     setImageBusy(true);
     setImageError('');
     try {
-      if (!uploadedReference) throw new Error('Select a real product reference photo first.');
+      if (!uploadedReference && !row.selected_reference_url) {
+        throw new Error('Choose a product photo first, then click Generate with AI.');
+      }
       const res = await fetch('/api/ai-catalog-generate-image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           catalogId: row.id,
           prompt: promptText,
-          referenceImage: { base64: uploadedReference.base64, mimeType: uploadedReference.mimeType },
+          ...(uploadedReference
+            ? { referenceImage: { base64: uploadedReference.base64, mimeType: uploadedReference.mimeType } }
+            : { referenceImageUrl: row.selected_reference_url }),
         }),
       });
       await parseJsonOrThrow(res, 'Image generation failed.');
@@ -458,14 +462,18 @@ export default function CatalogAdminDetailPage() {
             )}
             <div className="flex flex-col gap-2">
               <label className="btn btn-secondary" style={{ cursor: imageBusy ? 'not-allowed' : 'pointer' }}>
-                <Upload size={16} /> Select Product Reference Photo
+                <Upload size={16} /> 1. Choose Product Photo
                 <input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={imageBusy} onChange={selectProductReference} />
               </label>
               <span style={{ fontSize: '12px', color: uploadedReference ? 'var(--color-success)' : 'var(--text-muted)' }}>
-                {uploadedReference ? `${uploadedReference.name} is ready.` : 'Required for AI generation. The product will be preserved and placed on the fixed workshop background.'}
+                {uploadedReference
+                  ? `${uploadedReference.name} is ready.`
+                  : row.selected_reference_url
+                    ? 'Web reference selected. A direct product photo gives the most reliable result.'
+                    : 'Required: choose a clear product photo. A new matching workshop background is created each time.'}
               </span>
-              <button className="btn btn-primary" disabled={imageBusy || !promptText.trim() || !uploadedReference} onClick={generateImageWithAi}>
-                <Sparkles size={16} /> {imageBusy ? 'Working…' : 'Generate with AI'}
+              <button className="btn btn-primary" disabled={imageBusy || !promptText.trim()} onClick={generateImageWithAi}>
+                <Sparkles size={16} /> {imageBusy ? 'Working…' : '2. Generate with AI'}
               </button>
               <label className="btn btn-secondary" style={{ cursor: imageBusy ? 'not-allowed' : 'pointer' }}>
                 <Upload size={16} /> Use Real Photo Without AI
