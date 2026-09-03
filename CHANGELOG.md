@@ -2,6 +2,21 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-02 — Tidied: settling an invoice moved into the invoice window
+
+Reported: the customer settlement button wasn't looking good — could it be merged into something.
+
+It had been given its own icon in the Sales table, which pushed that Actions column to six small
+buttons side by side. Too many to read at a glance, and the wrong place for the decision anyway.
+
+Settling now lives inside the invoice's own View window (the eye icon), as a **Settle for less**
+button at the bottom left — right under the Total, Paid and Balance figures you need in order to
+make the call. The Sales row is back to five icons.
+
+Nothing about how it works changed: the same window opens, the same amount and reason, the same
+rules. The tick box inside Receive Payment is untouched, so a customer handing over less than they
+owe can still be settled in one step while you record what they did pay.
+
 ## 2026-09-02 — New: Everyday Activity on the Dashboard
 
 Asked for: something like the activity grid in that screenshot, showing everyday activity.
