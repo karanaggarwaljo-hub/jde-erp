@@ -109,6 +109,8 @@ export default function SalesPage() {
   const { rows: invoiceItems, reload: reloadInvoiceItems } = useCompanyTable<InvoiceItem>('invoice_items');
   const { rows: payments, reload: reloadPayments } = useCompanyTable<Payment>('payments_received');
   const { rows: paymentAllocations } = useCompanyTable<PaymentAllocation>('payment_allocations');
+  // Only to grey out Edit and Delete on an invoice goods have already come back against.
+  const { rows: salesReturns } = useCompanyTable<{ id: string; invoice_id: string }>('sales_returns');
 
   // `value`, `price` and `category` are untouched — the save path matches lines on `value` and
   // fills the rate from `price`. The rest are extra fields off the same already-loaded product
@@ -1115,6 +1117,11 @@ export default function SalesPage() {
                 <tbody>{pagedInvoices.map((invoice) => {
                   const balance = invoiceBalanceDue(invoice);
                   const writtenOff = invoiceWrittenOff(invoice);
+                  // Editing rebuilds an invoice's lines from scratch, which would detach every
+                  // return recorded against them and let the same goods be returned again — it
+                  // already happened three times on one invoice. Closed here as well as in the
+                  // database, so the reason is readable instead of an error after the fact.
+                  const returnCount = salesReturns.filter((r) => r.invoice_id === invoice.id).length;
                   const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
                   const productLabel = items[0]?.name ?? (invoice.items > 0 ? 'Legacy sale' : '—');
                   const customerRow = customers.find((c) => c.name === invoice.customer);
@@ -1175,12 +1182,14 @@ export default function SalesPage() {
                       <button
                         className="btn btn-ghost btn-sm"
                         aria-label={`Edit ${invoice.id}`}
-                        title={writtenOff > 0
-                          ? 'Edit unavailable — this invoice was settled short, so its amounts are fixed'
-                          : items.length > 0 ? 'Edit invoice' : "Edit unavailable — this invoice predates line-item tracking"}
-                        disabled={items.length === 0 || writtenOff > 0}
-                        style={items.length === 0 || writtenOff > 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
-                        onClick={() => items.length > 0 && writtenOff === 0 && openEditInvoice(invoice)}
+                        title={returnCount > 0
+                          ? `Edit unavailable — ${returnCount} return${returnCount === 1 ? '' : 's'} recorded against this invoice. Delete the return first if it really must be changed.`
+                          : writtenOff > 0
+                            ? 'Edit unavailable — this invoice was settled short, so its amounts are fixed'
+                            : items.length > 0 ? 'Edit invoice' : "Edit unavailable — this invoice predates line-item tracking"}
+                        disabled={items.length === 0 || writtenOff > 0 || returnCount > 0}
+                        style={items.length === 0 || writtenOff > 0 || returnCount > 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+                        onClick={() => items.length > 0 && writtenOff === 0 && returnCount === 0 && openEditInvoice(invoice)}
                       ><Pencil size={14} /></button>
                       <button
                         className="btn btn-ghost btn-sm"
@@ -1191,7 +1200,11 @@ export default function SalesPage() {
                         onClick={() => items.length > 0 && openSalesReturn(invoice)}
                       ><Undo2 size={14} /></button>
                       <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={() => window.open(`/sales/invoice/${invoice.id}`, '_blank')}><Printer size={14} /></button>
-                      <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`} title="Delete invoice" style={{ color: 'var(--color-danger)' }} onClick={() => setDeleteCandidate(invoice)}><Trash2 size={14} /></button>
+                      <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`}
+                        title={returnCount > 0 ? 'Delete unavailable — goods have been returned against this invoice' : 'Delete invoice'}
+                        disabled={returnCount > 0}
+                        style={returnCount > 0 ? { color: 'var(--color-danger)', opacity: 0.4, cursor: 'not-allowed' } : { color: 'var(--color-danger)' }}
+                        onClick={() => returnCount === 0 && setDeleteCandidate(invoice)}><Trash2 size={14} /></button>
                     </div></td>
                   </tr>;
                 })}

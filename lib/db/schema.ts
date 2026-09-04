@@ -24,6 +24,9 @@ export const TABLES: Record<string, TableSchema> = {
   catalog_events: { primaryKey: 'id', companyScoped: true },
   payments_received: { primaryKey: 'id', companyScoped: true },
   payment_allocations: { primaryKey: 'id', companyScoped: true },
+  // Read-only for the Sales screen, so it can grey out Edit on an invoice that already has
+  // goods back against it and say why, rather than letting the owner hit a database refusal.
+  sales_returns: { primaryKey: 'id', companyScoped: true },
 };
 
 export type TableName = keyof typeof TABLES;
