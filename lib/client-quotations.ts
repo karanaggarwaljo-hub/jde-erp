@@ -29,6 +29,10 @@ export type QuotationInput = {
   /** 'exclusive' (tax added on top of the quoted rates) or 'inclusive' (tax already inside them).
    *  Optional so the server keeps its own default rather than this having to be sent everywhere. */
   gstMode?: 'exclusive' | 'inclusive';
+  /** Whether this save parks the quotation as a draft or confirms it as final. Anything other
+   *  than an explicit 'final' is treated as a draft, so a caller that forgets it can only ever
+   *  park the quote — never confirm one by accident. */
+  status: 'draft' | 'final';
   total: number;
 };
 
@@ -59,7 +63,9 @@ async function requestQuotation<T>(body: Record<string, unknown>): Promise<T> {
   return (await parseJsonOrThrow(response, 'Quotation could not be saved.')) as T;
 }
 
-/** Saves a draft quotation only. It never consumes inventory or changes customer balances. */
+/** Saves a quotation, either parked as a draft or confirmed as final — `input.status` says which.
+ *  Neither ever consumes inventory or changes customer balances; only conversion does that, and
+ *  only a confirmed quotation may be converted. */
 export function saveQuotation(input: QuotationInput) {
   return requestQuotation<QuotationDetail>({ action: 'save', ...input });
 }

@@ -18,9 +18,11 @@ function getClient(): SupabaseClient {
  * - jde_quotation_items has quotation_id, product_id, part_number, name, qty, unit_price,
  *   line_total and company_id. jde_quotations stores the displayed totals/tax fields.
  * - jde_save_quotation atomically replaces the quotation's lines and header; it must not touch
- *   products, stock layers, invoices, or customer balances.
+ *   products, stock layers, invoices, or customer balances. It carries a status of 'draft' or
+ *   'final' and will not turn a confirmed quotation back into a draft.
  * - jde_convert_quotation_to_invoice atomically reads those persisted lines, creates the invoice,
- *   consumes FIFO stock, adjusts the customer balance, and marks the quote converted.
+ *   consumes FIFO stock, adjusts the customer balance, and marks the quote converted. It refuses
+ *   a quotation still marked 'draft' — an unfinished quote must never become money.
  */
 export async function loadQuotation(quotationId: string, companyId: string): Promise<QuotationDetail> {
   const supabase = getClient();
@@ -59,6 +61,10 @@ export async function saveQuotation(input: QuotationInput): Promise<QuotationDet
     p_gst_percent: input.gstPercent,
     p_gst_amount: input.gstAmount,
     p_gst_mode: input.gstMode ?? 'exclusive',
+    // Only an explicit 'final' confirms a quotation. Anything else — a missing field, a stale
+    // client, a hand-made request — parks it as a draft, which commits nothing. The database
+    // repeats this check and refuses any other value outright.
+    p_status: input.status === 'final' ? 'final' : 'draft',
     p_total: input.total,
   }).single();
   if (error) throw error;

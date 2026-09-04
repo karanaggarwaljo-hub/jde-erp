@@ -11,7 +11,10 @@ import { money } from '@/lib/money';
 import { type Customer } from '@/lib/sales-types';
 
 const STATUS_LABEL: Record<string, string> = {
-  draft: 'Draft',
+  // A draft is a quotation still being written — it prints, but it says so on the page rather
+  // than pretending to be a finished document. 'final' is the confirmed one.
+  draft: 'Draft — not yet confirmed',
+  final: 'Final',
   sent: 'Sent',
   accepted: 'Accepted',
   converted: 'Converted to Invoice',
