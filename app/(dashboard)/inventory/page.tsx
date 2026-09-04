@@ -25,6 +25,7 @@ import { money, wholeMoney } from '@/lib/money';
 import { useCompany } from '@/components/CompanyProvider';
 import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, sheetFromScannedParts, fileToBase64, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
 import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatch } from '@/lib/cost-import';
+import { planDetailUpdates, countDetailOutcomes, fieldsToWrite, looksLikeAnInventedCode, type DetailChange } from '@/lib/detail-import';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { fifoCostLookup } from '@/lib/stock-value';
@@ -148,7 +149,11 @@ export default function InventoryPage() {
   >(null);
   // One file can mean two different jobs. Which one is proposed from the file's own content —
   // rows that match parts already stocked are a price list; rows that don't are a parts list.
-  const [importMode, setImportMode] = useState<'costs' | 'new'>('costs');
+  const [importMode, setImportMode] = useState<'costs' | 'new' | 'details'>('costs');
+  // Individual field changes the owner has unticked, keyed "row:field". Storing exclusions
+  // rather than selections means a change that appears after re-reading is offered by default
+  // instead of being silently skipped.
+  const [excludedDetails, setExcludedDetails] = useState<Set<string>>(new Set());
   const [excludedNew, setExcludedNew] = useState<Set<number>>(new Set());
   const [costColumn, setCostColumn] = useState('');
   const [idColumn, setIdColumn] = useState('');
@@ -533,7 +538,7 @@ export default function InventoryPage() {
       // Propose the job that fits the file. A sheet whose rows are mostly parts already stocked is
       // a price list; one whose rows are mostly unknown is a list of parts to add. Getting this
       // wrong is harmless — it is a preview either way — but getting it right saves a step.
-      let mode: 'costs' | 'new' = 'new';
+      let mode: 'costs' | 'new' | 'details' = 'new';
       if (costColumnGuess && idColumnGuess) {
         const rows = extractCostRows(sheet, costColumnGuess, idColumnGuess).rows;
         const known = planCostUpdates(rows, products).filter((m) => m.product).length;
@@ -541,6 +546,13 @@ export default function InventoryPage() {
       }
       if (newParts.length === 0) mode = 'costs';
 
+      // A supplier document with no price column, whose rows are parts already stocked, is
+      // almost always being used to fill in the real part numbers — propose that job rather than
+      // opening on a cost screen with nothing to show.
+      const detailUpdates = planDetailUpdates(newParts, products).filter((m) => m.outcome === 'update').length;
+      if (!costColumnGuess && detailUpdates > 0) mode = 'details';
+
+      setExcludedDetails(new Set());
       setCostColumn(costColumnGuess);
       setIdColumn(idColumnGuess);
       setExcludedRows(new Set());
@@ -649,6 +661,39 @@ export default function InventoryPage() {
       setCostSheet(null);
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to import parts.');
+    } finally {
+      setApplyingCosts(false);
+    }
+  };
+
+  /** Writes only the identifying details the owner left ticked. Nothing here touches stock,
+   *  cost, selling price or any batch — this changes what a part is CALLED, never how many
+   *  there are or what they are worth. */
+  const applyDetailPlan = async (pending: { productId: string; patch: Record<string, string>; name: string }[]) => {
+    if (!costSheet) return;
+    setApplyingCosts(true);
+    setCostProgress(0);
+    setImportError('');
+    let done = 0;
+    let fields = 0;
+    try {
+      for (const item of pending) {
+        await update(item.productId, item.patch);
+        fields += Object.keys(item.patch).length;
+        done += 1;
+        setCostProgress(done);
+      }
+      await reload();
+      setFeedback(`Filled in ${fields} detail(s) across ${done} part(s) from ${costSheet.fileName}. Stock and prices were not touched.`);
+      setCostSheet(null);
+    } catch (err) {
+      // Say exactly how far it got — a half-applied run whose shape the owner knows is
+      // recoverable; a silent one is not.
+      await reload();
+      setImportError(
+        `${err instanceof Error ? err.message : 'Failed to update part details.'} ` +
+          `${done} of ${pending.length} part(s) were updated before this stopped.`
+      );
     } finally {
       setApplyingCosts(false);
     }
@@ -886,7 +931,14 @@ export default function InventoryPage() {
               const meter = meterPercent(p);
               return (
                 <tr key={p.id}>
-                  <td><span className="pn-chip">{p.part_number}</span></td>
+                  <td>
+                    {p.part_number
+                      ? <span className="pn-chip" title={looksLikeAnInventedCode(p.part_number) ? 'This is a code this app generated, not the manufacturer’s part number — don’t quote it to a customer or supplier' : undefined}>
+                          {p.part_number}
+                          {looksLikeAnInventedCode(p.part_number) && <span style={{ marginLeft: '4px', opacity: 0.65, fontWeight: 400 }}>(internal)</span>}
+                        </span>
+                      : <span className="text-muted" style={{ fontSize: '12px' }}>no part number</span>}
+                  </td>
                   <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{p.hsn_code || '-'}</td>
                   <td style={{ fontWeight: 600, maxWidth: '150px' }} className="truncate">{p.name}</td>
                   <td>
@@ -1262,6 +1314,34 @@ export default function InventoryPage() {
         });
         const skipped = parsed ? parsed.skippedNoCost + parsed.skippedNoIdentifier : 0;
         const samples = costColumn ? sampleColumnValues(sheet, costColumn) : [];
+        // The same rows, read for what they say a part IS rather than what it costs.
+        const detailMatches = planDetailUpdates(costSheet.newParts, products);
+        const detailCounts = countDetailOutcomes(detailMatches);
+        const detailKey = (rowNumber: number, change: DetailChange) => `${rowNumber}:${change.field}`;
+        const detailAccepted = (rowNumber: number) => (change: DetailChange) => !excludedDetails.has(detailKey(rowNumber, change));
+        const detailPending = detailMatches
+          .filter((m) => m.outcome === 'update' && m.product)
+          .map((m) => ({ match: m, patch: fieldsToWrite(m, detailAccepted(m.rowNumber)) }))
+          .filter(({ patch }) => Object.keys(patch).length > 0);
+        const detailOfferedCount = detailMatches.reduce(
+          (total, m) => total + m.changes.filter((c) => c.kind !== 'keep').length,
+          0
+        );
+        const detailTickedCount = detailPending.reduce((total, { patch }) => total + Object.keys(patch).length, 0);
+        const toggleDetail = (rowNumber: number, change: DetailChange) =>
+          setExcludedDetails((previous) => {
+            const next = new Set(previous);
+            const key = detailKey(rowNumber, change);
+            if (next.has(key)) next.delete(key);
+            else next.add(key);
+            return next;
+          });
+        // Anything that will not be applied is listed first, same reasoning as the cost plan.
+        const detailOrdered = [...detailMatches].sort((a, b) => {
+          const rank = { conflict: 0, not_found: 1, update: 2, nothing_to_add: 3 } as const;
+          return rank[a.outcome] - rank[b.outcome] || a.rowNumber - b.rowNumber;
+        });
+
         const chosenNew = costSheet.newParts.filter((_, index) => !excludedNew.has(index));
         const duplicateCount = costSheet.newParts.filter((part) =>
           findExistingProduct(products, { partNumber: part.part_number, name: part.name })
@@ -1301,6 +1381,14 @@ export default function InventoryPage() {
                     >
                       Add as new parts{costSheet.newParts.length > 0 ? ' (' + costSheet.newParts.length + ')' : ''}
                     </button>
+                    <button
+                      type="button"
+                      className={'btn btn-sm ' + (importMode === 'details' ? 'btn-primary' : 'btn-secondary')}
+                      disabled={detailCounts.update === 0}
+                      onClick={() => setImportMode('details')}
+                    >
+                      Fill in part numbers &amp; details{detailCounts.update > 0 ? ' (' + detailCounts.update + ')' : ''}
+                    </button>
                   </div>
                 </div>
 
@@ -1328,9 +1416,81 @@ export default function InventoryPage() {
                 <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                   {importMode === 'costs'
                     ? 'Only the cost price changes — stock, selling price and every other detail are left exactly as they are.'
-                    : 'Each ticked row becomes a brand-new part. Rows matching something you already stock start unticked, so nothing is duplicated by accident.'}
+                    : importMode === 'details'
+                      ? 'Fills in the real part number, OEM number, HSN, brand and category on parts you already stock. Stock, cost and selling price are not touched. A detail you already have is only replaced when the existing one is a code this app made up — shown as old → new, and you can untick any of them.'
+                      : 'Each ticked row becomes a brand-new part. Rows matching something you already stock start unticked, so nothing is duplicated by accident.'}
                 </p>
-                {importMode === 'new' ? (
+                {importMode === 'details' ? (
+                  <>
+                    <p style={{ fontSize: '13px', margin: '10px 0' }}>
+                      <strong>{detailTickedCount} of {detailOfferedCount}</strong> detail(s) ticked, across {detailCounts.update} part(s)
+                      {detailCounts.not_found > 0 && (
+                        <span style={{ color: 'var(--text-muted)' }}> · {detailCounts.not_found} row(s) match no part you stock</span>
+                      )}
+                      {detailCounts.conflict > 0 && (
+                        <span style={{ color: 'var(--color-warning)' }}> · {detailCounts.conflict} left alone</span>
+                      )}
+                    </p>
+                    <div style={{ maxHeight: '320px', overflowY: 'auto', overflowX: 'auto' }}>
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>Part on file</th>
+                            <th>What the document adds</th>
+                            <th>Result</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detailOrdered.map((m) => (
+                            <tr key={m.rowNumber}>
+                              <td>
+                                <strong style={{ fontSize: '13px' }}>{m.product?.name ?? m.name}</strong>
+                                {m.product && (
+                                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                                    {m.product.part_number ? m.product.part_number : 'no part number yet'}
+                                    {m.matchedBy ? ` · matched by ${m.matchedBy}` : ''}
+                                  </div>
+                                )}
+                              </td>
+                              <td>
+                                {m.changes.length === 0 && <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>}
+                                {m.changes.map((change) => (
+                                  <div key={change.field} style={{ fontSize: '12px', marginBottom: '2px' }}>
+                                    {change.kind === 'keep' ? (
+                                      <span style={{ color: 'var(--color-warning)' }}>
+                                        {change.label}: document says <strong>{change.to}</strong>, you have <strong>{change.from}</strong> — left alone
+                                      </span>
+                                    ) : (
+                                      <label className="flex items-center gap-2" style={{ cursor: applyingCosts ? 'default' : 'pointer' }}>
+                                        <input
+                                          type="checkbox"
+                                          disabled={applyingCosts}
+                                          checked={!excludedDetails.has(`${m.rowNumber}:${change.field}`)}
+                                          onChange={() => toggleDetail(m.rowNumber, change)}
+                                        />
+                                        <span>
+                                          {change.label}: {change.kind === 'replace'
+                                            ? <><span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>{change.from}</span> → <strong>{change.to}</strong></>
+                                            : <strong>{change.to}</strong>}
+                                        </span>
+                                      </label>
+                                    )}
+                                  </div>
+                                ))}
+                              </td>
+                              <td style={{ fontSize: '12px' }}>
+                                {m.outcome === 'update' && <span className="badge badge-success">update</span>}
+                                {m.outcome === 'nothing_to_add' && <span style={{ color: 'var(--text-muted)' }}>{m.reason}</span>}
+                                {m.outcome === 'not_found' && <span style={{ color: 'var(--text-muted)' }}>{m.reason}</span>}
+                                {m.outcome === 'conflict' && <span style={{ color: 'var(--color-warning)' }}>{m.reason}</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : importMode === 'new' ? (
                   <>
                     <p style={{ fontSize: '13px', margin: '10px 0' }}>
                       <strong>{chosenNew.length} of {costSheet.newParts.length}</strong> selected to add
@@ -1456,7 +1616,19 @@ export default function InventoryPage() {
               </div>
               <div className="modal-footer">
                 <button className="btn btn-secondary" disabled={applyingCosts} onClick={() => setCostSheet(null)}>Cancel</button>
-                {importMode === 'new' ? (
+                {importMode === 'details' ? (
+                  <button
+                    className="btn btn-primary"
+                    disabled={applyingCosts || detailPending.length === 0}
+                    onClick={() => applyDetailPlan(detailPending.map(({ match, patch }) => ({ productId: match.product!.id, patch, name: match.product!.name })))}
+                  >
+                    {applyingCosts
+                      ? `Updating ${costProgress} of ${detailPending.length}…`
+                      : detailPending.length === 0
+                        ? (detailCounts.update === 0 ? 'Nothing to fill in' : 'Nothing ticked')
+                        : `Fill in ${detailTickedCount} detail(s) on ${detailPending.length} part(s)`}
+                  </button>
+                ) : importMode === 'new' ? (
                   <button className="btn btn-primary" disabled={applyingCosts || chosenNew.length === 0} onClick={() => applyNewParts(chosenNew)}>
                     {applyingCosts ? 'Adding\u2026' : chosenNew.length === 0 ? 'Nothing selected' : 'Add ' + chosenNew.length + ' new part(s)'}
                   </button>

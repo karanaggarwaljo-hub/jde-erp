@@ -2,6 +2,47 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-03 — Fill in real part numbers from a supplier document, in bulk
+
+Your part numbers are mostly ones this app invented. Of 944 parts: **447 have none at all**, and
+**406 carry a made-up code** like AIR-F90 or STI-B168, built from the first letters of the name.
+Only 4 have a genuine manufacturer number.
+
+Nothing can turn AIR-F90 into a real part number — that code holds no information about the
+manufacturer's. The real numbers exist on the parts themselves and on supplier paperwork, so this
+reads them off the paperwork, many at a time.
+
+**New in Inventory → Import from File: "Fill in part numbers & details".** Photograph a supplier
+invoice or price list (or upload a spreadsheet), and it matches each line to the part you already
+stock and fills in the real part number, OEM number, HSN code, brand and category.
+
+**It cannot touch stock, cost or selling price.** This changes what a part is *called*, never how
+many you have or what they are worth. There is an automated test that fails if a price or stock
+field ever creeps into it.
+
+Three rules keep it safe:
+
+- **A blank detail is filled in** — ticked by default, nothing to lose.
+- **A made-up code is offered for replacement**, shown as `AIR-F90 → 32/925994`, so it is a
+  decision rather than a surprise. You can untick any single one.
+- **A real number you already have is never overwritten** on a document's say-so. If the document
+  disagrees, it says so and leaves yours alone. Same for a brand or category that disagrees.
+
+Rows matching two parts, or two rows matching the same part, are left alone and reported rather
+than guessed at.
+
+**Also: made-up codes now say so.** In the Inventory list they show as `AIR-F90 (internal)`, and
+parts with none show "no part number" instead of an empty space. Those codes look exactly like
+real ones — if someone read one out to a customer or supplier it would mean nothing to them, and
+could cost an order.
+
+**The good news on scale:** of your 944 parts, only **46** have ever actually been bought or sold,
+and **38** of those need a real number. That is the job — not 944.
+
+Sixteen new automated tests, including ones built from your real codes: it recognises every
+invented shape in your data, and never mistakes a genuine number like 331/34392 or P00-12400 for
+one.
+
 ## 2026-09-03 — The AI work is now shared out, instead of stacked on one service
 
 Asked for: do the keys work together, or take turns?
