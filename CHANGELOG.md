@@ -2,6 +2,34 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-03 — The AI work is now shared out, instead of stacked on one service
+
+Asked for: do the keys work together, or take turns?
+
+They didn't take turns — and that was the problem. Whichever service was first in the list got
+every single request and burned through its own free allowance, while the other two sat untouched.
+That is how Google ran dry and left Groq carrying the whole app.
+
+The heavy jobs — daily briefing, report summaries, forecasts, insights, reorder suggestions — now
+start with a different service each time, so all three free allowances get used roughly evenly
+instead of one being drained. Three times as much headroom before anything runs out.
+
+**Nothing about reliability changes.** Only the starting point moves; the full chain is still
+behind it. If the one that goes first can't answer, the next is asked exactly as before.
+
+**Quick asks are left alone on purpose** — drafting a reminder, suggesting part details,
+categorising an expense. You're watching those happen, they cost almost nothing, so they still go
+to the fastest service first rather than being spread around.
+
+One consequence worth knowing: the same question asked twice may now be answered by different
+services, so the wording can differ slightly between runs. The facts come from your own data
+either way.
+
+Also fixed: the "no AI is set up" message still named only two services and now names all three.
+
+Nine new automated tests, including one that runs three thousand requests and checks no service
+takes more than its share.
+
 ## 2026-09-03 — Added a third AI service, so one running dry can't stop everything
 
 Yesterday Google ran out of free usage and Groq was left carrying every AI feature in the app on
