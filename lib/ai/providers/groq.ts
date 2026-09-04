@@ -1,4 +1,4 @@
-import { AiProviderError, classifyStatus, classifyError, type AiFailureKind } from '../errors';
+import { AiProviderError, classifyOpenAiCompatibleFailure, classifyError, type AiFailureKind } from '../errors';
 import { toStrictJsonSchema } from '../schema';
 import type { AiJsonRequest, AiProvider, AiProviderResult } from '../types';
 
@@ -13,9 +13,7 @@ const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
  *  provider can do the job — and Gemini demonstrably can. Left as bad_request they surfaced a raw
  *  "Groq 400: Failed to validate JSON" to the owner while a working provider sat untried. */
 export function classifyGroqFailure(status: number, detail: string): AiFailureKind {
-  const providerFailedTheTask = /failed_generation|failed to validate json|response_format|json_schema|not supported/i.test(detail);
-  if (status === 400 && providerFailedTheTask) return 'empty';
-  return classifyStatus(status);
+  return classifyOpenAiCompatibleFailure(status, detail);
 }
 
 

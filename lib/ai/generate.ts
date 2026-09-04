@@ -2,11 +2,13 @@ import { AiProviderError, AiUnavailableError, classifyError, cooldownMs, shouldT
 import { isAvailable, markHealthy, markUnavailable } from './health';
 import { geminiProvider } from './providers/gemini';
 import { groqProvider } from './providers/groq';
+import { cerebrasProvider } from './providers/cerebras';
 import type { AiJsonRequest, AiProvider } from './types';
 
 const REGISTRY: Record<string, AiProvider> = {
   gemini: geminiProvider,
   groq: groqProvider,
+  cerebras: cerebrasProvider,
 };
 
 /** Adds a provider under an extra name. Exists for scripts/ai-fallback-check.ts, which needs a
@@ -17,9 +19,14 @@ export function registerProvider(name: string, provider: AiProvider): void {
 }
 
 // Analysis and document reading lead with the better model; short interactive asks lead with
-// the fastest one. Both fall back to the other, so neither order costs a feature.
-const DEFAULT_ORDER = 'gemini,groq';
-const DEFAULT_FAST_ORDER = 'groq,gemini';
+// the fastest one. Both fall back to the others, so neither order costs a feature.
+//
+// Cerebras is last in both. It exists so that one provider running out of free allowance can no
+// longer take every AI feature down with it — which is what nearly happened when Google's quota
+// ran out and Groq was left carrying the whole app alone. It reads no images, so the gateway
+// skips it for invoice scans by itself (see its `supports`).
+const DEFAULT_ORDER = 'gemini,groq,cerebras';
+const DEFAULT_FAST_ORDER = 'groq,cerebras,gemini';
 
 /** Keep the primary provider on a short leash so a slow provider does not make the user wait
  * before the already-configured fallback gets a chance. Attachments genuinely take longer to

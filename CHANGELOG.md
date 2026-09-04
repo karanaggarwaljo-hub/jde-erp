@@ -2,6 +2,29 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-03 — Added a third AI service, so one running dry can't stop everything
+
+Yesterday Google ran out of free usage and Groq was left carrying every AI feature in the app on
+its own. That worked — but it meant one more outage away from nothing working at all.
+
+Cerebras is now wired in as a third option, behind the other two. It is only asked when both
+Google and Groq have failed, so day to day nothing changes; it exists so that "both are down" stops
+being the end of the line.
+
+**It is deliberately never sent your invoice photos.** Cerebras' free models read text only, so
+document scanning stays with Google and Groq — the app knows this and skips Cerebras for anything
+with a photo attached, rather than sending it something it would refuse.
+
+Free tier, no card, US-hosted, and it runs the same model Groq already uses, so an answer reads
+the same whichever service produced it.
+
+**Still not fixed by this:** Reference Search and the catalog photo generator. Those need Google
+specifically — one searches the web and images, the other draws pictures, and no text service can
+stand in. They come back when Google's allowance resets or billing is switched on.
+
+Seven new automated tests, including one that proves an invoice photo can never be routed to a
+service that cannot read it.
+
 ## 2026-09-02 — Fixed: an AI failure hidden behind "the ERP ran into a problem"
 
 Reported: Reference Search showing *"The ERP ran into a problem and could not finish that."*
