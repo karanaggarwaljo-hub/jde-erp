@@ -3,7 +3,7 @@ import { isAvailable, markHealthy, markUnavailable } from './health';
 import { geminiProvider } from './providers/gemini';
 import { groqProvider } from './providers/groq';
 import { cerebrasProvider } from './providers/cerebras';
-import type { AiJsonRequest, AiProvider } from './types';
+import type { AiJsonRequest, AiPriority, AiProvider } from './types';
 
 const REGISTRY: Record<string, AiProvider> = {
   gemini: geminiProvider,
@@ -73,6 +73,37 @@ function orderedProviders(request: AiJsonRequest): AiProvider[] {
     .filter(Boolean)
     .map((name) => REGISTRY[name])
     .filter((provider): provider is AiProvider => Boolean(provider));
+}
+
+/** Which provider starts, when more than one could.
+ *
+ *  Without this the first name in the order absorbs every request and burns through its own free
+ *  allowance while the others sit untouched — which is exactly how one service running dry came
+ *  to take most of the app's AI down with it. Rotating the starting point spreads the heavy work
+ *  across every configured allowance instead of stacking it on one.
+ *
+ *  Only the START moves. The rest of the chain keeps its order, so a rotated-to provider that
+ *  fails still falls through to the others exactly as before — this trades nothing away.
+ *
+ *  Deliberately NOT applied to 'speed' requests. Those are short interactive asks where someone
+ *  is watching a field fill in; they lead with the fastest provider on purpose and consume very
+ *  little, so there is nothing to spread and a slower start would be felt immediately.
+ *
+ *  `pick` is injected so the behaviour can be tested exactly rather than sampled. In the app it
+ *  is a plain random choice: on Vercel each serverless instance is separate and cold-starts
+ *  often, so a shared counter would not survive to take real turns — random spreads evenly
+ *  across instances without any state to keep. */
+export function rotateForFairShare<T>(
+  providers: T[],
+  options: { priority?: AiPriority; rotate?: boolean; pick: (count: number) => number }
+): T[] {
+  if (providers.length < 2) return providers;
+  if (options.priority === 'speed') return providers;
+  if (options.rotate === false) return providers;
+
+  const raw = options.pick(providers.length);
+  const index = Number.isInteger(raw) && raw >= 0 && raw < providers.length ? raw : 0;
+  return [...providers.slice(index), ...providers.slice(0, index)];
 }
 
 function friendlyMessage(kinds: AiFailureKind[]): string {
@@ -213,7 +244,7 @@ export async function generateJson<T>(request: AiJsonRequest): Promise<{ data: T
 
   if (eligible.length === 0) {
     throw new AiUnavailableError(
-      'No AI provider is configured for this feature. Add GEMINI_API_KEY (and optionally GROQ_API_KEY) to .env.local and restart.',
+      'No AI provider is configured for this feature. Add GEMINI_API_KEY, GROQ_API_KEY or CEREBRAS_API_KEY to .env.local and restart.',
       []
     );
   }
@@ -221,7 +252,15 @@ export async function generateJson<T>(request: AiJsonRequest): Promise<{ data: T
   // Skip anything still cooling down from a recent failure — unless that would leave nothing to
   // try, in which case a wasted call beats refusing to work at all.
   const healthy = eligible.filter((provider) => isAvailable(provider.name));
-  const candidates = healthy.length ? healthy : eligible;
+  const available = healthy.length ? healthy : eligible;
+
+  // Share the heavy work around rather than stacking it all on whichever name is first. Applied
+  // to the healthy list, so rotation can never hand the job to a provider already cooling down.
+  const candidates = rotateForFairShare(available, {
+    priority: request.priority,
+    rotate: process.env.AI_ROTATE !== 'off',
+    pick: (count) => Math.floor(Math.random() * count),
+  });
 
   const attempts: Attempt[] = [];
 
