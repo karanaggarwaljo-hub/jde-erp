@@ -60,6 +60,23 @@ export function classifyError(error: unknown): AiFailureKind {
   return 'unknown';
 }
 
+/** How an OpenAI-compatible provider's HTTP failure should be treated by the failover chain.
+ *
+ *  classifyStatus maps every 400 to bad_request, which deliberately STOPS the chain on the
+ *  grounds that a malformed request fails identically everywhere. That reasoning does not hold
+ *  for two cases: "failed to validate JSON" means this model produced a bad answer, and an
+ *  unsupported or over-large response_format means this model lacks a feature. Neither says
+ *  anything about whether another provider can do the job. Left as bad_request they surface a
+ *  raw provider error to the owner while a working provider sits untried — which is exactly what
+ *  happened once with Groq. Classed as `empty` they are retryable, so the next provider is asked.
+ *
+ *  Shared by every provider that speaks the OpenAI chat API (Groq, Cerebras). */
+export function classifyOpenAiCompatibleFailure(status: number, detail: string): AiFailureKind {
+  const providerFailedTheTask = /failed_generation|failed to validate json|response_format|json_schema|schema is too|not supported/i.test(detail);
+  if (status === 400 && providerFailedTheTask) return 'empty';
+  return classifyStatus(status);
+}
+
 /** A wrong key or a malformed request will fail identically everywhere, so only the first
  *  costs us a call — but a bad key shouldn't stop the *other* providers from being tried. */
 export function shouldTryNextProvider(kind: AiFailureKind): boolean {
