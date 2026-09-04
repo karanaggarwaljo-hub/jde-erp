@@ -24,7 +24,7 @@ test('an out-of-quota failure comes back as 503, so its explanation survives the
   const response = aiFailureResponse(REAL_QUOTA_ERROR, 'Unknown error.');
   assert.equal(response.status, 503);
   const body = await response.json() as { error: string };
-  assert.match(body.error, /no free usage left/i);
+  assert.match(body.error, /used up its free allowance/i);
   assert.match(body.error, /billing/i, 'says what would actually fix it');
   assert.doesNotMatch(body.error, /RESOURCE_EXHAUSTED|429/, 'no raw machinery in the message');
 });
@@ -72,4 +72,38 @@ test('status codes stay inside the range parseJsonOrThrow passes through untouch
     const status = aiFailureStatus(kind);
     assert.ok(status >= 501 && status <= 503, `${kind} -> ${status} must be 501-503 to survive`);
   }
+});
+
+/** Measured against the live key on 2026-09-04: a plain text request answered 200 while, seconds
+ *  apart, search grounding and image generation both answered 429. Blaming "Google's AI" as a
+ *  whole in that state is untrue, and sends the owner hunting for a fault that isn't there. */
+test('the quota message names the capability that ran out, not the whole service', async () => {
+  const search = await (aiFailureResponse(REAL_QUOTA_ERROR, 'x', 'search')).json() as { error: string };
+  assert.match(search.error, /web and image search/i);
+  assert.match(search.error, /rest of the app’s AI is unaffected/i);
+
+  const image = await (aiFailureResponse(REAL_QUOTA_ERROR, 'x', 'image')).json() as { error: string };
+  assert.match(image.error, /image generation/i);
+  assert.doesNotMatch(image.error, /web and image search/i);
+});
+
+test('it no longer claims the whole account is out of usage', async () => {
+  for (const capability of ['search', 'image'] as const) {
+    const body = await (aiFailureResponse(REAL_QUOTA_ERROR, 'x', capability)).json() as { error: string };
+    assert.doesNotMatch(body.error, /no free usage left on this account/i);
+  }
+});
+
+test('without a capability it still says something true and general', async () => {
+  const body = await (aiFailureResponse(REAL_QUOTA_ERROR, 'x')).json() as { error: string };
+  assert.match(body.error, /Google’s AI has used up its free allowance/i);
+});
+
+test('the other failure kinds are unchanged by the capability wording', () => {
+  const authError = Object.assign(new Error('forbidden'), { status: 403 });
+  assert.equal(
+    friendlyAiErrorMessage(authError, 'x', 'search'),
+    friendlyAiErrorMessage(authError, 'x', 'image'),
+    'only the quota message differs by capability'
+  );
 });

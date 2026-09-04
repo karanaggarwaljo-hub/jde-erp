@@ -2,6 +2,33 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-04 — Corrected: it isn't your whole Google account that's out
+
+Yesterday's message said *"Google's AI has no free usage left on this account."* I measured it
+again today against your own key, and that is no longer true — it was too broad:
+
+    ordinary AI request            works        (200)
+    web + image search             out of free  (429)
+    catalog photo generation       out of free  (429)
+
+Your general allowance reset overnight. **Searching the web and making pictures did not** — they
+carry their own, much smaller free limits, and those are what keep running out.
+
+That matters because the old wording implied every AI feature was dead when in fact the rest of
+the app — daily briefing, report summaries, invoice scanning, reorder suggestions — was working
+normally the whole time. It sent you looking for a fault that wasn't there.
+
+The message now names the exact thing that ran out, says plainly that the rest of your AI is
+unaffected, and stops claiming the account is empty.
+
+**The practical position, honestly:** these two features will keep running out on the free tier —
+the allowance is small and resets slowly. There is no backup service for them, because nothing
+else searches the web or draws pictures. They become reliable only with billing enabled on the
+Google AI account, which is yours to switch on.
+
+For catalog photos in the meantime, the "Choose Product Photo" upload on that same screen has
+always worked and needs no AI at all.
+
 ## 2026-09-03 — "What does it fit?" is now something you can actually search
 
 The compatibility field — which machine a part fits — had two problems that made it not worth

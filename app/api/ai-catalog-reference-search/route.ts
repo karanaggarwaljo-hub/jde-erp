@@ -64,6 +64,6 @@ export async function POST(request: Request) {
     console.error('ai-catalog-reference-search route failed:', error);
     // Returns 503/501/502 for the situations we can explain, so the explanation reaches the
     // owner instead of being replaced with the generic 500 sentence. See lib/ai/friendly-error.ts.
-    return aiFailureResponse(error, 'Unknown error searching for references.');
+    return aiFailureResponse(error, 'Unknown error searching for references.', 'search');
   }
 }

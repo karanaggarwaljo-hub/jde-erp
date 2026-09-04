@@ -119,8 +119,8 @@ export async function POST(request: Request) {
     console.error('ai-catalog-generate-image route failed:', error);
     // The same sentence is stored against the product and sent back, but the status now carries
     // it: a 500 body is replaced by a generic line before the owner ever sees it.
-    const message = friendlyAiErrorMessage(error, 'Unknown error generating image.');
+    const message = friendlyAiErrorMessage(error, 'Unknown error generating image.', 'image');
     await updateRow('catalog_products', catalogId, { image_status: 'failed', generation_error: message }).catch(() => {});
-    return aiFailureResponse(error, 'Unknown error generating image.');
+    return aiFailureResponse(error, 'Unknown error generating image.', 'image');
   }
 }

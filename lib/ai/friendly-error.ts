@@ -11,13 +11,31 @@
 
 export type AiFailureKind = 'quota' | 'auth' | 'unavailable' | 'refused' | 'unknown';
 
-/** The routes that talk to Gemini directly (Google Search grounding and image generation) can't
- *  fall back to the backup provider, so their messages say what is actually needed. */
+/** What the route was asking Google to do, so a message can name it instead of blaming
+ *  "Google's AI" as a whole.
+ *
+ *  This distinction is not cosmetic. Measured directly against the live key on 2026-09-04: an
+ *  ordinary text request answered 200 while, seconds apart, web-search grounding and image
+ *  generation both answered 429. The general allowance had reset; these two had not. Saying
+ *  "Google's AI has no free usage left on this account" in that state is simply untrue — the
+ *  rest of the app's AI was working fine — and it sends the owner looking for a fault that
+ *  isn't there. */
+export type GeminiCapability = 'search' | 'image' | 'ai';
+
+const CAPABILITY_NAMES: Record<GeminiCapability, string> = {
+  search: 'Google’s web and image search',
+  image: 'Google’s image generation',
+  ai: 'Google’s AI',
+};
+
+/** These two capabilities have their own, much smaller free allowances than ordinary text, and
+ *  no backup provider can stand in for them — nothing else here searches the web or draws a
+ *  picture. So the message says which one ran out, and what actually restores it. */
 const MESSAGES: Record<Exclude<AiFailureKind, 'unknown'>, string> = {
   quota:
-    'Google’s AI has no free usage left on this account right now. This feature can only use Google’s AI — ' +
-    'there is no backup service for it — so it will start working again when the allowance resets, or once ' +
-    'billing is enabled on the Google AI account.',
+    '{capability} has used up its free allowance. It has a much smaller free limit than ordinary AI ' +
+    'requests — the rest of the app’s AI is unaffected and still working. Nothing else can do this job, ' +
+    'so it returns when that allowance resets, or once billing is enabled on the Google AI account.',
   auth:
     'Google’s AI rejected the key this ERP is using. Check that GEMINI_API_KEY is set correctly and is still valid.',
   unavailable:
@@ -42,9 +60,13 @@ export function classifyAiFailure(error: unknown): AiFailureKind {
 }
 
 /** The plain sentence for a failure, or the fallback when it isn't one of the known situations. */
-export function friendlyAiErrorMessage(error: unknown, fallback: string): string {
+function wording(kind: Exclude<AiFailureKind, 'unknown'>, capability: GeminiCapability): string {
+  return MESSAGES[kind].replace('{capability}', CAPABILITY_NAMES[capability]);
+}
+
+export function friendlyAiErrorMessage(error: unknown, fallback: string, capability: GeminiCapability = 'ai'): string {
   const kind = classifyAiFailure(error);
-  if (kind !== 'unknown') return MESSAGES[kind];
+  if (kind !== 'unknown') return wording(kind, capability);
   return error instanceof Error ? error.message : fallback;
 }
 
@@ -63,10 +85,10 @@ export function aiFailureStatus(kind: AiFailureKind): 500 | 501 | 502 | 503 {
 }
 
 /** One call for a route's catch block: the right words with the right status behind them. */
-export function aiFailureResponse(error: unknown, fallback: string): Response {
+export function aiFailureResponse(error: unknown, fallback: string, capability: GeminiCapability = 'ai'): Response {
   const kind = classifyAiFailure(error);
   const message = kind === 'unknown'
     ? (error instanceof Error ? error.message : fallback)
-    : MESSAGES[kind];
+    : wording(kind, capability);
   return Response.json({ error: message }, { status: aiFailureStatus(kind) });
 }
