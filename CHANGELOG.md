@@ -2,6 +2,36 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-04 — Fixed: the same goods could be returned over and over
+
+Reported: the sales return isn't working as planned.
+
+**It wasn't, and it had already gone wrong on your data.** Invoice INV-1013 (kareem) carries three
+identical returns — SRN-1003, SRN-1004 and SRN-1005, the same two items, ₹3,500 credited each
+time. Stock was handed back three times for what was almost certainly one physical return.
+
+**Why.** The check that stops you returning more than you sold works by remembering which line of
+the invoice each return came from. Editing an invoice throws its lines away and builds new ones,
+so the earlier returns were left attached to nothing and the check reset to "nothing returned
+yet". The edit also wiped the reduction the return had made to the invoice total — so the return
+appeared to vanish, which is presumably why it was done again. And again.
+
+**Now: an invoice with goods returned against it can no longer be edited or deleted.** The Edit
+and Delete buttons grey out and say why, and the database refuses as well, so it cannot be worked
+around. This is the same rule already used for an invoice settled for less. If you genuinely need
+to change one, delete the return first — a deliberate act rather than an accident.
+
+**A second fault fixed at the same time, before it could bite.** A return on an invoice you had
+settled for less would have handed the forgiven amount back to the customer as credit. Measured on
+your own data and undone: settling Teja's invoice short left them owing ₹0, and returning one item
+then moved their balance to **−₹3,186.75** — exactly the amount that had been written off. It now
+stays ₹0. Nobody has hit this, because you have no settled-short invoices yet.
+
+**What still needs you, and I can't answer it from here:** stock was credited back three times.
+The ERP currently says 67 "plantary grari" and 28 "big pinion beraing 803149/10". If those goods
+came back once, the real figures are 4 and 2 lower. Count them and tell me — correcting stock on a
+guess would be worse than the bug.
+
 ## 2026-09-04 — Quotations can now be parked as drafts, like sales do
 
 Sales got this on 1 September, after you reported that opening a draft to change it billed the

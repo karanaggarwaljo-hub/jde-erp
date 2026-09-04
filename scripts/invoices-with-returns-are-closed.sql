@@ -1,0 +1,63 @@
+-- Applied to the live Supabase project on 2026-09-04 as migration
+--   protect_invoices_that_have_returns_and_settlements
+--
+-- Three defects around sales returns, all found from the owner's real data after they reported
+-- "the sales return is not wired or not working as planned".
+--
+-- 1. EDITING AN INVOICE SILENTLY DETACHED ITS RETURNS — and this had already happened.
+--
+--    A return records which invoice LINE it came from (jde_sales_return_items.invoice_item_id),
+--    and that is the whole basis of "you cannot return more than you sold":
+--
+--      select coalesce(sum(sri.qty),0) into v_returned
+--        from jde_sales_return_items sri where sri.invoice_item_id = v_item.id;
+--      if v_line.qty > v_item.qty - v_returned then raise exception ...
+--
+--    But jde_save_sales_invoice's edit path deletes every line and recreates it with fresh uuids.
+--    The old returns then point at rows that no longer exist, v_returned comes back 0, and the
+--    full quantity can be returned all over again.
+--
+--    INV-1013 carries THREE identical returns — SRN-1003, SRN-1004, SRN-1005, same two items,
+--    3,500 credited each time, each against a different and now-deleted set of line ids. Stock
+--    was handed back three times: 6 units of "plantary grari" and 3 of "big pinion beraing
+--    803149/10" for what was almost certainly one physical return.
+--
+--    The edit also overwrote the invoice total the return had reduced (the client sends a total
+--    recomputed from the line items), so the credit vanished from the invoice — which is very
+--    likely why it looked like it had not worked and was repeated.
+--
+-- 2. DELETING such an invoice had the same hole: it would orphan the returns and restore the
+--    stock a second time.
+--
+-- 3. THE RETURN ARITHMETIC IGNORED A SETTLE-FOR-LESS WRITE-OFF. jde_create_sales_return worked
+--    out what the customer still owed as (total - paid), which stopped being true the moment
+--    settlement_write_off existed. Measured against live data and rolled back:
+--
+--      settle INV-1011 short          Teja owes 0.00 (3,186.75 written off)
+--      return 1 x mak hydraulic oil   BEFORE: Teja owes -3,186.75   <- the forgiven amount
+--                                             handed straight back as credit
+--                                     AFTER:  Teja owes 0.00
+--
+--    The amount forgiven now also shrinks with the invoice — you cannot let someone off more than
+--    the invoice still comes to — and the paid/settled status is recomputed as
+--    (paid + written off >= total) rather than (paid >= total).
+--
+-- Both new guards mirror the settle-for-less rule already in jde_save_sales_invoice: an invoice
+-- whose money has been settled elsewhere is closed to editing rather than taught a second kind of
+-- arithmetic. Reopening one stays a deliberate act — delete the return first.
+--
+-- Verified after applying: one overload each, grants {postgres=X, service_role=X} on all three.
+--
+-- HOW IT WAS PATCHED, and why that matters. Each function was rewritten in place —
+-- pg_get_functiondef -> replace() -> execute — rather than retyping 7KB of body, so nothing
+-- unrelated could drift during transcription. Every replacement asserts it actually matched:
+--
+--   if length(v_def) = v_len then raise exception '... body has changed shape'; end if;
+--
+-- so a future body that no longer contains the expected fragment aborts the migration loudly
+-- instead of silently applying nothing. If you re-run something like this, keep that assertion.
+--
+-- NOT DONE HERE, deliberately: the three duplicate returns on INV-1013 were left exactly as they
+-- are. Whether kareem physically returned those goods once or three times is a question about the
+-- shelf, not the database, and the owner was asked to count. Correcting stock on a guess would be
+-- worse than the bug.
