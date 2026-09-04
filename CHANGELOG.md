@@ -2,6 +2,41 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-04 — Quotations can now be parked as drafts, like sales do
+
+Sales got this on 1 September, after you reported that opening a draft to change it billed the
+customer. Quotations never got it, and they had the same problem in a quieter form: **every
+quotation you saved was finished the moment you saved it.** There was no half-way state. A quote
+you were still pricing sat in the list looking exactly like one you had agreed, and the Convert
+button next to it would turn it straight into a real invoice — moving stock and putting the money
+on the customer's account.
+
+Now a quotation works the way a sale does:
+
+- **Save as Draft** parks it. Come back to it as often as you like — change parts, prices,
+  discounts, the GST setting, the customer — and press **Save & Keep as Draft** each time. It stays
+  a draft.
+- **Confirm Quotation** is the separate, deliberate step that finishes it. Only then is it ready to
+  print for the customer or turn into an invoice.
+- A draft **cannot be converted.** The Convert button is greyed out on it and says why, and the
+  database refuses it as well, so it can't happen by any route.
+- A confirmed quotation **cannot be pushed back to a draft** — same rule as a live invoice. Change
+  it, or start again.
+
+The Status column now reads **DRAFT**, **FINAL** or **CONVERTED** in those words. One small
+correction while doing this: a draft used to be labelled EXPIRED once its "valid until" date passed.
+That was wrong — a draft was never given to anybody, so there is nothing to expire. Drafts now
+simply read DRAFT; only a confirmed quotation can go expired.
+
+**Nothing about the money changed.** Saving a quotation still never touches inventory or any
+customer balance, whichever button you press — that only ever happens on conversion, exactly as
+before. Checked against the live database and undone immediately: a quote for 2 x ₹100 plus GST at
+18% saved as a draft at ₹236.00, re-saved as a draft at ₹354.00 after changing the quantity to 3,
+then confirmed. Stock stayed at 300 and the customer's balance at ₹0.00 through all three saves,
+and moved only when the confirmed quote was converted — stock to 297, balance to ₹354.00. Trying
+to convert it while it was still a draft was refused, and so was trying to turn the confirmed one
+back into a draft. You had no saved quotations at all, so nothing existing was touched.
+
 ## 2026-09-04 — Corrected: it isn't your whole Google account that's out
 
 Yesterday's message said *"Google's AI has no free usage left on this account."* I measured it

@@ -101,8 +101,15 @@ export type PaymentAllocation = {
 };
 
 /** The status the atomic save is given for a sale the owner wants to park and finish later. It
- *  reserves stock like any other invoice, but nothing is billed and nothing is owed yet. */
+ *  reserves stock like any other invoice, but nothing is billed and nothing is owed yet.
+ *  Shared with quotations, where a draft is a quote still being worked on: it is not ready to
+ *  give to the customer and cannot be turned into an invoice until it is confirmed. */
 export const DRAFT_STATUS = 'draft';
+
+/** A quotation the owner has confirmed as finished. Only from here can it be turned into an
+ *  invoice — which is the moment it costs stock and puts money on a customer's account. The
+ *  database enforces this too; the button being hidden is not the rule. */
+export const QUOTATION_FINAL_STATUS = 'final';
 
 /** Billed to the counter, with no customer account behind it. A sale that isn't fully paid may
  *  not use this — see the credit check in the sales page. */

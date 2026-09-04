@@ -1,0 +1,120 @@
+-- Applied to the live Supabase project on 2026-09-04 as migrations
+--   save_quotation_keeps_draft_until_confirmed
+--   convert_quotation_requires_a_confirmed_quote
+--
+-- WHY: quotations had no way of being unfinished. Sales invoices do — the owner reported, about
+-- invoices, "when I am trying to edit the draft it's confirming the edit as final invoice, I want
+-- it to be saved as the draft until I confirm it to be the final invoice", and that was fixed on
+-- 2026-09-01. Quotations were left behind: every save produced a quotation that was immediately
+-- printable and immediately convertible, with no step in between where the owner says "this one
+-- is finished". The status column said 'draft', but nothing in the app or the database treated it
+-- as one — a half-typed quote could be converted straight into a real invoice.
+--
+-- Verified against the live database before the change, and rolled back (2 x 100 to customer
+-- 'kareem', GST 18% exclusive, product 'nipple'):
+--
+--   before   new quotation saved                    QT-1001 status=draft total=236.00
+--   before   converting that draft                  ALLOWED -> INV-1017
+--   before   after the conversion                   stock 300 -> 298, balance 0.00 -> 236.00
+--
+-- So an unfinished quote drew FIFO stock and put 236.00 on a customer's account with no
+-- confirmation step anywhere in between. That is what this closes.
+--
+-- WHAT CHANGED
+--
+-- 1. jde_save_quotation takes p_status, which is either 'draft' or 'final'. Nothing else is
+--    accepted — an unknown value is refused rather than guessed at — and an omitted one parks the
+--    quotation as a draft. That default direction is deliberate: only a confirmed quotation can be
+--    converted, so a caller that forgets the parameter can only ever fail safe.
+--
+--    On an edit it will move a quotation from draft to confirmed, and refuses the other way:
+--
+--      if v_result.status <> 'draft' and v_status = 'draft' then
+--        raise exception 'This quotation has already been confirmed, so it cannot be turned
+--                         back into a draft.';
+--
+--    the mirror of a live invoice that cannot be parked. A quotation that had already moved on to
+--    some other state keeps it, so editing the figures never quietly rewrites where it had got to.
+--
+-- 2. jde_convert_quotation_to_invoice refuses a quotation still marked 'draft':
+--
+--      if v_quote.status = 'draft' then raise exception 'This quotation is still a draft. Open it
+--        and press Confirm Quotation before turning it into an invoice.';
+--
+--    Conversion is the only moment a quotation costs anything — it draws FIFO stock and puts the
+--    total on the customer's account — so that is where the guard belongs. It lives in the
+--    database rather than as a disabled button, so nothing sent from a browser can talk its way
+--    past it. The Sales screen disables Convert on a draft as well, purely so the owner is told
+--    why up front instead of after a rejected request.
+--
+-- No column, table or existing figure changed. Quotation arithmetic is byte-identical: the same
+-- per-line rounding, the same discount order, the same inclusive/exclusive tax reading, and the
+-- same 0.01 tolerance check against the totals the browser sends.
+--
+-- TWO TRAPS, both previously hit on this exact function and both avoided here:
+--
+-- 1. Adding a defaulted parameter with CREATE OR REPLACE does NOT replace the function — it
+--    creates a SECOND overload beside it, and PostgREST goes on calling the old body, so the
+--    change silently does nothing. The 15-argument version was therefore dropped by name first:
+--
+--      DROP FUNCTION IF EXISTS public.jde_save_quotation(text, text, boolean, text, text, text,
+--        text, jsonb, numeric, numeric, numeric, numeric, numeric, numeric, text);
+--
+--    Verified afterwards that exactly ONE jde_save_quotation exists, with 16 arguments ending
+--    p_gst_mode text, p_status text.
+--
+-- 2. A function created from scratch is handed to anon and authenticated by Supabase's default
+--    privileges, as EXPLICIT grants that "revoke ... from public" does not remove. Revoked by
+--    name, and the final privileges confirmed to read {postgres=X/postgres,service_role=X/postgres}
+--    for both functions:
+--
+--      REVOKE ALL ON FUNCTION public.jde_save_quotation(...) FROM PUBLIC, anon, authenticated;
+--      GRANT EXECUTE ON FUNCTION public.jde_save_quotation(...) TO service_role;
+--
+-- REHEARSED END TO END against the live database and rolled back, first with the new bodies under
+-- throwaway names and then again against the applied functions. Identical both times:
+--
+--   start                       stock=300  balance=0.00
+--   1 save as draft             QT-1001 status=draft total=236.00
+--   2 convert the draft         refused: still a draft, confirm it first
+--   3 re-save as draft (qty 3)  status=draft total=354.00 lines=1  stock=300 balance=0.00
+--   4 confirm it                status=final total=354.00 lines=1  stock=300 balance=0.00
+--   5 push back to draft        refused: already confirmed
+--   6 unknown status 'sent'     refused: draft or final only
+--   7 convert the confirmed one invoice=INV-1017 converted  stock=297 balance=354.00
+--
+-- Stock and the customer balance did not move on any of the three saves — only on the conversion
+-- at the end — and re-saving kept a single set of lines rather than accumulating copies. Nothing
+-- persisted: the company had 0 quotations before and after, stock stayed at 300 and the balance
+-- at 0.00.
+--
+-- There were no saved quotations in the live database at all when this was applied, so no existing
+-- record needed a status backfill and none could be affected either way.
+
+-- The full function bodies live in the two migrations named at the top of this file. What follows
+-- is only the part worth reading side by side — the status handling that is new.
+
+-- jde_save_quotation, near the top:
+--
+--   v_status := coalesce(nullif(trim(p_status),''),'draft');
+--   if v_status not in ('draft','final') then
+--     raise exception 'A quotation is either saved as a draft or confirmed as final.';
+--   end if;
+--
+-- jde_save_quotation, in the edit branch:
+--
+--   if v_result.status in ('converted','cancelled') then
+--     raise exception 'Converted or cancelled quotations cannot be edited.';
+--   end if;
+--   if v_result.status <> 'draft' and v_status = 'draft' then
+--     raise exception 'This quotation has already been confirmed, so it cannot be turned back into a draft.';
+--   end if;
+--   if v_result.status <> 'draft' then v_status := v_result.status; end if;
+--
+-- ... and the header write now carries it: status=v_status on the update, v_status on the insert.
+--
+-- jde_convert_quotation_to_invoice, immediately after the converted/cancelled check:
+--
+--   if v_quote.status = 'draft' then
+--     raise exception 'This quotation is still a draft. Open it and press Confirm Quotation before turning it into an invoice.';
+--   end if;

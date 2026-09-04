@@ -38,6 +38,7 @@ import ReceivePaymentModal from '@/components/ReceivePaymentModal';
 import { money, paise } from '@/lib/money';
 import {
   DRAFT_STATUS,
+  QUOTATION_FINAL_STATUS,
   GST_STATE_NAMES,
   WALK_IN_CUSTOMER,
   type Customer,
@@ -180,6 +181,7 @@ export default function SalesPage() {
   const [viewingQuotation, setViewingQuotation] = useState<QuotationDetail | null>(null);
   const [quotationError, setQuotationError] = useState('');
   const [savingQuotation, setSavingQuotation] = useState(false);
+  const [savingQuoteDraft, setSavingQuoteDraft] = useState(false);
   const [loadingQuotation, setLoadingQuotation] = useState(false);
   const [convertingQuotationId, setConvertingQuotationId] = useState<string | null>(null);
   const [quoteCustomer, setQuoteCustomer] = useState('');
@@ -236,6 +238,22 @@ export default function SalesPage() {
   // quoted rates already contain the tax.
   const quoteNetTaxableValue = quoteGstInclusive ? quoteTaxableAmount - quoteGstAmount : quoteTaxableAmount;
   const quoteTotal = round2(quoteGstInclusive ? quoteTaxableAmount : quoteTaxableAmount + quoteGstAmount);
+
+  // A quotation draft is a quote still being written: it is not ready to hand to the customer and
+  // cannot be turned into an invoice, which is the only step that costs stock or puts money on an
+  // account. The same idea as a parked sale, and the same word for it.
+  const isQuoteDraft = (quote: Quotation) => quote.status === DRAFT_STATUS;
+  const editingQuoteDraft = Boolean(editingQuotation && editingQuotation.status === DRAFT_STATUS);
+
+  // What the Status column says, in the owner's words rather than the stored value. A draft is
+  // never called EXPIRED: it was never given to anybody, so its validity date is still only a plan.
+  const quoteBadge = (quote: Quotation): { className: string; label: string } => {
+    if (quote.status === 'converted') return { className: 'badge-success', label: 'CONVERTED' };
+    if (quote.status === 'accepted') return { className: 'badge-success', label: 'ACCEPTED' };
+    if (isQuoteDraft(quote)) return { className: 'badge-muted', label: 'DRAFT' };
+    if (quote.validity < todayIso()) return { className: 'badge-warning', label: 'EXPIRED' };
+    return { className: 'badge-info', label: quote.status === QUOTATION_FINAL_STATUS ? 'FINAL' : quote.status.toUpperCase() };
+  };
 
   const selectedCustomer = customers.find((c) => c.name === customer);
   const customerLabel = customer.trim() || WALK_IN_CUSTOMER;
@@ -444,9 +462,17 @@ export default function SalesPage() {
     setQuoteLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, ...patch } : line));
   };
 
-  const saveQuote = async (event: FormEvent) => {
-    event.preventDefault();
+  // Saves the quotation on screen, either parked as a draft or confirmed as final. Deliberately
+  // one path for both, exactly like the invoice side: a draft and a confirmed quote are stored
+  // and checked identically, and the only difference between them is the status they carry — so
+  // "keep it a draft" can never quietly mean "save something different".
+  const persistQuotation = async (status: typeof DRAFT_STATUS | typeof QUOTATION_FINAL_STATUS) => {
     if (!activeCompany) return;
+    // A confirmed quotation is the one case that cannot be parked again: it has been finished and
+    // is ready to turn into an invoice, so pushing it back would hide that from the owner. The
+    // button is not offered either, and the database refuses it as well.
+    if (status === DRAFT_STATUS && editingQuotation && editingQuotation.status !== DRAFT_STATUS) return;
+
     const unmatchedLine = quoteLines.find((line) => line.part.trim() && !partOptions.some((part) => part.value === line.part));
     if (unmatchedLine) {
       setQuotationError(`"${unmatchedLine.part}" doesn't match a part in Inventory — pick one from the dropdown list.`);
@@ -466,7 +492,9 @@ export default function SalesPage() {
       return;
     }
 
-    setSavingQuotation(true);
+    const parking = status === DRAFT_STATUS;
+    const wasDraft = Boolean(editingQuotation && editingQuotation.status === DRAFT_STATUS);
+    if (parking) setSavingQuoteDraft(true); else setSavingQuotation(true);
     setQuotationError('');
     try {
       const quote = await saveQuotation({
@@ -484,22 +512,43 @@ export default function SalesPage() {
         gstPercent: quoteGstPercent,
         gstAmount: quoteGstAmount,
         gstMode: quoteGstInclusive ? 'inclusive' : 'exclusive',
+        status,
         total: quoteTotal,
       });
       await reloadQuotations();
       setShowQuotationModal(false);
       setEditingQuotation(null);
       setActiveTab('quotations');
-      setFeedback(`${quote.id} ${editingQuotation ? 'updated' : 'saved'} — inventory is unchanged until conversion.`);
+      setFeedback(
+        parking
+          ? editingQuotation
+            ? `${quote.id} saved — still a draft, so it can't be turned into an invoice yet.`
+            : `${quote.id} parked as a draft for ${quoteCustomer} — finish it whenever you like.`
+          : wasDraft
+            ? `${quote.id} confirmed — the draft is now a final quotation, ready to print or convert.`
+            : `${quote.id} ${editingQuotation ? 'updated' : 'saved'} — inventory is unchanged until conversion.`
+      );
     } catch (error) {
       setQuotationError(error instanceof Error ? error.message : 'Failed to save quotation.');
     } finally {
-      setSavingQuotation(false);
+      if (parking) setSavingQuoteDraft(false); else setSavingQuotation(false);
     }
+  };
+
+  const saveQuote = (event: FormEvent) => {
+    event.preventDefault();
+    void persistQuotation(QUOTATION_FINAL_STATUS);
   };
 
   const convertQuote = async (quote: Quotation) => {
     if (!activeCompany || quote.status === 'converted') return;
+    // Converting is the step that draws stock and puts the total on the customer's account, so an
+    // unfinished quote must not reach it. The database refuses this too — this only says so in
+    // plain words instead of surfacing a rejection after the fact.
+    if (isQuoteDraft(quote)) {
+      setQuotationError(`${quote.id} is still a draft. Open it and press Confirm Quotation before turning it into an invoice.`);
+      return;
+    }
     if (quote.validity < todayIso() && !window.confirm(`${quote.id} expired on ${quote.validity}. Convert it anyway?`)) return;
     if (!window.confirm(`Create an invoice from ${quote.id}? This will deduct the saved quote quantities from stock.`)) return;
     setConvertingQuotationId(quote.id);
@@ -1227,12 +1276,19 @@ export default function SalesPage() {
               <thead><tr><th>Quote #</th><th>Customer Name</th><th>Quote Date</th><th>Valid Until</th><th className="text-right">Total Amount</th><th>Status</th><th className="text-center">Actions</th></tr></thead>
               <tbody>{quotations.map((quote) => <tr key={quote.id}>
                 <td><span className="pn-chip">{quote.id}</span></td><td style={{ fontWeight: 600 }}>{quote.customer}</td><td className="text-muted">{quote.date}</td><td>{quote.validity}</td><td className="text-right font-semibold">₹{money(Number(quote.total))}</td>
-                <td><span className={`badge ${quote.status === 'converted' || quote.status === 'accepted' ? 'badge-success' : quote.validity < todayIso() ? 'badge-warning' : 'badge-info'}`}>{quote.status === 'draft' && quote.validity < todayIso() ? 'EXPIRED' : quote.status.toUpperCase()}</span></td>
+                <td><span className={`badge ${quoteBadge(quote).className}`}>{quoteBadge(quote).label}</span></td>
                 <td className="text-center"><div className="flex justify-between gap-1 items-center">
                   <button className="btn btn-ghost btn-sm" title="View quotation" aria-label={`View ${quote.id}`} disabled={loadingQuotation} onClick={() => void loadQuotationFor(quote, 'view')}><Eye size={14} /></button>
                   <button className="btn btn-ghost btn-sm" title="Edit quotation" aria-label={`Edit ${quote.id}`} disabled={loadingQuotation || quote.status === 'converted'} onClick={() => void loadQuotationFor(quote, 'edit')}><Pencil size={14} /></button>
                   <button className="btn btn-ghost btn-sm" title="Print quotation" aria-label={`Print ${quote.id}`} onClick={() => window.open(`/sales/quotation/${quote.id}`, '_blank')}><Printer size={14} /></button>
-                  <button className="btn btn-secondary btn-sm" disabled={convertingQuotationId === quote.id || quote.status === 'converted'} onClick={() => void convertQuote(quote)}>{convertingQuotationId === quote.id ? 'Converting…' : quote.status === 'converted' ? 'Converted' : 'Convert'}</button>
+                  {/* A draft cannot be converted: that is the step that draws stock and bills the
+                      customer, and an unfinished quote has no business doing either. */}
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    title={isQuoteDraft(quote) ? 'Still a draft — open it and press Confirm Quotation first' : 'Create an invoice from this quotation'}
+                    disabled={convertingQuotationId === quote.id || quote.status === 'converted' || isQuoteDraft(quote)}
+                    onClick={() => void convertQuote(quote)}
+                  >{convertingQuotationId === quote.id ? 'Converting…' : quote.status === 'converted' ? 'Converted' : 'Convert'}</button>
                 </div></td>
               </tr>)}
               {quotations.length === 0 && (
@@ -1351,7 +1407,7 @@ export default function SalesPage() {
       {viewingQuotation && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '720px' }} role="dialog" aria-modal="true" aria-labelledby="view-quotation-title">
         <div className="modal-header"><div><h3 id="view-quotation-title" className="modal-title">{viewingQuotation.id}</h3><p className="text-muted text-sm">Quotation — inventory is unchanged until conversion.</p></div><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setViewingQuotation(null)}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
-          <div className="form-grid-2"><div><small className="text-muted">Customer</small><div style={{ fontWeight: 600 }}>{viewingQuotation.customer}</div></div><div><small className="text-muted">Quote date</small><div style={{ fontWeight: 600 }}>{viewingQuotation.date}</div></div><div><small className="text-muted">Valid until</small><div style={{ fontWeight: 600 }}>{viewingQuotation.validity}</div></div><div><small className="text-muted">Status</small><div style={{ fontWeight: 600 }}>{viewingQuotation.status.toUpperCase()}</div></div></div>
+          <div className="form-grid-2"><div><small className="text-muted">Customer</small><div style={{ fontWeight: 600 }}>{viewingQuotation.customer}</div></div><div><small className="text-muted">Quote date</small><div style={{ fontWeight: 600 }}>{viewingQuotation.date}</div></div><div><small className="text-muted">Valid until</small><div style={{ fontWeight: 600 }}>{viewingQuotation.validity}</div></div><div><small className="text-muted">Status</small><div style={{ fontWeight: 600 }}>{quoteBadge(viewingQuotation).label}</div>{isQuoteDraft(viewingQuotation) && <small className="text-muted">Not finished — confirm it before turning it into an invoice.</small>}</div></div>
           <div className="table-wrap"><table className="erp-table"><thead><tr><th>Part</th><th className="text-right">Qty</th><th className="text-right">Unit Price</th><th className="text-right">Line Total</th></tr></thead><tbody>{viewingQuotation.items.map((item, index) => <tr key={`${item.part_number}-${index}`}><td><div style={{ fontWeight: 600 }}>{item.name}</div><small className="text-muted">{item.part_number}</small></td><td className="text-right">{item.qty}</td><td className="text-right">₹{Number(item.unit_price).toLocaleString()}</td><td className="text-right">₹{Number(item.line_total).toLocaleString()}</td></tr>)}</tbody></table></div>
           <div className="report-summary"><div className="report-line"><span>Subtotal{viewingQuotation.items.some((item) => Number(item.discount_percent) > 0) ? ' after item discounts' : ''}</span><span>₹{Number(viewingQuotation.subtotal ?? viewingQuotation.total).toLocaleString()}</span></div>{Number(viewingQuotation.discount_amount) > 0 && <div className="report-line"><span>Whole-quote discount ({Number(viewingQuotation.discount_percent).toFixed(1)}%)</span><span className="text-danger">-₹{Number(viewingQuotation.discount_amount).toLocaleString()}</span></div>}<div className="report-line"><span>GST ({Number(viewingQuotation.gst_percent ?? 0).toFixed(1)}%){viewingQuotation.gst_mode === 'inclusive' ? ' — included in the rates' : ''}</span><span>₹{Number(viewingQuotation.gst_amount ?? 0).toLocaleString()}</span></div><div className="report-line report-strong"><span>Quotation Total</span><strong>₹{Number(viewingQuotation.total).toLocaleString()}</strong></div></div>
         </div>
@@ -1367,7 +1423,32 @@ export default function SalesPage() {
           <div className="form-grid-2"><div className="form-group"><label className="form-label">Discount (%)</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={quoteDiscountPercent} onChange={(event) => setQuoteDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} /></div><div className="form-group"><label className="form-label">Discount Amount (₹)</label><input className="form-input" value={quoteDiscountAmount.toFixed(2)} disabled /></div><div className="form-group"><label className="form-label">GST Rate (%)</label><input type="number" min="0" max="28" step="0.1" className="form-input" value={quoteGstPercent} onChange={(event) => setQuoteGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} /><div className="flex gap-2 mt-2" role="group" aria-label="How the quoted rates are priced"><button type="button" className={'btn btn-sm ' + (quoteGstInclusive ? 'btn-secondary' : 'btn-primary')} onClick={() => setQuoteGstInclusive(false)}>GST extra</button><button type="button" className={'btn btn-sm ' + (quoteGstInclusive ? 'btn-primary' : 'btn-secondary')} onClick={() => setQuoteGstInclusive(true)}>GST included</button></div><small className="text-muted">{quoteGstInclusive ? 'Quoted rates already include GST — the tax is taken out of them.' : 'Quoted rates are before GST — the tax is added on top.'}</small></div><div className="form-group"><label className="form-label">GST Amount (₹)</label><input className="form-input" value={quoteGstAmount.toFixed(2)} disabled /></div></div>
           <div className="flex justify-between items-center invoice-summary">{quoteItemDiscountTotal > 0 && <div><span className="text-muted">Item discounts: </span><strong className="text-danger">-₹{quoteItemDiscountTotal.toFixed(2)}</strong></div>}<div><span className="text-muted">Subtotal: </span><strong>₹{quoteSubtotal.toLocaleString()}</strong></div>{quoteDiscountAmount > 0 && <div><span className="text-muted">Whole-quote discount: </span><strong className="text-danger">-₹{quoteDiscountAmount.toFixed(2)}</strong></div>}<div><span className="text-muted">Taxable value: </span><strong>₹{quoteNetTaxableValue.toFixed(2)}</strong></div><div><span className="text-muted">GST ({quoteGstPercent}%){quoteGstInclusive ? ' incl.' : ''}: </span><strong>₹{quoteGstAmount.toFixed(2)}</strong></div><div><strong>Quote Total: </strong><span className="invoice-total">₹{quoteTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div></div>
         </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => { setShowQuotationModal(false); setEditingQuotation(null); }}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!quoteTotal || savingQuotation}>{savingQuotation ? 'Saving…' : editingQuotation ? 'Save Changes' : 'Save Quotation'}</button></div>
+        <div className="modal-footer">
+          <div className="text-muted text-sm" style={{ marginRight: 'auto', maxWidth: '360px' }}>
+            {editingQuoteDraft
+              ? <>This is still a draft. <strong>Confirm Quotation</strong> finishes it, ready to print or turn into an invoice. <strong>Save &amp; Keep as Draft</strong> leaves it parked.</>
+              : editingQuotation
+                ? 'This quotation is already confirmed. Saving your changes keeps it that way.'
+                : 'Save as Draft parks it to finish later — a draft cannot be turned into an invoice until you confirm it.'}
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={() => { setShowQuotationModal(false); setEditingQuotation(null); }}>Cancel</button>
+          {/* Offered on a new quotation and on a draft being edited, so a quote can be worked on
+              over several sittings. Not offered on a confirmed one: it is finished and ready to
+              convert, and quietly parking it again would hide that. */}
+          {(!editingQuotation || editingQuoteDraft) && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={!quoteTotal || savingQuotation || savingQuoteDraft}
+              onClick={() => void persistQuotation(DRAFT_STATUS)}
+            >
+              {savingQuoteDraft ? 'Saving…' : editingQuoteDraft ? 'Save & Keep as Draft' : 'Save as Draft'}
+            </button>
+          )}
+          <button type="submit" className="btn btn-primary" disabled={!quoteTotal || savingQuotation || savingQuoteDraft}>
+            {savingQuotation ? 'Saving…' : editingQuotation ? (editingQuoteDraft ? 'Confirm Quotation' : 'Save Changes') : 'Save Quotation'}
+          </button>
+        </div>
       </form></div></div>}
 
       {viewingInvoice && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '560px' }} role="dialog" aria-modal="true" aria-labelledby="view-invoice-title">
