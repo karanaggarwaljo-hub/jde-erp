@@ -2,6 +2,34 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-03 — "What does it fit?" is now something you can actually search
+
+The compatibility field — which machine a part fits — had two problems that made it not worth
+filling in.
+
+**It wasn't searched at all.** Recording that a filter fits a JCB 3DX BS4 only pays off if, when a
+JCB 3DX BS4 turns up, typing "3DX" finds it. It didn't. Now it does.
+
+**And the same machine was written several ways.** Of the nine parts that had it filled in, four
+were the same machine spelled differently — "N/m bs4", "N/M bs4", "JCB N/M (bs4)", "Jcb BS4 & 5 in
+n/m". A plain search would find one and miss three.
+
+Searching now ignores punctuation and spacing on codes and machine models, so **"BS4" finds all
+four**, and so do "bs 4" and "bs-4". The same fix means a part number typed "331-34392" now finds
+"331/34392", which it never used to.
+
+**The field now suggests the spellings you already use**, commonest first, when you fill it in.
+Picking one instead of retyping it is what stops the same machine becoming four different things.
+It's still free text — you can type anything.
+
+**And supplier documents are now read for it.** If a price list has an Application / Model /
+Suitable For column, or a heading like "JCB 3DX" above a block of rows, the scanner picks it up and
+the bulk fill-in tool offers it. It is told never to guess from the part name — only to copy what
+is actually printed.
+
+Thirteen new automated tests, built from your nine real values, including the one that matters:
+one search for "BS4" reaches every way you have spelled it.
+
 ## 2026-09-03 — Fill in real part numbers from a supplier document, in bulk
 
 Your part numbers are mostly ones this app invented. Of 944 parts: **447 have none at all**, and

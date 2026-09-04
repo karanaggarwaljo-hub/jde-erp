@@ -26,6 +26,7 @@ import { useCompany } from '@/components/CompanyProvider';
 import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, sheetFromScannedParts, fileToBase64, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
 import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { planDetailUpdates, countDetailOutcomes, fieldsToWrite, looksLikeAnInventedCode, type DetailChange } from '@/lib/detail-import';
+import { matchesProductSearch, compatibilitySuggestions } from '@/lib/product-search';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { fifoCostLookup } from '@/lib/stock-value';
@@ -250,10 +251,9 @@ export default function InventoryPage() {
   })();
 
   const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.part_number.toLowerCase().includes(search.toLowerCase()) ||
-      p.oem_number.toLowerCase().includes(search.toLowerCase()) ||
-      p.brand.toLowerCase().includes(search.toLowerCase());
+    // Now also searches what a part FITS, and ignores punctuation in codes and models, so
+    // "BS4" reaches "N/M bs4" and "331-34392" reaches "331/34392". See lib/product-search.ts.
+    const matchesSearch = matchesProductSearch(p, search);
     const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
     return matchesSearch && matchesCategory;
   });
@@ -882,7 +882,7 @@ export default function InventoryPage() {
               <Search className="search-bar-icon" size={16} />
               <input
                 type="text"
-                placeholder="Search by Part #, OEM #, Description, Brand..."
+                placeholder="Search by part no, OEM, name, brand, or what it fits (e.g. 3DX, BS4)"
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               />
@@ -1090,7 +1090,19 @@ export default function InventoryPage() {
 
                   <div className="form-group">
                     <label className="form-label">Fits which machines</label>
-                    <input className="form-input" placeholder="e.g. JCB 3DX, JCB 4DX" value={formData.compatibility} onChange={e => setFormData({ ...formData, compatibility: e.target.value })} />
+                    <input
+                      className="form-input"
+                      list="compatibility-options"
+                      placeholder="e.g. JCB 3DX, JCB N/M (bs4)"
+                      value={formData.compatibility}
+                      onChange={e => setFormData({ ...formData, compatibility: e.target.value })}
+                    />
+                    {/* The spellings this shop already uses, commonest first. Picking one instead
+                        of retyping it is what keeps "N/M bs4" and "N/m bs4" a single thing that a
+                        search can find — the field stays free text either way. */}
+                    <datalist id="compatibility-options">
+                      {compatibilitySuggestions(products).map((option) => <option key={option} value={option} />)}
+                    </datalist>
                   </div>
                 </div>
 
