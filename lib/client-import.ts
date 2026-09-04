@@ -618,6 +618,9 @@ export type ScannedPart = {
   brand: string | null;
   category: string | null;
   hsn_code: string | null;
+  /** Which machine or model the document says this part fits. Only ever what is printed —
+   *  the scanner is told never to infer it from the part name. */
+  compatibility: string | null;
   qty: number | null;
   cost_price: number | null;
   sale_price: number | null;
@@ -633,6 +636,7 @@ const SCAN_COLUMNS = {
   brand: 'Brand',
   category: 'Category',
   hsn: 'HSN Code',
+  compatibility: 'Compatibility',
   qty: 'Qty',
   cost: 'Cost Price',
   sale: 'Sale Price',
@@ -655,6 +659,7 @@ export function sheetFromScannedParts(items: ScannedPart[]): {
     [SCAN_COLUMNS.brand]: text(item.brand),
     [SCAN_COLUMNS.category]: text(item.category),
     [SCAN_COLUMNS.hsn]: text(item.hsn_code),
+    [SCAN_COLUMNS.compatibility]: text(item.compatibility),
     [SCAN_COLUMNS.qty]: item.qty ?? '',
     [SCAN_COLUMNS.cost]: item.cost_price ?? '',
     [SCAN_COLUMNS.sale]: item.sale_price ?? '',
@@ -679,7 +684,7 @@ export function sheetFromScannedParts(items: ScannedPart[]): {
     name: text(item.name) || text(item.part_number),
     brand: text(item.brand),
     category: text(item.category),
-    compatibility: '',
+    compatibility: text(item.compatibility),
     cost_price: num(item.cost_price),
     mrp: num(item.mrp),
     sale_price: num(item.sale_price),
