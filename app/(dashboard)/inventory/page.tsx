@@ -10,6 +10,7 @@ import {
   Trash2,
   AlertTriangle,
   Upload,
+  Download,
   Sparkles,
   Boxes,
   LayoutGrid,
@@ -27,6 +28,7 @@ import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColu
 import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { planDetailUpdates, countDetailOutcomes, fieldsToWrite, looksLikeAnInventedCode, type DetailChange } from '@/lib/detail-import';
 import { matchesProductSearch, compatibilitySuggestions } from '@/lib/product-search';
+import { buildPartsWorksheet, countUnanswered, worksheetToCsv, worksheetFileName } from '@/lib/parts-worksheet';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { fifoCostLookup } from '@/lib/stock-value';
@@ -249,6 +251,9 @@ export default function InventoryPage() {
       warnings,
     };
   })();
+
+  // How much of the job is left, for the button and the confirmation to say honestly.
+  const worksheetPending = countUnanswered(buildPartsWorksheet(products));
 
   const filteredProducts = products.filter(p => {
     // Now also searches what a part FITS, and ignores punctuation in codes and models, so
@@ -575,6 +580,28 @@ export default function InventoryPage() {
     }
   };
 
+  /** A spreadsheet of every part in this company, for correcting part numbers away from the
+   *  desk. Its columns are named so the answers import straight back through the existing
+   *  "Fill in part numbers & details" mode — see lib/parts-worksheet.ts for why the read-only
+   *  heading is worded the way it is. Built in the browser from rows already on screen: no
+   *  server round trip, and it can only ever contain the active company's parts. */
+  const downloadWorksheet = () => {
+    const csv = worksheetToCsv(buildPartsWorksheet(products));
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = worksheetFileName(activeCompany?.name ?? '', new Date().toISOString().slice(0, 10));
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setFeedback(
+      worksheetPending > 0
+        ? `Worksheet downloaded — ${worksheetPending} of ${products.length} parts still need a real part number. Fill in the "Part No" column, then bring it back through Import from File.`
+        : `Worksheet downloaded — all ${products.length} parts already have a part number.`
+    );
+  };
+
   const handleFileImport = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     // Cleared before the await so picking the same file twice in a row still fires onChange.
@@ -774,6 +801,12 @@ export default function InventoryPage() {
           <p className="page-subtitle">Track stock levels, locations & pricing{catalogueSummary}</p>
         </div>
         <div className="flex gap-2">
+          <button className="btn btn-secondary" onClick={downloadWorksheet} disabled={products.length === 0}
+            title={worksheetPending > 0
+              ? `Download a spreadsheet of all ${products.length} parts — ${worksheetPending} still need a real part number`
+              : 'Download a spreadsheet of all your parts'}>
+            <Download size={16} /> Parts Worksheet{worksheetPending > 0 ? ` (${worksheetPending})` : ''}
+          </button>
           <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
             <Upload size={16} /> {importing ? 'Reading…' : 'Import from File'}
             <input type="file" accept={`${SPREADSHEET_ACCEPT},${SCANNABLE_IMPORT_ACCEPT}`} hidden disabled={importing} onChange={handleFileImport} />

@@ -2,6 +2,35 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-04 — New: a parts worksheet, for fixing part numbers away from the desk
+
+Most of your part numbers are codes this app invented from the first letters of the name —
+`AIR-F90`, `STI-B168`, `SP-053`. They mean nothing to a customer or a supplier. The real numbers
+are stamped on the parts and printed on supplier paperwork, and nothing can work them out from
+`AIR-F90`; they have to be read off the shelf.
+
+**Inventory now has a "Parts Worksheet" button.** It downloads a spreadsheet of every part in the
+company you're working in, with everything already known filled in — name, brand, category, what
+it fits, stock — and the part number left blank where it needs an answer. The parts still needing
+one are sorted to the top, and the button says how many that is.
+
+Take it to the rack on a phone or a printout, fill in the **Part No** column, then bring the file
+back through **Import from File → "Fill in part numbers & details"**, which already exists. Nothing
+new to learn on the way back.
+
+**It won't offer you a wrong answer.** An invented code is never pre-filled as if it were real —
+the blank is the work. The old code still appears in a separate column so you can tell which row
+is which, and that column is named so the importer can never read it back in.
+
+**Where it can already answer for you, it does.** Eight of your parts have the real number typed
+into the *name* — "rear hub bearing 37425-625", "small pinion beraing 89449/10", "GBP-600, GREASE
+BUCKET 6KG DURELO". Those come pre-filled. It is deliberately careful not to mistake a size or a
+year for a part number, so "mak hydraulic oil 26l", "jcb engine oil 15l" and "air filter jcb 2012"
+are all left blank rather than guessed at.
+
+Sixteen new automated tests, built from your real part names, including the ones that check a
+weight or a year is never offered as a part number.
+
 ## 2026-09-04 — Corrected: it isn't your whole Google account that's out
 
 Yesterday's message said *"Google's AI has no free usage left on this account."* I measured it
