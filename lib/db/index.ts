@@ -430,6 +430,44 @@ export async function writeOffInvoiceBalance(input: WriteOffInvoiceBalanceInput)
   return data as WriteOffResult;
 }
 
+export type InvoiceCostRows = {
+  items: Array<{ id: string }>;
+  consumptions: Array<{ invoice_item_id: string; qty: number; unit_cost: number }>;
+};
+
+/** The lines of one invoice and the FIFO draws recorded against them — the raw material for
+ *  working out what a sale actually made (lib/invoice-profit.ts).
+ *
+ *  Fetched per invoice rather than by handing the browser the whole jde_stock_consumptions
+ *  table: that table gains a row for every line of every sale ever made, so loading it into a
+ *  screen to answer a question about one invoice gets slower every month the business trades.
+ *  Both reads are pinned to the company, so an invoice id guessed from another company's
+ *  numbering returns nothing rather than its costs. */
+export async function getInvoiceCostRows(companyId: string, invoiceId: string): Promise<InvoiceCostRows> {
+  const client = getClient();
+  const { data: items, error: itemsError } = await client
+    .from(supaTable('invoice_items'))
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('invoice_id', invoiceId);
+  if (itemsError) throw itemsError;
+
+  const rows = (items as Array<{ id: string }> | null) ?? [];
+  if (rows.length === 0) return { items: [], consumptions: [] };
+
+  const { data: consumptions, error: consumptionsError } = await client
+    .from(supaTable('stock_consumptions'))
+    .select('invoice_item_id, qty, unit_cost')
+    .eq('company_id', companyId)
+    .in('invoice_item_id', rows.map((row) => row.id));
+  if (consumptionsError) throw consumptionsError;
+
+  return {
+    items: rows,
+    consumptions: (consumptions as InvoiceCostRows['consumptions'] | null) ?? [],
+  };
+}
+
 /** Atomically reverses a recorded payment — puts every invoice it was applied to back to its
  *  prior paid amount and status, corrects the customer's balance by the same total, then removes
  *  the payment and its allocations. Used when a payment was entered wrong, not for a genuine

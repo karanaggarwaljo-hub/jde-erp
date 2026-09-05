@@ -2,6 +2,42 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-05 — Settling an invoice is one step now, and tells you what you made
+
+Reported: the settlement system is wrong, it has to be simple enough to just record, and it should
+never show how much I lost — it should show how much money I made.
+
+**Both were fair.** Settling a customer who paid less than the invoice took two jobs on two
+screens: record the cash on the payments modal, then come back to the invoice and open "Settle for
+less" to type the shortfall as a separate write-off. You had to do the subtraction yourself, the
+only number you were ever asked for was the one you were losing, and the button said **Write It
+Off**.
+
+**Now it is one dialog and one number — the money in your hand.** Open the invoice and press
+**Settle & close**. It asks "How much is <customer> paying now?", and does the rest itself:
+records that cash as a real payment against the invoice, then closes whatever is left so it stops
+showing as owed. If they already paid everything they were going to, leave it at 0 and it just
+closes the balance, exactly as before.
+
+**And it leads with what the sale earned.** The dialog now works out the true cost of the goods on
+that invoice from the actual batches they were sold from, and shows **"You made on this sale
+₹—"** as the headline, with the money received and what the goods cost underneath. The amount
+settled off is still on screen — agreeing to it is the whole point, so hiding it would be hiding a
+real decision — but it is a quiet line under the result, never the headline, and never the figure
+you type. The confirmation reads "INV-1011 settled and closed — ₹40,000 received on this sale.
+Profit on it: ₹8,000."
+
+**What has not changed, deliberately.** Your books are untouched. The invoice still keeps the total
+it was issued for, only money that actually arrived is counted as received, and the settled-off
+amount is still recorded separately with its reason and its audit row. The framing changed; not
+one number did.
+
+**Two honest limits.** If the cost of any line on the invoice was never recorded, no profit figure
+is shown at all rather than a flattering guess — the missing cost would otherwise be counted as
+zero and the whole sale value reported as profit. And if the payment goes through but closing the
+balance fails, it says so plainly, tells you the money is safe and not to enter it again, and
+leaves the dialog set up to finish just the part that didn't.
+
 ## 2026-09-04 — Fixed: the same goods could be returned over and over
 
 Reported: the sales return isn't working as planned.
