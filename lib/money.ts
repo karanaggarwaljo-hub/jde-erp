@@ -20,3 +20,12 @@ export const paise = (value: number): string =>
 /** Rounded to whole rupees — for headline figures and KPI tiles, where the paise are noise. */
 export const wholeMoney = (value: number): string =>
   Math.round(Number(value || 0)).toLocaleString('en-IN');
+
+/** Rupees, to the paisa — for a figure that will be stored or compared, not merely displayed.
+ *
+ *  Adding EPSILON before rounding is what makes 1.005 round up to 1.01 rather than down to 1.00:
+ *  the binary representation of 1.005 is a hair below it, so plain Math.round goes the wrong way
+ *  on exactly the halfway cases a price list is full of. It also keeps a subtraction of two
+ *  two-decimal figures from surfacing as 1356.7500000000002 in a sentence someone reads. */
+export const round2 = (value: number): number =>
+  Math.round(((Number(value) || 0) + Number.EPSILON) * 100) / 100;
