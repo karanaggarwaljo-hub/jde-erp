@@ -37,6 +37,7 @@ import { buildCustomerLedger } from '@/lib/customer-ledger';
 import AddCustomerModal from '@/components/AddCustomerModal';
 import ReceivePaymentModal from '@/components/ReceivePaymentModal';
 import { money, paise, round2 } from '@/lib/money';
+import { amountReceived, billTotals, lineDiscountAmount, lineDiscountPercent, lineGross, lineNet } from '@/lib/invoice-totals';
 import {
   DRAFT_STATUS,
   QUOTATION_FINAL_STATUS,
@@ -202,53 +203,32 @@ export default function SalesPage() {
   const [quoteGstPercent, setQuoteGstPercent] = useState(18);
   const [quoteGstInclusive, setQuoteGstInclusive] = useState(false);
 
-  // Two discounts now exist and they stack in a fixed order: each line is discounted on its own
-  // first, and the invoice-wide discount then applies to whatever that leaves. Doing it the other
-  // way round would change the tax base, so the order is not cosmetic.
-  const lineGross = (line: InvoiceLine) => Number(line.qty) * Number(line.price);
-  const lineDiscountPercent = (line: InvoiceLine) => Math.min(100, Math.max(0, Number(line.discount) || 0));
-  const lineNet = (line: InvoiceLine) => lineGross(line) * (1 - lineDiscountPercent(line) / 100);
+  // Both bills are priced by the same tested arithmetic — see lib/invoice-totals.ts for why the
+  // invoice used to disagree with the quotation, and how it showed up in the data.
+  const invoiceMoney = billTotals({ lines, discountPercent, gstPercent, gstInclusive });
+  const {
+    grossSubtotal, itemDiscountTotal, subtotal, discountAmount,
+    taxableAmount, gstAmount, netTaxableValue, total,
+  } = invoiceMoney;
+  const paidAmount = amountReceived(paymentStatus, total, amountPaid);
 
-  const grossSubtotal = lines.reduce((sum, line) => sum + lineGross(line), 0);
-  const subtotal = lines.reduce((sum, line) => sum + lineNet(line), 0);
-  const itemDiscountTotal = grossSubtotal - subtotal;
-  const discountAmount = subtotal * (discountPercent / 100);
-  const taxableAmount = subtotal - discountAmount;
-  // `taxableAmount` above is the amount left after both discounts. What it MEANS depends on the
-  // mode: priced exclusive it is the taxable value and tax is added to it; priced inclusive it is
-  // already the amount payable and the tax is inside it. Both are computed from the same figure,
-  // so switching the toggle never re-reads or rewrites anything the owner typed.
-  const gstAmount = gstInclusive
-    ? taxableAmount * (gstPercent / (100 + gstPercent))
-    : taxableAmount * (gstPercent / 100);
-  // The GST taxable value — what the tax is actually charged on — in both modes.
-  const netTaxableValue = gstInclusive ? taxableAmount - gstAmount : taxableAmount;
-  const total = gstInclusive ? taxableAmount : taxableAmount + gstAmount;
-  const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
-  // Mirrors jde_save_quotation exactly. That function recomputes every figure from the lines and
-  // rejects the save if the numbers sent differ by more than a paisa, so rounding here must match
-  // it step for step: each line rounded, then each total rounded, never one sum rounded at the end.
-  // round2 is the shared one in lib/money.ts — it rounds half up on the .005 cases a price list is
-  // full of, which is what the database function does too.
-  const quoteLineGross = (line: InvoiceLine) => round2(Number(line.qty) * Number(line.price));
-  const quoteLineDiscount = (line: InvoiceLine) =>
-    round2(quoteLineGross(line) * (Math.min(100, Math.max(0, Number(line.discount) || 0)) / 100));
-  const quoteLineNet = (line: InvoiceLine) => quoteLineGross(line) - quoteLineDiscount(line);
-
-  const quoteGrossSubtotal = quoteLines.reduce((sum, line) => sum + quoteLineGross(line), 0);
-  const quoteSubtotal = quoteLines.reduce((sum, line) => sum + quoteLineNet(line), 0);
-  const quoteItemDiscountTotal = quoteGrossSubtotal - quoteSubtotal;
-  const quoteDiscountAmount = round2(quoteSubtotal * (quoteDiscountPercent / 100));
-  const quoteTaxableAmount = quoteSubtotal - quoteDiscountAmount;
-  const quoteGstAmount = round2(
-    quoteGstInclusive
-      ? quoteTaxableAmount * (quoteGstPercent / (100 + quoteGstPercent))
-      : quoteTaxableAmount * (quoteGstPercent / 100)
-  );
-  // What the tax is charged on, which stops being the same as the discounted amount once the
-  // quoted rates already contain the tax.
-  const quoteNetTaxableValue = quoteGstInclusive ? quoteTaxableAmount - quoteGstAmount : quoteTaxableAmount;
-  const quoteTotal = round2(quoteGstInclusive ? quoteTaxableAmount : quoteTaxableAmount + quoteGstAmount);
+  const quoteMoney = billTotals({
+    lines: quoteLines,
+    discountPercent: quoteDiscountPercent,
+    gstPercent: quoteGstPercent,
+    gstInclusive: quoteGstInclusive,
+  });
+  const quoteSubtotal = quoteMoney.subtotal;
+  const quoteItemDiscountTotal = quoteMoney.itemDiscountTotal;
+  const quoteDiscountAmount = quoteMoney.discountAmount;
+  const quoteGstAmount = quoteMoney.gstAmount;
+  const quoteNetTaxableValue = quoteMoney.netTaxableValue;
+  const quoteTotal = quoteMoney.total;
+  // Same three helpers as the invoice lines use; kept under the quote names so the quotation
+  // markup below reads as it always did.
+  const quoteLineGross = lineGross;
+  const quoteLineDiscount = lineDiscountAmount;
+  const quoteLineNet = lineNet;
 
   // A quotation draft is a quote still being written: it is not ready to hand to the customer and
   // cannot be turned into an invoice, which is the only step that costs stock or puts money on an
