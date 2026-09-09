@@ -2,6 +2,28 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-09 — Housekeeping: one rule per calculation, and two real fixes fell out
+
+Tidying the three biggest screens. In doing it, two genuine faults turned up that the duplication
+had been hiding.
+
+**Your invoice totals were being stored with extra decimals.** Invoice INV-1005 sits in the
+database as ₹5002.624 — three decimal places in a money column. The invoice screen and the
+quotation screen each had their own copy of the same arithmetic, and only the quotation one
+rounded properly at each step. They now share one tested calculation, so a total is a real
+two-decimal amount. Invoices already saved are untouched.
+
+**Inventory showed a 100% margin on parts you have no cost for.** The average margin at the top of
+the screen deliberately skipped those parts, because averaging them in reports a profit nobody
+earns — but each row printed the fictional 100% anyway, so the two disagreed. A part with no
+recorded cost now shows a dash, and hovering says why.
+
+Also removed: two calculations on the Sales screen that nothing was reading, and the third copy of
+the "how much of this was paid" rule, which now exists once and is shared by Sales and Purchases.
+
+Twenty-three new automated tests cover the money arithmetic and the margin rules — the two places
+where a mistake costs real money. 209 passing in total.
+
 ## 2026-09-09 — Housekeeping: one set of ageing rules instead of two
 
 No new features here, and nothing you do changes. This is tidying that removes a way for the app

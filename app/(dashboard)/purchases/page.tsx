@@ -28,6 +28,7 @@ import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-p
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { money, wholeMoney } from '@/lib/money';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { amountReceived } from '@/lib/invoice-totals';
 import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
 
 type PurchaseTab = 'purchases' | 'invoices';
@@ -225,7 +226,8 @@ export default function PurchasesPage() {
   const [loadingReturnAvailability, setLoadingReturnAvailability] = useState(false);
 
   const total = lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0);
-  const paidAmount = paymentStatus === 'paid' ? total : paymentStatus === 'partial' ? Math.min(Math.max(amountPaid, 0), total) : 0;
+  // Same rule as everywhere else money is taken in — see lib/invoice-totals.ts.
+  const paidAmount = amountReceived(paymentStatus, total, amountPaid);
   const importReviews = importPreview ? reviewImportedLines(importPreview.lines, products, importLinks) : [];
   const importWarningCount = importReviews.reduce((count, review) => count + review.warnings.length + review.conflicts.length, 0);
   const importNewPartCount = importReviews.filter((review) => !review.matchedProduct && !review.needsDecision).length;
@@ -757,9 +759,7 @@ export default function PurchasesPage() {
   const awaitingSentence = `${pendingOrders.length} ${pendingOrders.length === 1 ? 'order' : 'orders'} worth ₹${wholeMoney(pendingValue)} ${pendingOrders.length === 1 ? 'is' : 'are'} still awaiting delivery${overdueOrders.length > 0 ? `, and ${overdueOrders.length} ${overdueOrders.length === 1 ? 'is' : 'are'} past the expected date on the order` : ''}.`;
 
   const importedPreviewTotal = importPreview ? importPreview.lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0) : 0;
-  const importPaidAmount = importPaymentStatus === 'paid'
-    ? importedPreviewTotal
-    : importPaymentStatus === 'partial' ? Math.min(Math.max(importAmountPaid, 0), importedPreviewTotal) : 0;
+  const importPaidAmount = amountReceived(importPaymentStatus, importedPreviewTotal, importAmountPaid);
 
   return (
     <div>

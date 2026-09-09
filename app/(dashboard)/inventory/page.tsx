@@ -28,6 +28,7 @@ import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColu
 import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { planDetailUpdates, countDetailOutcomes, fieldsToWrite, looksLikeAnInventedCode, type DetailChange } from '@/lib/detail-import';
 import { matchesProductSearch, compatibilitySuggestions } from '@/lib/product-search';
+import { averageMarginPercent, marginPercent } from '@/lib/margin';
 import { buildPartsWorksheet, countUnanswered, worksheetToCsv, worksheetFileName } from '@/lib/parts-worksheet';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
@@ -286,12 +287,10 @@ export default function InventoryPage() {
   const outOfStockCount = products.filter(isOutOfStock).length;
   const stockValue = products.reduce((total, p) => total + Number(p.current_stock || 0) * fifoCostFor(p), 0);
   const brandCount = new Set(products.map((p) => p.brand).filter(Boolean)).size;
-  // Only parts that carry both a cost and a sale price can have a margin — averaging in the ones
-  // priced at zero cost would report a 100% margin that nobody actually earns.
-  const marginParts = products.filter((p) => Number(p.sale_price) > 0 && fifoCostFor(p) > 0);
-  const averageMargin = marginParts.length > 0
-    ? marginParts.reduce((total, p) => total + ((Number(p.sale_price) - fifoCostFor(p)) / Number(p.sale_price)) * 100, 0) / marginParts.length
-    : null;
+  // Only parts that carry both a cost and a sale price have a margin at all — see lib/margin.ts,
+  // which is now also what each row uses, so the average and the rows agree about the awkward ones.
+  const marginParts = products.filter((p) => marginPercent(Number(p.sale_price), fifoCostFor(p)) !== null);
+  const averageMargin = averageMarginPercent(products, (p) => Number(p.sale_price), fifoCostFor);
 
   const suggestPartDetails = async () => {
     if (!formData.name.trim()) return;
@@ -958,7 +957,7 @@ export default function InventoryPage() {
               const isLow = isLowStock(p);
               const isOut = isOutOfStock(p);
               const fifoCost = fifoCostFor(p);
-              const margin = p.sale_price > 0 ? ((p.sale_price - fifoCost) / p.sale_price) * 100 : 0;
+              const margin = marginPercent(Number(p.sale_price), fifoCost);
               const status = isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
               const statusBadge = isOut ? 'badge-danger' : isLow ? 'badge-warning' : 'badge-success';
               const meter = meterPercent(p);
@@ -996,7 +995,9 @@ export default function InventoryPage() {
                   <td className="text-right">₹{money(fifoCost)}</td>
                   <td className="text-right font-semibold">₹{money(p.sale_price)}</td>
                   <td className="text-right">
-                    <span className={margin >= 0 ? 'text-success font-semibold' : 'text-danger font-semibold'}>{margin.toFixed(1)}%</span>
+                    {margin === null
+                      ? <span className="text-muted" title="No cost recorded for this part yet, so there is no margin to show">—</span>
+                      : <span className={margin >= 0 ? 'text-success font-semibold' : 'text-danger font-semibold'}>{margin.toFixed(1)}%</span>}
                   </td>
                   <td>
                     <span className={`badge ${statusBadge}`}>
