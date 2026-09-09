@@ -2,6 +2,23 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-09 — Housekeeping: the Inventory screen split up
+
+No change to how anything works — this is the three pop-up windows on the Inventory screen moving
+into their own files, the same tidy-up Sales and Purchases have just had. Nothing you click behaves
+differently: the add and edit part window, the "are you sure you want to delete this part" box, and
+the import-from-file window all look and act exactly as before, down to the wording.
+
+The Inventory page is now 1,091 lines instead of 1,699. The add/edit part window is 307 lines of
+its own, the import window 425, and the delete confirmation 39. The shapes those windows share with
+the page — what a part looks like, what is typed into the form, what an imported file holds — moved
+to one small file, so there is one definition of each rather than a copy per screen.
+
+Tidying it also turned up seven things the page was still fetching but no longer using now that the
+windows have moved out. Those are gone.
+
+That is all three of the big screens done.
+
 ## 2026-09-09 — Housekeeping: the Purchases screen split up
 
 No change to how anything works — the same treatment the Sales screen just had, applied to

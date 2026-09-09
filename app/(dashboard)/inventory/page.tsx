@@ -11,7 +11,6 @@ import {
   AlertTriangle,
   Upload,
   Download,
-  Sparkles,
   Boxes,
   LayoutGrid,
   Percent,
@@ -24,34 +23,26 @@ import {
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { money, wholeMoney } from '@/lib/money';
 import { useCompany } from '@/components/CompanyProvider';
-import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sampleColumnValues, sheetFromScannedParts, fileToBase64, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
-import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatch } from '@/lib/cost-import';
-import { planDetailUpdates, countDetailOutcomes, fieldsToWrite, looksLikeAnInventedCode, type DetailChange } from '@/lib/detail-import';
-import { matchesProductSearch, compatibilitySuggestions } from '@/lib/product-search';
+import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sheetFromScannedParts, fileToBase64, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
+import { planCostUpdates, findExistingProduct, type CostMatch } from '@/lib/cost-import';
+import { planDetailUpdates, looksLikeAnInventedCode } from '@/lib/detail-import';
+import { matchesProductSearch } from '@/lib/product-search';
 import { averageMarginPercent, marginPercent } from '@/lib/margin';
 import { buildPartsWorksheet, countUnanswered, worksheetToCsv, worksheetFileName } from '@/lib/parts-worksheet';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { fifoCostLookup } from '@/lib/stock-value';
 import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
-
-type Product = {
-  id: string;
-  company_id: string;
-  part_number: string;
-  oem_number: string;
-  hsn_code: string;
-  name: string;
-  brand: string;
-  category: string;
-  compatibility: string;
-  cost_price: number;
-  mrp: number;
-  sale_price: number;
-  current_stock: number;
-  min_stock: number;
-  location: string;
-};
+import PartFormModal from '@/components/inventory/PartFormModal';
+import DeletePartModal from '@/components/inventory/DeletePartModal';
+import ImportFromFileModal from '@/components/inventory/ImportFromFileModal';
+import type {
+  CostSheetImport,
+  ImportMode,
+  PartDraftSummary,
+  PartFormData,
+  Product,
+} from '@/lib/inventory-types';
 
 type StockLayer = { id: string; product_id: string; unit_cost: number; qty_remaining: number; created_at: string };
 
@@ -148,12 +139,10 @@ export default function InventoryPage() {
   // Apply — a bulk price overwrite is not something to do on a file-picker click.
   // The sheet is read once; which column means what stays the owner's choice, so changing it
   // re-plans instantly without touching the file again.
-  const [costSheet, setCostSheet] = useState<
-    { fileName: string; sheet: SheetForCostUpdate; newParts: ImportedProduct[]; guessedFields: string[] } | null
-  >(null);
+  const [costSheet, setCostSheet] = useState<CostSheetImport | null>(null);
   // One file can mean two different jobs. Which one is proposed from the file's own content —
   // rows that match parts already stocked are a price list; rows that don't are a parts list.
-  const [importMode, setImportMode] = useState<'costs' | 'new' | 'details'>('costs');
+  const [importMode, setImportMode] = useState<ImportMode>('costs');
   // Individual field changes the owner has unticked, keyed "row:field". Storing exclusions
   // rather than selections means a change that appears after re-reading is offered by default
   // instead of being silently skipped.
@@ -178,7 +167,7 @@ export default function InventoryPage() {
   // running count and the footer wording, and resets whenever the dialog is reopened.
   const [savedThisSession, setSavedThisSession] = useState(0);
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<PartFormData>({
     part_number: '',
     oem_number: '',
     hsn_code: '',
@@ -216,7 +205,7 @@ export default function InventoryPage() {
   // Everything the summary panel shows, derived from what is currently typed. Nothing here is
   // stored or guessed — an empty field simply produces an empty readout, and each warning
   // describes a condition that is actually true of the numbers on screen right now.
-  const draft = (() => {
+  const draft: PartDraftSummary = (() => {
     const cost = Number(formData.cost_price) || 0;
     const sale = Number(formData.sale_price) || 0;
     const mrp = Number(formData.mrp) || 0;
@@ -542,7 +531,7 @@ export default function InventoryPage() {
       // Propose the job that fits the file. A sheet whose rows are mostly parts already stocked is
       // a price list; one whose rows are mostly unknown is a list of parts to add. Getting this
       // wrong is harmless — it is a preview either way — but getting it right saves a step.
-      let mode: 'costs' | 'new' | 'details' = 'new';
+      let mode: ImportMode = 'new';
       if (costColumnGuess && idColumnGuess) {
         const rows = extractCostRows(sheet, costColumnGuess, idColumnGuess).rows;
         const known = planCostUpdates(rows, products).filter((m) => m.product).length;
@@ -1064,636 +1053,39 @@ export default function InventoryPage() {
 
       {/* Add / Edit Product Modal */}
       {showModal && (
-        <div className="modal-overlay">
-          <div className="modal-box" style={{ maxWidth: '980px' }}>
-            <div className="modal-header">
-              <div>
-                <h3 className="modal-title">{editingProduct ? 'Edit Spare Part' : 'Add New Spare Part'}</h3>
-                <p className="page-subtitle" style={{ marginTop: '2px' }}>
-                  {editingProduct
-                    ? <>Editing <span className="pn-chip">{editingProduct.part_number}</span> · changes apply the moment you save</>
-                    : 'Added to this company’s catalogue and available to sell straight away'}
-                </p>
-              </div>
-              <button className="btn btn-ghost btn-sm" disabled={savingProduct} onClick={() => setShowModal(false)}>✕</button>
-            </div>
-            <form onSubmit={handleSave}>
-              {/* Form on the left, a live picture of the part on the right — the same split the
-                  invoice dialog uses, so what you are about to create is visible while you type
-                  rather than only after saving. */}
-              <div className="modal-body part-form">
-                <div className="part-form-fields">
-                {saveError && <div className="alert alert-danger" role="alert">{saveError}</div>}
-                {possibleDuplicate && (
-                  <div className="alert alert-warning" role="alert">
-                    A part named &quot;{possibleDuplicate.name}&quot; already exists ({possibleDuplicate.part_number}, {possibleDuplicate.current_stock} in stock) — this will add a separate, second entry rather than update it. If you meant to edit the existing one, cancel and use its Edit button instead.
-                  </div>
-                )}
-                {/* ── What the part is ───────────────────────────────────────── */}
-                <div className="form-section">
-                  <div className="form-section-head">
-                    <h4>Part details</h4>
-                    <small>Fields marked * are required</small>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Part Name / Description *</label>
-                    <input className="form-input" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} onBlur={suggestPartDetails} />
-                    <small style={{ color: 'var(--text-muted)' }}>{suggestFailed ? "Couldn't get a suggestion this time — go ahead and fill these in yourself." : 'Brand and category are suggested once you finish typing this — override either anytime.'}</small>
-                  </div>
-
-                  <div className="form-grid-2">
-                    <div className="form-group">
-                      <label className="form-label flex items-center gap-1">Brand {suggesting && <Sparkles size={12} className="text-brand spin" />}</label>
-                      <input className="form-input" value={formData.brand} onChange={e => setFormData({ ...formData, brand: e.target.value })} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label flex items-center gap-1">Category {suggesting && <Sparkles size={12} className="text-brand spin" />}</label>
-                      <input
-                        className="form-input"
-                        list="category-options"
-                        placeholder="Pick or type a new category"
-                        value={formData.category}
-                        onChange={e => setFormData({ ...formData, category: e.target.value })}
-                      />
-                      <datalist id="category-options">
-                        {categoryOptions.map((category) => <option key={category} value={category} />)}
-                      </datalist>
-                    </div>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Fits which machines</label>
-                    <input
-                      className="form-input"
-                      list="compatibility-options"
-                      placeholder="e.g. JCB 3DX, JCB N/M (bs4)"
-                      value={formData.compatibility}
-                      onChange={e => setFormData({ ...formData, compatibility: e.target.value })}
-                    />
-                    {/* The spellings this shop already uses, commonest first. Picking one instead
-                        of retyping it is what keeps "N/M bs4" and "N/m bs4" a single thing that a
-                        search can find — the field stays free text either way. */}
-                    <datalist id="compatibility-options">
-                      {compatibilitySuggestions(products).map((option) => <option key={option} value={option} />)}
-                    </datalist>
-                  </div>
-                </div>
-
-                {/* ── How it is identified on paper ──────────────────────────── */}
-                <div className="form-section">
-                  <div className="form-section-head">
-                    <h4>Reference numbers</h4>
-                    <small>HSN is what appears on a GST invoice</small>
-                  </div>
-                  {/* OEM number was dropped from this form at the owner's request — it is not part
-                      of how this business identifies a part. The field itself is kept in state and
-                      still round-trips through save, so any OEM already recorded on an older part
-                      survives an edit here instead of being blanked. */}
-                  <div className="form-grid-2">
-                    <div className="form-group">
-                      <label className="form-label">Part Number *</label>
-                      <input className="form-input" required value={formData.part_number} onChange={e => setFormData({ ...formData, part_number: e.target.value })} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">HSN Code</label>
-                      <input className="form-input" placeholder="e.g. 84314990" value={formData.hsn_code} onChange={e => setFormData({ ...formData, hsn_code: e.target.value })} />
-                    </div>
-                  </div>
-                </div>
-
-                {/* ── What it costs and sells for ────────────────────────────── */}
-                <div className="form-section">
-                  <div className="form-section-head">
-                    <h4>Pricing</h4>
-                    {/* Worked out live from what is being typed, so the margin is checked before
-                        saving rather than discovered later in a report. Only shown once both
-                        numbers are real — never a placeholder. */}
-                    {draftMargin !== null && (
-                      <span className={`form-readout ${draftMargin < 0 ? 'is-bad' : draftMargin >= 15 ? 'is-good' : ''}`}>
-                        Margin {draftMargin.toFixed(1)}%
-                      </span>
-                    )}
-                  </div>
-                  <div className="form-grid-3">
-                    <div className="form-group">
-                      <label className="form-label">Cost Price (₹)</label>
-                      <input type="number" min="0" className="form-input" value={formData.cost_price} onChange={e => setFormData({ ...formData, cost_price: e.target.value })} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">MRP (₹)</label>
-                      <input type="number" min="0" className="form-input" value={formData.mrp} onChange={e => setFormData({ ...formData, mrp: e.target.value })} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Sale Price (₹) *</label>
-                      <input type="number" min="0" className="form-input" required value={formData.sale_price} onChange={e => setFormData({ ...formData, sale_price: e.target.value })} />
-                    </div>
-                  </div>
-                </div>
-
-                {/* ── How much there is and where it sits ────────────────────── */}
-                <div className="form-section">
-                  <div className="form-section-head">
-                    <h4>Stock</h4>
-                    <small>Below the threshold, this part shows as low stock</small>
-                  </div>
-                  <div className="form-grid-3">
-                    <div className="form-group">
-                      <label className="form-label">Initial Stock{!editingProduct && ' *'}</label>
-                      <input type="number" className="form-input" min={editingProduct ? 0 : 1} required={!editingProduct} value={formData.current_stock} onChange={e => setFormData({ ...formData, current_stock: e.target.value })} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Min Stock Threshold</label>
-                      <input type="number" className="form-input" value={formData.min_stock} onChange={e => setFormData({ ...formData, min_stock: e.target.value })} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Rack Location</label>
-                      <input className="form-input" placeholder="e.g. A-01" value={formData.location} onChange={e => setFormData({ ...formData, location: e.target.value })} />
-                    </div>
-                  </div>
-                </div>
-                </div>
-
-                {/* ── Live summary of the part being described ───────────────── */}
-                <aside className="part-form-summary">
-                  <div className="card" style={{ background: 'var(--surface-2)' }}>
-                    <div className="form-section-head" style={{ marginBottom: '12px' }}>
-                      <h4>{editingProduct ? 'After saving' : 'New part'}</h4>
-                    </div>
-
-                    <div style={{ marginBottom: '14px' }}>
-                      <div className="directory-card-title" style={{ marginBottom: '6px' }}>
-                        {draft.name || <span className="text-muted">Part name goes here</span>}
-                      </div>
-                      <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
-                        {draft.partNumber && <span className="pn-chip">{draft.partNumber}</span>}
-                        {draft.brand && (
-                          <span className="brand-chip" style={{ ['--brand-chip-color' as string]: brandChipColor(draft.brand) } as React.CSSProperties}>
-                            {draft.brand}
-                          </span>
-                        )}
-                        {draft.category && <span className="badge badge-muted">{draft.category}</span>}
-                      </div>
-                    </div>
-
-                    {/* Same stock wording the table uses, so a part reads identically here and there. */}
-                    <div className="flex justify-between items-center" style={{ marginBottom: '4px' }}>
-                      <span className="text-muted" style={{ fontSize: '12.5px' }}>Opening stock</span>
-                      <span className={`badge ${draft.stockBadge.tone}`}>{draft.stockBadge.label}</span>
-                    </div>
-                    {draft.meterPercent !== null && (
-                      <div className={`meter ${draft.stock <= 0 ? 'meter--out' : draft.isLow ? 'meter--low' : ''}`} style={{ marginBottom: '14px' }}>
-                        <i style={{ width: `${draft.meterPercent}%` }} />
-                      </div>
-                    )}
-
-                    <div className="report-summary" style={{ maxWidth: 'none', margin: 0, padding: 0, gap: 0 }}>
-                      <div className="report-line"><span className="text-muted">Cost price</span><strong>{draft.cost > 0 ? `₹${money(draft.cost)}` : '—'}</strong></div>
-                      <div className="report-line"><span className="text-muted">Sale price</span><strong>{draft.sale > 0 ? `₹${money(draft.sale)}` : '—'}</strong></div>
-                      {draft.mrp > 0 && (
-                        <div className="report-line"><span className="text-muted">MRP</span><strong>₹{money(draft.mrp)}</strong></div>
-                      )}
-                      {draftMargin !== null && (
-                        <div className="report-line report-strong">
-                          <span>Margin per piece</span>
-                          <strong className={draftMargin < 0 ? 'text-danger' : 'text-success'}>
-                            ₹{money(draft.sale - draft.cost)} · {draftMargin.toFixed(1)}%
-                          </strong>
-                        </div>
-                      )}
-                    </div>
-
-                    {draft.stockValue > 0 && (
-                      <div className="report-total mt-2">
-                        <div>
-                          <small>Opening stock at cost</small>
-                          <strong>₹{wholeMoney(draft.stockValue)}</strong>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Only things that are actually wrong or genuinely missing — never nagging. */}
-                    {draft.warnings.length > 0 && (
-                      <div className="flex flex-col gap-2 mt-2">
-                        {draft.warnings.map((warning) => (
-                          <div key={warning.text} className={`alert ${warning.tone}`} role="status" style={{ fontSize: '12.5px', padding: '9px 11px' }}>
-                            {warning.text}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </aside>
-              </div>
-
-              <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
-                <span className="text-muted" style={{ fontSize: '12.5px' }}>
-                  {savedThisSession > 0
-                    ? `${savedThisSession} ${savedThisSession === 1 ? 'part' : 'parts'} added so far`
-                    : ''}
-                </span>
-                <div className="flex gap-2">
-                  <button type="button" className="btn btn-secondary" disabled={savingProduct} onClick={() => setShowModal(false)}>
-                    {savedThisSession > 0 ? 'Done' : 'Cancel'}
-                  </button>
-                  {/* Only offered when adding: "another" makes no sense mid-edit of one part. */}
-                  {!editingProduct && (
-                    <button
-                      type="submit"
-                      className="btn btn-secondary"
-                      disabled={savingProduct}
-                      onClick={() => { addAnotherRef.current = true; }}
-                    >
-                      <Plus size={15} /> Save &amp; add another
-                    </button>
-                  )}
-                  <button type="submit" className="btn btn-primary" disabled={savingProduct}>
-                    {savingProduct ? 'Saving…' : editingProduct ? 'Save Changes' : 'Save Part'}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
+        <PartFormModal
+          formData={formData} setFormData={setFormData}
+          editingProduct={editingProduct} products={products}
+          categoryOptions={categoryOptions} possibleDuplicate={possibleDuplicate}
+          draft={draft} draftMargin={draftMargin}
+          saveError={saveError} savingProduct={savingProduct} savedThisSession={savedThisSession}
+          suggesting={suggesting} suggestFailed={suggestFailed} suggestPartDetails={suggestPartDetails}
+          addAnotherRef={addAnotherRef} handleSave={handleSave} setShowModal={setShowModal}
+          brandChipColor={brandChipColor}
+        />
       )}
 
       {deleteCandidate && (
-        <div className="modal-overlay">
-          <div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="delete-part-title">
-            <div className="modal-header"><h3 id="delete-part-title" className="modal-title">Delete inventory part?</h3></div>
-            <div className="modal-body">
-              <p>This will remove <strong>{deleteCandidate.part_number} — {deleteCandidate.name}</strong> from the current inventory list.</p>
-              {deleteError && <p className="form-error" role="alert">{deleteError}</p>}
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" disabled={deletingProduct} onClick={() => setDeleteCandidate(null)}>Cancel</button>
-              <button className="btn btn-danger" disabled={deletingProduct} onClick={confirmDelete}>{deletingProduct ? 'Deleting…' : 'Delete Part'}</button>
-            </div>
-          </div>
-        </div>
+        <DeletePartModal
+          deleteCandidate={deleteCandidate} setDeleteCandidate={setDeleteCandidate}
+          deleteError={deleteError} deletingProduct={deletingProduct} confirmDelete={confirmDelete}
+        />
       )}
 
-      {costSheet && (() => {
-        const sheet = costSheet.sheet;
-        // Re-derived on every render, so changing either dropdown immediately re-plans against
-        // the same already-read sheet — no re-upload, no stale preview.
-        const parsed = costColumn && idColumn ? extractCostRows(sheet, costColumn, idColumn) : null;
-        const matches = parsed ? planCostUpdates(parsed.rows, products) : [];
-        const counts = countOutcomes(matches);
-        const updatable = matches.filter((m) => m.outcome === 'update' && m.product);
-        const pending = updatable.filter((m) => !excludedRows.has(m.row.rowNumber));
-        const allTicked = updatable.length > 0 && pending.length === updatable.length;
-        const toggleRow = (rowNumber: number) =>
-          setExcludedRows((previous) => {
-            const next = new Set(previous);
-            if (next.has(rowNumber)) next.delete(rowNumber);
-            else next.add(rowNumber);
-            return next;
-          });
-        const toggleAll = () =>
-          setExcludedRows(allTicked ? new Set(updatable.map((m) => m.row.rowNumber)) : new Set());
-        // Anything that will not be applied is listed first: the point of this screen is to show
-        // what the file failed to do, not to bury it under a long list of successes.
-        const ordered = [...matches].sort((a, b) => {
-          const rank = { conflict: 0, not_found: 1, update: 2, unchanged: 3 } as const;
-          return rank[a.outcome] - rank[b.outcome] || a.row.rowNumber - b.row.rowNumber;
-        });
-        const skipped = parsed ? parsed.skippedNoCost + parsed.skippedNoIdentifier : 0;
-        const samples = costColumn ? sampleColumnValues(sheet, costColumn) : [];
-        // The same rows, read for what they say a part IS rather than what it costs.
-        const detailMatches = planDetailUpdates(costSheet.newParts, products);
-        const detailCounts = countDetailOutcomes(detailMatches);
-        const detailKey = (rowNumber: number, change: DetailChange) => `${rowNumber}:${change.field}`;
-        const detailAccepted = (rowNumber: number) => (change: DetailChange) => !excludedDetails.has(detailKey(rowNumber, change));
-        const detailPending = detailMatches
-          .filter((m) => m.outcome === 'update' && m.product)
-          .map((m) => ({ match: m, patch: fieldsToWrite(m, detailAccepted(m.rowNumber)) }))
-          .filter(({ patch }) => Object.keys(patch).length > 0);
-        const detailOfferedCount = detailMatches.reduce(
-          (total, m) => total + m.changes.filter((c) => c.kind !== 'keep').length,
-          0
-        );
-        const detailTickedCount = detailPending.reduce((total, { patch }) => total + Object.keys(patch).length, 0);
-        const toggleDetail = (rowNumber: number, change: DetailChange) =>
-          setExcludedDetails((previous) => {
-            const next = new Set(previous);
-            const key = detailKey(rowNumber, change);
-            if (next.has(key)) next.delete(key);
-            else next.add(key);
-            return next;
-          });
-        // Anything that will not be applied is listed first, same reasoning as the cost plan.
-        const detailOrdered = [...detailMatches].sort((a, b) => {
-          const rank = { conflict: 0, not_found: 1, update: 2, nothing_to_add: 3 } as const;
-          return rank[a.outcome] - rank[b.outcome] || a.rowNumber - b.rowNumber;
-        });
-
-        const chosenNew = costSheet.newParts.filter((_, index) => !excludedNew.has(index));
-        const duplicateCount = costSheet.newParts.filter((part) =>
-          findExistingProduct(products, { partNumber: part.part_number, name: part.name })
-        ).length;
-        const allNewTicked = costSheet.newParts.length > 0 && chosenNew.length === costSheet.newParts.length;
-        const toggleNew = (index: number) =>
-          setExcludedNew((previous) => {
-            const next = new Set(previous);
-            if (next.has(index)) next.delete(index);
-            else next.add(index);
-            return next;
-          });
-        const toggleAllNew = () =>
-          setExcludedNew(allNewTicked ? new Set(costSheet.newParts.map((_, index) => index)) : new Set());
-        return (
-          <div className="modal-overlay">
-            <div className="modal-box" style={{ maxWidth: '820px' }} role="dialog" aria-modal="true" aria-labelledby="cost-import-title">
-              <div className="modal-header">
-                <h3 id="cost-import-title" className="modal-title">Import from {costSheet.fileName}</h3>
-              </div>
-              <div className="modal-body">
-                <div className="form-group" style={{ marginBottom: '12px' }}>
-                  <span className="form-label">What should this file do?</span>
-                  <div className="flex gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      className={'btn btn-sm ' + (importMode === 'costs' ? 'btn-primary' : 'btn-secondary')}
-                      onClick={() => setImportMode('costs')}
-                    >
-                      Update cost prices of parts I already have
-                    </button>
-                    <button
-                      type="button"
-                      className={'btn btn-sm ' + (importMode === 'new' ? 'btn-primary' : 'btn-secondary')}
-                      disabled={costSheet.newParts.length === 0}
-                      onClick={() => setImportMode('new')}
-                    >
-                      Add as new parts{costSheet.newParts.length > 0 ? ' (' + costSheet.newParts.length + ')' : ''}
-                    </button>
-                    <button
-                      type="button"
-                      className={'btn btn-sm ' + (importMode === 'details' ? 'btn-primary' : 'btn-secondary')}
-                      disabled={detailCounts.update === 0}
-                      onClick={() => setImportMode('details')}
-                    >
-                      Fill in part numbers &amp; details{detailCounts.update > 0 ? ' (' + detailCounts.update + ')' : ''}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex gap-4 flex-wrap" style={{ marginBottom: '12px', display: importMode === 'costs' ? undefined : 'none' }}>
-                  <div className="form-group" style={{ margin: 0, minWidth: '230px' }}>
-                    <label className="form-label" htmlFor="cost-col">Which column holds the cost?</label>
-                    <select id="cost-col" className="form-select" value={costColumn} onChange={(e) => { setCostColumn(e.target.value); setExcludedRows(new Set()); }}>
-                      <option value="">— choose a column —</option>
-                      {sheet.columns.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    {samples.length > 0 && (
-                      <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                        First values: {samples.join(', ')}
-                      </p>
-                    )}
-                  </div>
-                  <div className="form-group" style={{ margin: 0, minWidth: '230px' }}>
-                    <label className="form-label" htmlFor="id-col">Which column names the part?</label>
-                    <select id="id-col" className="form-select" value={idColumn} onChange={(e) => { setIdColumn(e.target.value); setExcludedRows(new Set()); }}>
-                      <option value="">— choose a column —</option>
-                      {sheet.columns.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                  {importMode === 'costs'
-                    ? 'Only the cost price changes — stock, selling price and every other detail are left exactly as they are.'
-                    : importMode === 'details'
-                      ? 'Fills in the real part number, OEM number, HSN, brand and category on parts you already stock. Stock, cost and selling price are not touched. A detail you already have is only replaced when the existing one is a code this app made up — shown as old → new, and you can untick any of them.'
-                      : 'Each ticked row becomes a brand-new part. Rows matching something you already stock start unticked, so nothing is duplicated by accident.'}
-                </p>
-                {importMode === 'details' ? (
-                  <>
-                    <p style={{ fontSize: '13px', margin: '10px 0' }}>
-                      <strong>{detailTickedCount} of {detailOfferedCount}</strong> detail(s) ticked, across {detailCounts.update} part(s)
-                      {detailCounts.not_found > 0 && (
-                        <span style={{ color: 'var(--text-muted)' }}> · {detailCounts.not_found} row(s) match no part you stock</span>
-                      )}
-                      {detailCounts.conflict > 0 && (
-                        <span style={{ color: 'var(--color-warning)' }}> · {detailCounts.conflict} left alone</span>
-                      )}
-                    </p>
-                    <div style={{ maxHeight: '320px', overflowY: 'auto', overflowX: 'auto' }}>
-                      <table className="table">
-                        <thead>
-                          <tr>
-                            <th>Part on file</th>
-                            <th>What the document adds</th>
-                            <th>Result</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {detailOrdered.map((m) => (
-                            <tr key={m.rowNumber}>
-                              <td>
-                                <strong style={{ fontSize: '13px' }}>{m.product?.name ?? m.name}</strong>
-                                {m.product && (
-                                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                                    {m.product.part_number ? m.product.part_number : 'no part number yet'}
-                                    {m.matchedBy ? ` · matched by ${m.matchedBy}` : ''}
-                                  </div>
-                                )}
-                              </td>
-                              <td>
-                                {m.changes.length === 0 && <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>}
-                                {m.changes.map((change) => (
-                                  <div key={change.field} style={{ fontSize: '12px', marginBottom: '2px' }}>
-                                    {change.kind === 'keep' ? (
-                                      <span style={{ color: 'var(--color-warning)' }}>
-                                        {change.label}: document says <strong>{change.to}</strong>, you have <strong>{change.from}</strong> — left alone
-                                      </span>
-                                    ) : (
-                                      <label className="flex items-center gap-2" style={{ cursor: applyingCosts ? 'default' : 'pointer' }}>
-                                        <input
-                                          type="checkbox"
-                                          disabled={applyingCosts}
-                                          checked={!excludedDetails.has(`${m.rowNumber}:${change.field}`)}
-                                          onChange={() => toggleDetail(m.rowNumber, change)}
-                                        />
-                                        <span>
-                                          {change.label}: {change.kind === 'replace'
-                                            ? <><span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>{change.from}</span> → <strong>{change.to}</strong></>
-                                            : <strong>{change.to}</strong>}
-                                        </span>
-                                      </label>
-                                    )}
-                                  </div>
-                                ))}
-                              </td>
-                              <td style={{ fontSize: '12px' }}>
-                                {m.outcome === 'update' && <span className="badge badge-success">update</span>}
-                                {m.outcome === 'nothing_to_add' && <span style={{ color: 'var(--text-muted)' }}>{m.reason}</span>}
-                                {m.outcome === 'not_found' && <span style={{ color: 'var(--text-muted)' }}>{m.reason}</span>}
-                                {m.outcome === 'conflict' && <span style={{ color: 'var(--color-warning)' }}>{m.reason}</span>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                ) : importMode === 'new' ? (
-                  <>
-                    <p style={{ fontSize: '13px', margin: '10px 0' }}>
-                      <strong>{chosenNew.length} of {costSheet.newParts.length}</strong> selected to add
-                      {duplicateCount > 0 && (
-                        <span style={{ color: 'var(--color-warning)' }}> · {duplicateCount} already stocked</span>
-                      )}
-                    </p>
-                    <div style={{ maxHeight: '300px', overflowY: 'auto', overflowX: 'auto' }}>
-                      <table className="table">
-                        <thead>
-                          <tr>
-                            <th style={{ width: '34px' }}>
-                              <input
-                                type="checkbox"
-                                aria-label={allNewTicked ? 'Clear all' : 'Select all'}
-                                checked={allNewTicked}
-                                ref={(el) => { if (el) el.indeterminate = chosenNew.length > 0 && !allNewTicked; }}
-                                onChange={toggleAllNew}
-                              />
-                            </th>
-                            <th>Part</th><th>Name</th><th>Stock</th><th>Cost</th><th>What happens</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {costSheet.newParts.map((part, index) => {
-                            const existing = findExistingProduct(products, { partNumber: part.part_number, name: part.name });
-                            return (
-                              <tr key={index} style={excludedNew.has(index) ? { opacity: 0.45 } : undefined}>
-                                <td>
-                                  <input
-                                    type="checkbox"
-                                    aria-label={'Add ' + (part.part_number || part.name)}
-                                    checked={!excludedNew.has(index)}
-                                    onChange={() => toggleNew(index)}
-                                  />
-                                </td>
-                                <td>{part.part_number || '—'}</td>
-                                <td>{part.name}</td>
-                                <td style={{ fontVariantNumeric: 'tabular-nums' }}>{part.current_stock}</td>
-                                <td style={{ fontVariantNumeric: 'tabular-nums' }}>₹{money(part.cost_price)}</td>
-                                <td>
-                                  {existing
-                                    ? <span style={{ color: 'var(--color-warning)' }}>already stocked as {existing.part_number || existing.name}</span>
-                                    : <span className="badge badge-success">add</span>}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                ) : !parsed ? (
-                  <p style={{ fontSize: '13px', color: 'var(--color-warning)', marginTop: '10px' }}>
-                    Choose both columns above to see what would change.
-                  </p>
-                ) : (
-                  <>
-                    <p style={{ fontSize: '13px', margin: '10px 0' }}>
-                      <strong>{pending.length} of {counts.update}</strong> selected to update · {counts.unchanged} already correct · {counts.not_found} not found
-                      {counts.conflict > 0 && <> · <span style={{ color: 'var(--color-warning)' }}>{counts.conflict} unclear</span></>}
-                      {skipped > 0 && <span style={{ color: 'var(--text-muted)' }}> · {skipped} row(s) skipped as unreadable</span>}
-                    </p>
-                    {/* The likeliest cause of a wall of "not found" is not a bad file but the wrong
-                        company being active — this sheet's part codes simply belong elsewhere.
-                        Say that plainly instead of leaving 227 unexplained misses to decode. */}
-                    {matches.length > 0 && counts.not_found > matches.length / 2 && (
-                      <p className="alert alert-warning" style={{ fontSize: '13px', padding: '8px 12px' }}>
-                        Most rows don&apos;t match anything in <strong>{activeCompany?.name ?? 'this company'}</strong>. If this
-                        price list belongs to another company, switch to it first — or check that the
-                        &ldquo;{idColumn}&rdquo; column really holds your part codes.
-                      </p>
-                    )}
-                    <div style={{ maxHeight: '300px', overflowY: 'auto', overflowX: 'auto' }}>
-                      <table className="table">
-                        <thead>
-                          <tr>
-                            <th style={{ width: '34px' }}>
-                              <input
-                                type="checkbox"
-                                aria-label={allTicked ? 'Clear all' : 'Select all'}
-                                checked={allTicked}
-                                disabled={updatable.length === 0}
-                                // Partly-ticked has to be set on the node; there is no attribute for it.
-                                ref={(el) => { if (el) el.indeterminate = pending.length > 0 && !allTicked; }}
-                                onChange={toggleAll}
-                              />
-                            </th>
-                            <th>Row</th><th>Part</th><th>Cost now</th><th>New cost</th><th>What happens</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {ordered.map((m) => (
-                            <tr key={m.row.rowNumber} style={m.outcome === 'update' && excludedRows.has(m.row.rowNumber) ? { opacity: 0.45 } : undefined}>
-                              <td>
-                                {m.outcome === 'update' && (
-                                  <input
-                                    type="checkbox"
-                                    aria-label={`Update ${m.product?.part_number || m.product?.name || `row ${m.row.rowNumber}`}`}
-                                    checked={!excludedRows.has(m.row.rowNumber)}
-                                    onChange={() => toggleRow(m.row.rowNumber)}
-                                  />
-                                )}
-                              </td>
-                              <td style={{ color: 'var(--text-muted)' }}>{m.row.rowNumber}</td>
-                              <td>{m.product ? `${m.product.part_number || '—'} · ${m.product.name}` : (m.row.partNumber || m.row.name || m.row.oemNumber)}</td>
-                              <td style={{ fontVariantNumeric: 'tabular-nums' }}>{m.product ? `₹${money(Number(m.product.cost_price))}` : '—'}</td>
-                              <td style={{ fontVariantNumeric: 'tabular-nums' }}>₹{money(m.row.cost)}</td>
-                              <td>
-                                {m.outcome === 'update' && <span className="badge badge-success">update</span>}
-                                {m.outcome === 'unchanged' && <span style={{ color: 'var(--text-muted)' }}>{m.reason ?? 'no change'}</span>}
-                                {m.outcome === 'not_found' && <span style={{ color: 'var(--text-muted)' }}>{m.reason}</span>}
-                                {m.outcome === 'conflict' && <span style={{ color: 'var(--color-warning)' }}>{m.reason}</span>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                )}
-                {importError && <p className="form-error" role="alert">{importError}</p>}
-              </div>
-              <div className="modal-footer">
-                <button className="btn btn-secondary" disabled={applyingCosts} onClick={() => setCostSheet(null)}>Cancel</button>
-                {importMode === 'details' ? (
-                  <button
-                    className="btn btn-primary"
-                    disabled={applyingCosts || detailPending.length === 0}
-                    onClick={() => applyDetailPlan(detailPending.map(({ match, patch }) => ({ productId: match.product!.id, patch, name: match.product!.name })))}
-                  >
-                    {applyingCosts
-                      ? `Updating ${costProgress} of ${detailPending.length}…`
-                      : detailPending.length === 0
-                        ? (detailCounts.update === 0 ? 'Nothing to fill in' : 'Nothing ticked')
-                        : `Fill in ${detailTickedCount} detail(s) on ${detailPending.length} part(s)`}
-                  </button>
-                ) : importMode === 'new' ? (
-                  <button className="btn btn-primary" disabled={applyingCosts || chosenNew.length === 0} onClick={() => applyNewParts(chosenNew)}>
-                    {applyingCosts ? 'Adding\u2026' : chosenNew.length === 0 ? 'Nothing selected' : 'Add ' + chosenNew.length + ' new part(s)'}
-                  </button>
-                ) : (
-                <button className="btn btn-primary" disabled={applyingCosts || pending.length === 0} onClick={() => applyCostPlan(pending)}>
-                  {applyingCosts
-                    ? `Updating ${costProgress} of ${pending.length}…`
-                    : pending.length === 0
-                      // "Nothing to update" would be wrong when there are updates and the owner
-                      // has simply unticked them all — say which of the two it is.
-                      ? (updatable.length === 0 ? 'Nothing to update' : 'Nothing selected')
-                      : `Apply ${pending.length} cost update(s)`}
-                </button>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
+      {costSheet && (
+        <ImportFromFileModal
+          costSheet={costSheet} setCostSheet={setCostSheet}
+          products={products} activeCompany={activeCompany}
+          importMode={importMode} setImportMode={setImportMode}
+          costColumn={costColumn} setCostColumn={setCostColumn}
+          idColumn={idColumn} setIdColumn={setIdColumn}
+          excludedRows={excludedRows} setExcludedRows={setExcludedRows}
+          excludedNew={excludedNew} setExcludedNew={setExcludedNew}
+          excludedDetails={excludedDetails} setExcludedDetails={setExcludedDetails}
+          applyingCosts={applyingCosts} costProgress={costProgress} importError={importError}
+          applyCostPlan={applyCostPlan} applyNewParts={applyNewParts} applyDetailPlan={applyDetailPlan}
+        />
+      )}
     </div>
   );
 }
