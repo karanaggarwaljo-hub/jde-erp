@@ -1,3 +1,5 @@
+import type { InvoiceCost } from '@/lib/invoice-profit';
+
 export type SalesInvoiceItemInput = {
   product_id: string | null;
   part_number: string;
@@ -112,4 +114,15 @@ export function writeOffInvoiceBalance(input: WriteOffInvoiceInput) {
  *  amount and status and corrects the customer balance — for a payment entered wrong. */
 export function deleteCustomerPayment(companyId: string, paymentId: string) {
   return deleteJson<{ ok: true }>('/api/sales/payments', { companyId, paymentId });
+}
+
+/** What the goods on one invoice cost, so the settle dialog can show what the sale made instead
+ *  of only what was let go. Answers `cost_known: false` when any line has no recorded cost — the
+ *  caller must then show no profit at all rather than treat the missing cost as zero. */
+export function getInvoiceCost(companyId: string, invoiceId: string) {
+  const params = new URLSearchParams({ companyId, invoiceId });
+  return fetch(`/api/sales/invoice-cost?${params.toString()}`).then(async (res) => {
+    if (!res.ok) throw new Error(`invoice-cost failed (${res.status})`);
+    return (await res.json()) as InvoiceCost;
+  });
 }

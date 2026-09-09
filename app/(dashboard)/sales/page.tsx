@@ -27,7 +27,8 @@ import {
   HandCoins,
   History,
 } from 'lucide-react';
-import { saveSalesInvoice, deleteSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance } from '@/lib/client-sales';
+import { saveSalesInvoice, deleteSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance, receiveCustomerPayment, getInvoiceCost } from '@/lib/client-sales';
+import { realisedProfit, type InvoiceCost } from '@/lib/invoice-profit';
 import { invoiceBalanceDue, invoiceWrittenOff, wasSettledShort } from '@/lib/invoice-balance';
 import { createSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem } from '@/lib/client-sales-returns';
 import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } from '@/lib/client-quotations';
@@ -35,7 +36,7 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 import { buildCustomerLedger } from '@/lib/customer-ledger';
 import AddCustomerModal from '@/components/AddCustomerModal';
 import ReceivePaymentModal from '@/components/ReceivePaymentModal';
-import { money, paise } from '@/lib/money';
+import { money, paise, round2 } from '@/lib/money';
 import {
   DRAFT_STATUS,
   QUOTATION_FINAL_STATUS,
@@ -132,11 +133,18 @@ export default function SalesPage() {
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Invoice | null>(null);
-  // Closing what is still owing on an invoice the customer settled by paying less than it was
-  // for. Deliberately separate from recording a payment: no money changes hands here.
+  // Closing an invoice a customer settled by paying less than it was for.
+  //
+  // This used to be two jobs on two screens: record the cash on the payments modal, then come
+  // back here and type the shortfall as a separate write-off. The owner had to do the subtraction
+  // himself, and the only figure he was ever asked for was the one he was losing. It now takes the
+  // money he was actually handed and works the rest out from there.
   const [settlingInvoice, setSettlingInvoice] = useState<Invoice | null>(null);
-  const [settleAmount, setSettleAmount] = useState(0);
+  const [settleReceived, setSettleReceived] = useState(0);
   const [settleReason, setSettleReason] = useState('');
+  // What the goods on this invoice cost. Null while it loads, and still null if it cannot be
+  // established — in which case no profit figure is shown at all rather than a flattering guess.
+  const [settleCost, setSettleCost] = useState<InvoiceCost | null>(null);
   const [settleError, setSettleError] = useState('');
   const [savingSettlement, setSavingSettlement] = useState(false);
   const [returnCandidate, setReturnCandidate] = useState<Invoice | null>(null);
@@ -220,7 +228,8 @@ export default function SalesPage() {
   // Mirrors jde_save_quotation exactly. That function recomputes every figure from the lines and
   // rejects the save if the numbers sent differ by more than a paisa, so rounding here must match
   // it step for step: each line rounded, then each total rounded, never one sum rounded at the end.
-  const round2 = (value: number) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+  // round2 is the shared one in lib/money.ts — it rounds half up on the .005 cases a price list is
+  // full of, which is what the database function does too.
   const quoteLineGross = (line: InvoiceLine) => round2(Number(line.qty) * Number(line.price));
   const quoteLineDiscount = (line: InvoiceLine) =>
     round2(quoteLineGross(line) * (Math.min(100, Math.max(0, Number(line.discount) || 0)) / 100));
@@ -792,31 +801,89 @@ export default function SalesPage() {
 
   const openSettleShort = (invoice: Invoice) => {
     setSettlingInvoice(invoice);
-    // Defaults to forgiving the whole remaining balance, which is what "we're settled" usually
-    // means — still editable when only part of it is being let go.
-    setSettleAmount(invoiceBalanceDue(invoice));
+    // Starts at nothing handed over today — the case where a customer has already paid what they
+    // were going to and just wants the rest closed. Typing what they are paying now is what makes
+    // this one step instead of two.
+    setSettleReceived(0);
     setSettleReason('');
     setSettleError('');
+    setSettleCost(null);
+    if (!activeCompany) return;
+    // The profit line is a nicety, not a precondition. If this never answers, the dialog reports
+    // the money received and says nothing about profit rather than inventing one.
+    void getInvoiceCost(activeCompany.id, invoice.id)
+      .then(setSettleCost)
+      .catch((error) => console.error('Could not work out what this sale cost:', error));
   };
+
+  // What the dialog is about to do, worked out once so the summary the owner reads and the action
+  // the button takes can never disagree about the figures.
+  const settleDue = settlingInvoice ? invoiceBalanceDue(settlingInvoice) : 0;
+  // Capped at the open balance: the database refuses more than that anyway, and a number on
+  // screen that the save is going to reject is worse than one that was never offered.
+  const settlePayNow = round2(Math.min(Math.max(0, Number(settleReceived) || 0), settleDue));
+  const settleClosing = round2(settleDue - settlePayNow);
+  const settleTotalReceived = round2((settlingInvoice ? Number(settlingInvoice.paid) : 0) + settlePayNow);
+  const settleOutcome = settleCost ? realisedProfit(settleTotalReceived, settleCost) : null;
+  const settleCustomerRow = settlingInvoice ? customers.find((c) => c.name === settlingInvoice.customer) : undefined;
 
   const confirmSettleShort = async () => {
     if (!settlingInvoice || !activeCompany || savingSettlement) return;
+    if (settlePayNow > 0 && !settleCustomerRow) {
+      setSettleError(`${settlingInvoice.customer} has no customer account, so a payment cannot be recorded against it. Set the amount to 0 to close the balance on its own.`);
+      return;
+    }
     setSettleError('');
     setSavingSettlement(true);
+    // The money goes in first and the closing entry second, deliberately in that order. If the
+    // second step fails, the cash is already recorded against the invoice and the balance is
+    // simply still open — visible, and finishable. The other order would leave an invoice looking
+    // settled with the customer's money missing from it.
+    let paymentRecorded = false;
     try {
-      // How much may be written off is decided by the database, which locks the invoice first —
-      // this amount is only a request.
-      const result = await writeOffInvoiceBalance({
-        companyId: activeCompany.id,
-        invoiceId: settlingInvoice.id,
-        amount: settleAmount,
-        reason: settleReason,
-      });
-      await Promise.all([reloadInvoices(), reloadCustomers()]);
-      setFeedback(`₹${money(result.written_off)} written off on ${settlingInvoice.id}${result.remaining_due > 0 ? ` — ₹${money(result.remaining_due)} still owing` : ' — nothing left owing'}.`);
+      if (settlePayNow > 0 && settleCustomerRow) {
+        await receiveCustomerPayment({
+          companyId: activeCompany.id,
+          customerId: settleCustomerRow.id,
+          date: todayIso(),
+          amount: settlePayNow,
+          note: settleReason ? `Settled ${settlingInvoice.id} — ${settleReason}` : `Settled ${settlingInvoice.id}`,
+          allocations: [{ invoiceId: settlingInvoice.id, amount: settlePayNow }],
+        });
+        paymentRecorded = true;
+      }
+      if (settleClosing > 0) {
+        // How much may actually be closed is decided by the database, which locks the invoice
+        // first — this amount is only a request.
+        await writeOffInvoiceBalance({
+          companyId: activeCompany.id,
+          invoiceId: settlingInvoice.id,
+          amount: settleClosing,
+          reason: settleReason,
+        });
+      }
+      await Promise.all([reloadInvoices(), reloadCustomers(), reloadPayments()]);
+      // Reports the takings, not the shortfall — and only claims a profit when the cost of the
+      // goods is actually known.
+      const earned = settleOutcome
+        ? ` ${settleOutcome.profit >= 0 ? 'Profit' : 'Loss'} on it: ₹${money(Math.abs(settleOutcome.profit))}.`
+        : '';
+      setFeedback(`${settlingInvoice.id} settled and closed — ₹${money(settleTotalReceived)} received on this sale.${earned}`);
       setSettlingInvoice(null);
     } catch (error) {
-      setSettleError(error instanceof Error ? error.message : 'This settlement was not recorded.');
+      const message = error instanceof Error ? error.message : 'This settlement was not recorded.';
+      if (paymentRecorded) {
+        // Half-done is not the same as failed, and reporting it as failed is how the same payment
+        // gets entered twice. The money is really on the invoice, so the dialog is moved on to
+        // reflect that: the balance drops by what was paid and the amount resets to zero, which
+        // leaves the retry doing only the part that did not go through.
+        setSettlingInvoice({ ...settlingInvoice, paid: round2(Number(settlingInvoice.paid) + settlePayNow) });
+        setSettleReceived(0);
+        await Promise.all([reloadInvoices(), reloadCustomers(), reloadPayments()]);
+        setSettleError(`₹${money(settlePayNow)} was recorded against ${settlingInvoice.id} and is safe — do not enter it again. Closing the remaining ₹${money(settleClosing)} did not go through: ${message}`);
+      } else {
+        setSettleError(message);
+      }
     } finally {
       setSavingSettlement(false);
     }
@@ -1484,7 +1551,7 @@ export default function SalesPage() {
             <div className="report-line report-strong"><span>Total</span><strong>₹{money(Number(viewingInvoice.total))}</strong></div>
             <div className="report-line"><span>Paid</span><strong className="text-success">₹{money(Number(viewingInvoice.paid))}</strong></div>
             {wasSettledShort(viewingInvoice) && (
-              <div className="report-line"><span>Written off (settled short)</span><strong className="text-muted">₹{money(invoiceWrittenOff(viewingInvoice))}</strong></div>
+              <div className="report-line"><span>Settled off</span><strong className="text-muted">₹{money(invoiceWrittenOff(viewingInvoice))}</strong></div>
             )}
             <div className="report-line"><span>Balance</span><strong className={invoiceBalanceDue(viewingInvoice) > 0 ? 'text-danger' : 'text-muted'}>₹{money(invoiceBalanceDue(viewingInvoice))}</strong></div>
           </div>
@@ -1495,20 +1562,20 @@ export default function SalesPage() {
               type="button"
               className="btn btn-secondary"
               style={{ marginRight: 'auto' }}
-              title={`Customer paid less and this is settled — write off the remaining ₹${money(invoiceBalanceDue(viewingInvoice))}`}
+              title={`Take what the customer is paying and close the remaining ₹${money(invoiceBalanceDue(viewingInvoice))}`}
               onClick={() => { const invoice = viewingInvoice; setViewingInvoice(null); openSettleShort(invoice); }}
-            ><HandCoins size={14} /> Settle for less</button>
+            ><HandCoins size={14} /> Settle &amp; close</button>
           )}
           <button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/invoice/${viewingInvoice.id}`, '_blank')}><Printer size={14} /> Print</button>
           <button type="button" className="btn btn-primary" onClick={() => setViewingInvoice(null)}>Close</button>
         </div>
       </div></div>}
 
-      {settlingInvoice && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '460px' }} role="dialog" aria-modal="true" aria-labelledby="settle-short-title">
+      {settlingInvoice && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '480px' }} role="dialog" aria-modal="true" aria-labelledby="settle-short-title">
         <div className="modal-header">
           <div>
-            <h3 id="settle-short-title" className="modal-title flex items-center gap-2"><HandCoins size={16} /> Settle for less</h3>
-            <p className="text-muted text-sm">For when the customer pays less and you agree that closes it.</p>
+            <h3 id="settle-short-title" className="modal-title flex items-center gap-2"><HandCoins size={16} /> Settle &amp; close</h3>
+            <p className="text-muted text-sm">Enter what the customer paid. Anything left stops showing as owed.</p>
           </div>
           <button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingSettlement} onClick={() => setSettlingInvoice(null)}>✕</button>
         </div>
@@ -1517,28 +1584,53 @@ export default function SalesPage() {
           <div className="report-summary">
             <div className="report-line"><span>{settlingInvoice.id} — {settlingInvoice.customer}</span><span className="text-muted">{settlingInvoice.date}</span></div>
             <div className="report-line"><span>Invoice total</span><strong>₹{money(Number(settlingInvoice.total))}</strong></div>
-            <div className="report-line"><span>Received</span><strong className="text-success">₹{money(Number(settlingInvoice.paid))}</strong></div>
-            <div className="report-line report-strong"><span>Still owing</span><strong className="text-danger">₹{money(invoiceBalanceDue(settlingInvoice))}</strong></div>
+            <div className="report-line"><span>Received earlier</span><strong>₹{money(Number(settlingInvoice.paid))}</strong></div>
+            <div className="report-line report-strong"><span>Still open</span><strong>₹{money(settleDue)}</strong></div>
           </div>
+
+          {/* The one number the owner is asked for is the one he is actually holding. Everything
+              else on this dialog is worked out from it. */}
           <div className="form-group">
-            <label className="form-label" htmlFor="settle-amount">Amount to write off (₹)</label>
-            <input id="settle-amount" type="number" min="0.01" step="0.01" max={invoiceBalanceDue(settlingInvoice)} className="form-input"
-              value={settleAmount} disabled={savingSettlement} onChange={(event) => setSettleAmount(Number(event.target.value))} autoFocus />
+            <label className="form-label" htmlFor="settle-received">How much is {settlingInvoice.customer} paying now? (₹)</label>
+            <input id="settle-received" type="number" min="0" step="0.01" max={settleDue} className="form-input"
+              value={settleReceived} disabled={savingSettlement} onChange={(event) => setSettleReceived(Number(event.target.value))} autoFocus />
+            <p className="text-muted" style={{ fontSize: '12px' }}>Leave it at 0 if they have already paid everything they are going to.</p>
           </div>
+
+          {/* The result, stated as what the sale earned. The amount being let go is still here —
+              agreeing to it is the whole point of the dialog, and hiding it would be hiding a real
+              decision — but it is a quiet line under the outcome, never the headline and never the
+              number being typed in. */}
+          <div className="report-summary">
+            {settleOutcome ? <>
+              <div className="report-line report-strong">
+                <span>{settleOutcome.profit >= 0 ? 'You made on this sale' : 'You lost on this sale'}</span>
+                <strong className={settleOutcome.profit >= 0 ? 'text-success' : 'text-danger'}>₹{money(Math.abs(settleOutcome.profit))}</strong>
+              </div>
+              <div className="report-line"><span>Money received in total</span><span>₹{money(settleOutcome.received)}</span></div>
+              <div className="report-line"><span>What these goods cost you</span><span className="text-muted">₹{money(settleOutcome.cost)}</span></div>
+            </> : (
+              <div className="report-line report-strong">
+                <span>Money received on this sale</span>
+                <strong className="text-success">₹{money(settleTotalReceived)}</strong>
+              </div>
+            )}
+            {settleClosing > 0 && <div className="report-line"><span>Settled off, so nobody chases it</span><span className="text-muted">₹{money(settleClosing)}</span></div>}
+          </div>
+
           <div className="form-group">
-            <label className="form-label" htmlFor="settle-reason">Why (optional)</label>
+            <label className="form-label" htmlFor="settle-reason">Note (optional)</label>
             <input id="settle-reason" type="text" className="form-input" placeholder="e.g. rounded off in cash, agreed discount for late delivery"
               value={settleReason} disabled={savingSettlement} onChange={(event) => setSettleReason(event.target.value)} />
           </div>
           <p className="text-muted" style={{ fontSize: '12px' }}>
-            {settlingInvoice.customer} stops owing this, and the invoice keeps the total it was issued for.
-            It is <strong>not</strong> counted as money received — it will show as written off, so your
-            takings stay honest. Record any cash the customer actually handed over as a payment first.
+            The invoice keeps the total it was issued for, and only money that actually arrived is
+            counted as received — so this closes the balance without inflating your takings.
           </p>
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-secondary" disabled={savingSettlement} onClick={() => setSettlingInvoice(null)}>Cancel</button>
-          <button type="button" className="btn btn-primary" disabled={savingSettlement || !(settleAmount > 0)} onClick={confirmSettleShort}>{savingSettlement ? 'Recording…' : 'Write It Off'}</button>
+          <button type="button" className="btn btn-primary" disabled={savingSettlement || settleDue <= 0} onClick={confirmSettleShort}>{savingSettlement ? 'Recording…' : 'Record Settlement'}</button>
         </div>
       </div></div>}
 
