@@ -29,7 +29,7 @@ export function normalizeImportText(value: string): string {
  * supplier's "Seal kit" to the wrong inventory part is much more costly than showing the owner
  * one extra review warning. The selected datalist format ("PART-1 - Part name") is supported too.
  */
-export function matchImportedProduct(description: string, products: MatchableProduct[]): MatchableProduct | null {
+function matchImportedProduct(description: string, products: MatchableProduct[]): MatchableProduct | null {
   const trimmed = description.trim();
   const normalized = normalizeImportText(trimmed);
   if (!normalized) return null;
@@ -46,15 +46,21 @@ export function matchImportedProduct(description: string, products: MatchablePro
   }) ?? null;
 }
 
-export function normalizeCode(value: string | null | undefined): string {
+function normalizeCode(value: string | null | undefined): string {
   return (value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 /** "SP-014" and friends are placeholders this app invented during an earlier import because the
  *  source document carried no real code — not something a supplier ever printed. An invoice that
  *  does carry a real part number is therefore allowed to replace one, where it would never be
- *  allowed to overwrite a number the owner actually entered. */
-export function isPlaceholderPartNumber(value: string): boolean {
+ *  allowed to overwrite a number the owner actually entered.
+ *
+ *  Deliberately NARROWER than looksLikeAnInventedCode in lib/detail-import.ts, which also treats
+ *  shapes like "AIR-F90" as invented. Do not merge them: the two carry different risks. There, a
+ *  false positive only OFFERS a replacement the owner can decline. Here it decides whether a code
+ *  may be trusted as an exact match, so a false positive would refuse a genuine supplier code
+ *  like "ABC-123", drop the row to name matching, and can end up creating a duplicate part. */
+function isPlaceholderPartNumber(value: string): boolean {
   return /^sp-?\d+$/i.test(value.trim());
 }
 
@@ -63,7 +69,7 @@ function nameTokens(value: string): Set<string> {
 }
 
 /** Dice coefficient over the words of two names: 1 means identical wording, 0 nothing in common. */
-export function nameSimilarity(a: string, b: string): number {
+function nameSimilarity(a: string, b: string): number {
   const left = nameTokens(a);
   const right = nameTokens(b);
   if (!left.size || !right.size) return 0;

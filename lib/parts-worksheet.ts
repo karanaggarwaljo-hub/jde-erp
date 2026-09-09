@@ -1,3 +1,5 @@
+import { looksLikeAnInventedCode as isInvented } from './detail-import';
+
 /** The parts worksheet: a spreadsheet of everything this company stocks, for correcting part
  *  numbers away from the desk and importing the answers straight back.
  *
@@ -43,17 +45,6 @@ export const WORKSHEET_COLUMNS: (keyof WorksheetRow)[] = [
 ];
 
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : value == null ? '' : String(value));
-
-/** Codes this app generated itself, which must never be offered back as an answer.
- *  Mirrors looksLikeAnInventedCode in lib/detail-import.ts — kept in step by the test that
- *  feeds both the same real examples. */
-function isInvented(code: string): boolean {
-  const raw = text(code);
-  if (!raw) return false;
-  if (/\s/.test(raw)) return true;
-  const compact = raw.toUpperCase();
-  return /^SP-?\d{1,6}$/.test(compact) || /^[A-Z]{2,4}-[A-Z]?\d{1,4}$/.test(compact);
-}
 
 /**
  * A real part number already sitting inside the part's own NAME.

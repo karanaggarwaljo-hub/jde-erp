@@ -2,6 +2,31 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-09 — Housekeeping: one set of ageing rules instead of two
+
+No new features here, and nothing you do changes. This is tidying that removes a way for the app
+to start contradicting itself.
+
+**The "how overdue is this money" rules existed twice** — once for the Reports screen and once
+for the spreadsheet you export from it. Same four buckets, same boundaries, written out separately
+with nothing keeping them in step. Change one and the exported file would quietly disagree with
+the report it came from — the kind of thing nobody notices until two numbers are side by side in
+front of a customer. There is now one set of rules that both use, and the spreadsheet's column
+headings are built from the same list as its columns, so they cannot fall out of line either.
+
+**A real fault fixed on the way.** Ageing was measured against your computer's local clock while
+invoice dates are plain calendar dates. In India that is a five-and-a-half hour gap, so a bill
+could change bucket depending on what time of day you opened the report, and one exactly 30 days
+old could land on either side of the line. It is now counted in whole calendar days, so the same
+bill gives the same answer whenever you look.
+
+Also: the one remaining code warning is gone, a duplicated "is this a made-up part number" rule
+now exists once instead of twice, and five helpers that were only ever used inside their own file
+are no longer offered to the rest of the app.
+
+Twelve new automated tests cover the ageing rules, including one that asks the same question in
+the morning and at night and requires the same answer. 176 tests passing.
+
 ## 2026-09-05 — Settling an invoice is one step now, and tells you what you made
 
 Reported: the settlement system is wrong, it has to be simple enough to just record, and it should

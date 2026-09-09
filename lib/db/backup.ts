@@ -105,7 +105,7 @@ export async function backupDatabase(): Promise<BackupInfo> {
   return { filename, size_bytes: Buffer.byteLength(contents, 'utf8'), created_at: now.toISOString() };
 }
 
-export async function hasBackupToday(): Promise<boolean> {
+async function hasBackupToday(): Promise<boolean> {
   const todayStr = new Date().toISOString().slice(0, 10);
   return (await listBackups()).some((backup) => backup.created_at.slice(0, 10) === todayStr);
 }
