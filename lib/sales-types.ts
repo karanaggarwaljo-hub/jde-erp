@@ -159,3 +159,23 @@ export const GST_STATE_NAMES: Record<string, string> = {
   '97': 'Other Territory',
   '99': 'Centre Jurisdiction',
 };
+
+/** How a bill was settled at the moment it was written. */
+export type PaymentStatus = 'paid' | 'partial' | 'unpaid';
+
+/** One typed line on an invoice or a quotation. `discount` is a percentage off THIS line only,
+ *  kept separate from the bill-wide discount. Optional because quotations reuse this shape and do
+ *  not offer one — absent means none. */
+export type InvoiceLine = { part: string; qty: number; price: number; discount?: number };
+
+/** A part as offered in the "type a part" datalist: the label the owner picks, plus everything
+ *  the form fills in behind it once picked. */
+export type PartOption = {
+  value: string;
+  price: number;
+  category: string;
+  partNumber: string;
+  brand: string;
+  stock: number;
+  hsn: string;
+};

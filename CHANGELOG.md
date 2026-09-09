@@ -2,6 +2,18 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-09 — Housekeeping: the Sales screen split up
+
+No change to how anything works — this is the invoice write/edit window moving into its own file
+so the Sales screen stops being one 2,000-line page. Nothing you click behaves differently.
+
+The Sales page is now 1,694 lines instead of 2,029, and the invoice form is 433 lines of its own.
+The shapes the sales screens share — a payment status, an invoice line, a part in the "type a part"
+list — moved to the one file that already held the others, so there is one definition of each
+rather than a copy per screen.
+
+Inventory and Purchases get the same treatment next.
+
 ## 2026-09-09 — Housekeeping: one rule per calculation, and two real fixes fell out
 
 Tidying the three biggest screens. In doing it, two genuine faults turned up that the duplication
