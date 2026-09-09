@@ -5,7 +5,7 @@ import {
   removeBackupObjects,
   createBackupSignedUrl,
 } from './index';
-import { TABLES, type TableName } from './schema';
+import { BACKUP_TABLES, type TableName } from './schema';
 
 /** Daily JSON snapshots of every jde_ table, kept in a private Supabase Storage bucket.
  *
@@ -70,16 +70,22 @@ export async function pruneOldBackups(retentionDays: number = BACKUP_RETENTION_D
 }
 
 export async function backupDatabase(): Promise<BackupInfo> {
-  const tableNames = Object.keys(TABLES) as TableName[];
+  // BACKUP_TABLES, not TABLES. TABLES is the set of tables the browser may read through
+  // /api/local/[table]; using it here meant a table could only be backed up by also being
+  // published to the browser, and five detail tables — quotation lines, credit-note lines, both
+  // purchase-return tables and the settlement audit trail — were therefore in no snapshot ever
+  // taken. The failure was invisible from the outside: the headers all arrived, so the file was
+  // the right shape and roughly the right size.
+  const tableNames = Object.keys(BACKUP_TABLES) as TableName[];
   // listAllRows, not listRows: a backup has to page past Supabase's 1000-row API cap, or it
   // silently stops mid-table and still looks like a complete file.
   //
-  // All tables at once rather than one after another. Read sequentially, nineteen round trips to
+  // All tables at once rather than one after another. Read sequentially, the round trips to
   // Supabase took ~11s from here — fine now, but it grows with the data, and this job has a hard
   // ceiling it must finish inside. It also makes the snapshot *more* coherent, not less: there is
   // no transaction spanning these reads either way, so the shorter the window they span, the less
-  // chance of a sale landing between two tables and being half-captured. Nineteen is the fixed
-  // table count from the schema, not something user data can inflate, so this needs no throttle.
+  // chance of a sale landing between two tables and being half-captured. The table count is fixed
+  // by the schema, not something user data can inflate, so this needs no throttle.
   const tables = await Promise.all(tableNames.map((table) => listAllRows(table)));
   const snapshot: Record<string, Array<Record<string, unknown>>> = Object.fromEntries(
     tableNames.map((table, i) => [table, tables[i]])
