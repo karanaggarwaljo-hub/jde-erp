@@ -2,6 +2,62 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-09 — Your backups were missing five tables, including credit note lines
+
+You asked me to confirm the backups actually work. They run, they are real, and they were
+incomplete.
+
+**The daily snapshot is genuinely running.** Seven nightly files in storage, the newest from
+yesterday evening, about 810 KB each, and the one I opened contained 944 products, 735 stock
+batches, 16 invoices and 42 invoice lines. Not an empty shell.
+
+**But it was backing up 20 of your 25 tables.** Missing: the line items of every quotation, the
+line items of every credit note, both purchase-return tables, and the record of who was let off
+what when an invoice is settled. Every document *header* was there, so the file was the right
+shape and roughly the right size — which is exactly why nobody spotted it.
+
+**What that would have cost you today.** Restoring yesterday's backup would have brought back your
+five credit notes as empty headers: the notes exist, the items on them do not. Eight rows, gone.
+The other four tables happen to be empty right now, so nothing else was at risk yet — but the
+settlement feature that went live on Friday writes to one of them, so the next settlement you
+recorded would have been the next thing not backed up.
+
+**Why it happened.** The backup job was walking the list of tables the *browser* is allowed to
+read. A table could therefore only get into a backup by also being published to the app's API —
+so five tables that no screen reads were never in any snapshot ever taken. Those are now two
+separate lists, which is what they always should have been: what the app may read, and what a
+restore needs. Tonight's backup will carry all 25 tables.
+
+**And a check so it cannot happen again quietly.** `npx tsx scripts/backup-coverage-check.ts`
+opens the newest snapshot and compares every table in it against the live database. It found the
+fault when I pointed it at yesterday's file, and it passes against the fixed job. There is also
+now a written-down list of the two things deliberately *not* backed up — stored AI answers, and a
+queue of already-sent events — so "left out" is always a decision somebody made rather than
+something nobody noticed.
+
+## 2026-09-09 — Live data check: balances and payments clean, two parts showing negative stock
+
+Alongside the backup work, I checked the real Jai Durga Enterprises data now that you are actually
+recording sales in it — seven invoices, the most recent on 3 September.
+
+**What is correct.** All three customer balances match their invoices to the paisa: jasspal
+₹7,026, Teja ₹3,186.75, kareem ₹0. The one payment recorded, RCPT-1001 for ₹13,000, is fully and
+correctly applied. Every invoice line has a cost recorded against it, so profit figures work.
+
+**What is wrong: two parts show negative stock.** STEARING COUPLING 3DX shows −1 and PIN (12400)
+shows −5. Both were sold on 1 September on invoices INV-1014 and INV-1012, and neither had ever
+been recorded as bought — there is no purchase for them anywhere in the system, so the sale pushed
+the count below zero.
+
+This is not corruption; it is the ERP letting you sell something you never recorded buying, which
+for a trading business is often exactly what happens. The cost was taken from the part's own cost
+price rather than a real purchase batch (₹250 and ₹390), so your profit figures on those two sales
+are estimates rather than audited numbers, and they look sensible.
+
+**What I need from you:** did those parts physically exist and just never get entered as a
+purchase, or were they ordered in for the customer? If it is the first, recording the purchase
+will put the stock right and give those sales a real cost. I have not changed anything, because
+guessing at stock is worse than the wrong number sitting there where you can see it.
 ## 2026-09-09 — Housekeeping: one set of ageing rules instead of two
 
 No new features here, and nothing you do changes. This is tidying that removes a way for the app

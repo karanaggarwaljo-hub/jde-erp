@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
-import { TABLES, type TableName } from './schema';
+import { BACKUP_TABLES, TABLES, type TableName } from './schema';
 
 export type { TableName };
 
@@ -133,7 +133,10 @@ export async function listAllRows(table: TableName): Promise<Array<Record<string
     const { data, error } = await getClient()
       .from(supaTable(table))
       .select('*')
-      .order(TABLES[table].primaryKey, { ascending: true })
+      // BACKUP_TABLES, not TABLES: this is the function the backup job walks, and it has to page
+      // tables that no screen reads. BACKUP_TABLES is a superset, so every table already handled
+      // here resolves to exactly the same key it did before.
+      .order(BACKUP_TABLES[table].primaryKey, { ascending: true })
       .range(offset, offset + pageSize - 1);
     if (error) throw error;
     const page = (data as Array<Record<string, unknown>>) ?? [];
