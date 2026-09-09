@@ -1,5 +1,6 @@
 import { getActiveCompanyId, listRows } from '@/lib/db';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
+import { AGE_BUCKETS, agingRows } from '@/lib/aging';
 
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; };
 type PurchaseOrder = { total: number; supplier: string; date: string; paid: number; status: string };
@@ -9,31 +10,8 @@ type Customer = { balance: number };
 type Supplier = { balance: number };
 
 const GST_RATE = 0.18;
-const AGE_BUCKETS = ['0-30', '31-60', '61-90', '90+'] as const;
-
 function toCsv(rows: Array<Array<string | number>>): string {
   return rows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n');
-}
-
-function bucketFor(days: number): typeof AGE_BUCKETS[number] {
-  if (days <= 30) return '0-30';
-  if (days <= 60) return '31-60';
-  if (days <= 90) return '61-90';
-  return '90+';
-}
-
-function agingRows(entries: Array<{ key: string; date: string; due: number }>): Array<[string, ...number[]]> {
-  const today = new Date();
-  const byKey = new Map<string, Record<typeof AGE_BUCKETS[number], number>>();
-  for (const entry of entries) {
-    if (entry.due <= 0) continue;
-    const days = Math.max(0, Math.floor((today.getTime() - new Date(entry.date).getTime()) / 86400000));
-    const bucket = bucketFor(days);
-    const row = byKey.get(entry.key) ?? { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
-    row[bucket] += entry.due;
-    byKey.set(entry.key, row);
-  }
-  return Array.from(byKey.entries()).map(([key, buckets]) => [key, buckets['0-30'], buckets['31-60'], buckets['61-90'], buckets['90+']]);
 }
 
 async function buildExport(type: string): Promise<{ filename: string; rows: Array<Array<string | number>> }> {
@@ -113,19 +91,21 @@ async function buildExport(type: string): Promise<{ filename: string; rows: Arra
   }
 
   if (type === 'aging') {
-    const receivables = agingRows(invoices.map((i) => ({ key: i.customer, date: i.date, due: invoiceBalanceDue(i) })));
+    const today = new Date();
+    const receivables = agingRows(invoices.map((i) => ({ key: i.customer, date: i.date, due: invoiceBalanceDue(i) })), today);
     const payables = agingRows(
-      purchaseOrders.filter((p) => p.status === 'received').map((p) => ({ key: p.supplier, date: p.date, due: Number(p.total) - Number(p.paid) }))
+      purchaseOrders.filter((p) => p.status === 'received').map((p) => ({ key: p.supplier, date: p.date, due: Number(p.total) - Number(p.paid) })),
+      today
     );
     return {
       filename: 'jde-aging-summary.csv',
       rows: [
         ['Receivables Aging'],
-        ['Customer', '0-30 Days', '31-60 Days', '61-90 Days', '90+ Days'],
+        ['Customer', ...AGE_BUCKETS.map((bucket) => `${bucket} Days`)],
         ...receivables,
         [],
         ['Payables Aging'],
-        ['Supplier', '0-30 Days', '31-60 Days', '61-90 Days', '90+ Days'],
+        ['Supplier', ...AGE_BUCKETS.map((bucket) => `${bucket} Days`)],
         ...payables,
       ],
     };

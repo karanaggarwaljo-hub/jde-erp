@@ -6,6 +6,7 @@ import { Download, Printer, TrendingUp, TrendingDown, ShoppingBag, Wallet, Recei
 import { printCurrentPage } from '@/lib/client-export';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import AIReportSummary from '@/components/AIReportSummary';
+import { AGE_BUCKETS, agingFrom, type AgeBucket } from '@/lib/aging';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
 
 type ReportType = 'pnl' | 'sales' | 'stock' | 'gst' | 'aging';
@@ -16,8 +17,6 @@ type Expense = { amount: number };
 type Product = { category: string; current_stock: number; cost_price: number; sale_price: number };
 
 const GST_RATE = 0.18;
-const AGE_BUCKETS = ['0-30', '31-60', '61-90', '90+'] as const;
-type AgeBucket = typeof AGE_BUCKETS[number];
 const BUCKET_COLORS: Record<AgeBucket, string> = { '0-30': 'var(--color-success)', '31-60': 'var(--chart-amber)', '61-90': 'var(--chart-orange)', '90+': 'var(--color-danger)' };
 const BUCKET_BG: Record<AgeBucket, string> = { '0-30': 'var(--color-success-bg)', '31-60': 'var(--amber-tint)', '61-90': 'color-mix(in srgb, var(--chart-orange) 12%, var(--surface))', '90+': 'var(--color-danger-bg)' };
 const CATEGORY_COLORS = ['var(--chart-amber)', 'var(--chart-blue)', 'var(--color-success)', 'var(--chart-violet)', 'var(--chart-pink)', 'var(--chart-teal)'];
@@ -47,36 +46,6 @@ function daysBetween(startIso: string, endIso: string) {
   const end = Date.parse(`${endIso}T00:00:00Z`);
   if (Number.isNaN(start) || Number.isNaN(end)) return null;
   return Math.floor((end - start) / 86400000) + 1;
-}
-
-function emptyBuckets(): Record<AgeBucket, number> {
-  return { '0-30': 0, '31-60': 0, '61-90': 0, '90+': 0 };
-}
-
-function bucketFor(days: number): AgeBucket {
-  if (days <= 30) return '0-30';
-  if (days <= 60) return '31-60';
-  if (days <= 90) return '61-90';
-  return '90+';
-}
-
-function daysSince(dateStr: string, today: Date) {
-  const then = new Date(dateStr);
-  return Math.max(0, Math.floor((today.getTime() - then.getTime()) / 86400000));
-}
-
-function agingFrom(rows: Array<{ key: string; date: string; due: number }>, today: Date) {
-  const totals = emptyBuckets();
-  const byKey = new Map<string, Record<AgeBucket, number>>();
-  for (const row of rows) {
-    if (row.due <= 0) continue;
-    const bucket = bucketFor(daysSince(row.date, today));
-    totals[bucket] += row.due;
-    const entry = byKey.get(row.key) ?? emptyBuckets();
-    entry[bucket] += row.due;
-    byKey.set(row.key, entry);
-  }
-  return { totals, byKey };
 }
 
 function Kpi({ title, value, icon: Icon, color, bg }: { title: string; value: string; icon: LucideIcon; color: string; bg: string }) {
