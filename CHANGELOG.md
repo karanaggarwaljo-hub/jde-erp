@@ -2,6 +2,22 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-09 — Housekeeping: the Purchases screen split up
+
+No change to how anything works — the same treatment the Sales screen just had, applied to
+Purchases. Four windows moved out into files of their own: "Record Purchase from File" (the review
+screen for a scanned or uploaded supplier document), the manual "Record Purchase" form, "Return
+items to supplier", and "Record Payment". Nothing you click behaves differently.
+
+The Purchases page is now 1,060 lines instead of 1,388, and the four windows are 579 lines between
+them. The shapes Purchases shares with those windows — a payment status, a purchase order, an
+order's item line, a part in the "type a part" list, and what the review screen decided about each
+line read off a document — moved to one file, so there is one definition of each rather than a copy
+per window.
+
+The move turned up three things the page was still importing but no longer using anywhere; those
+are gone.
+
 ## 2026-09-09 — Housekeeping: the Sales screen split up
 
 No change to how anything works — this is the invoice write/edit window moving into its own file

@@ -3,9 +3,7 @@
 import { ChangeEvent, FormEvent, useState } from 'react';
 import {
   Plus,
-  Minus,
   FileCheck,
-  FileText,
   Upload,
   Undo2,
   Receipt,
@@ -22,7 +20,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_ACCEPT, isSpreadsheetFileName, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
-import { matchImportedLine, normalizeImportText, planFieldUpdates, type LineMatch, type MatchableProduct } from '@/lib/import-matching';
+import { matchImportedLine, normalizeImportText, planFieldUpdates, type MatchableProduct } from '@/lib/import-matching';
 import { savePurchase, receivePurchaseStock, recordPurchasePayment } from '@/lib/client-purchases';
 import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-purchase-returns';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -30,16 +28,27 @@ import { money, wholeMoney } from '@/lib/money';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { amountReceived } from '@/lib/invoice-totals';
 import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
+import {
+  NEW_PART,
+  type ImportLineReview,
+  type ImportPreview,
+  type PaymentStatus,
+  type PoItem,
+  type POLine,
+  type PurchaseOrder,
+  type Supplier,
+} from '@/lib/purchase-types';
+import ImportReviewModal from '@/components/purchases/ImportReviewModal';
+import PurchaseFormModal from '@/components/purchases/PurchaseFormModal';
+import RecordPaymentModal from '@/components/purchases/RecordPaymentModal';
+import SupplierReturnModal from '@/components/purchases/SupplierReturnModal';
 
 type PurchaseTab = 'purchases' | 'invoices';
-type PaymentStatus = 'paid' | 'partial' | 'unpaid';
-type POLine = { description: string; quantity: number; unit_price: number };
 
+// Only this page reads these two: a product row as Inventory stores it, and the goods-received
+// note the save writes. Everything the dialogs also need lives in lib/purchase-types.ts.
 type Product = { id: string; company_id: string; part_number: string; oem_number: string; hsn_code: string; brand: string; name: string; category: string; cost_price: number; current_stock: number };
-type Supplier = { id: string; company_id: string; name: string; balance: number };
-type PurchaseOrder = { id: string; company_id: string; supplier: string; date: string; expected: string; items: number; total: number; paid: number; status: string };
 type Grn = { id: string; company_id: string; po_number: string; supplier: string; received_at: string; status: string };
-type PoItem = { id: string; po_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_cost: number };
 
 /** Which purchase orders the table is showing. Purely a view filter — it never changes what is
  *  loaded, only which of the already-loaded rows get painted. */
@@ -78,24 +87,6 @@ function pageWindow(current: number, total: number): Array<number | 'gap'> {
   return shown;
 }
 
-/** The value stored in the link map when the owner has looked at a suggestion and rejected it —
- *  distinct from "not yet decided", which is what an absent entry means. */
-const NEW_PART = 'new';
-
-type ImportLineReview = {
-  match: LineMatch;
-  /** The part this line will actually be recorded against — after any owner decision. */
-  matchedProduct: MatchableProduct | null;
-  /** True while a suggested match is still waiting on Link / Keep separate. */
-  needsDecision: boolean;
-  warnings: string[];
-  /** Fields where the invoice disagrees with data already on the part. Reported, never applied. */
-  conflicts: string[];
-  /** Blank fields on the existing part that this invoice will fill in. */
-  fills: string[];
-  costDifferencePercent: number | null;
-};
-
 function todayIso() {
   return new Date().toISOString().split('T')[0];
 }
@@ -111,15 +102,6 @@ function isScannableFile(file: File) {
 function cleanedGuess(text: string): string {
   return text.replace(/\.[a-z0-9]+$/i, '').replace(/[_-]+/g, ' ').trim();
 }
-
-/** The identifiers a supplier document prints alongside each line. Shown on the review screen so
- *  what the scan read can be checked, and typed in when it read nothing. */
-const IMPORT_IDENTIFIERS: { field: 'part_number' | 'hsn_code' | 'oem_number' | 'brand'; label: string }[] = [
-  { field: 'part_number', label: 'Part no' },
-  { field: 'hsn_code', label: 'HSN' },
-  { field: 'oem_number', label: 'OEM no' },
-  { field: 'brand', label: 'Brand' },
-];
 
 function reviewImportedLines(lines: ImportedLine[], products: Product[], links: Record<number, string>): ImportLineReview[] {
   const descriptionCounts = new Map<string, number>();
@@ -199,7 +181,7 @@ export default function PurchasesPage() {
 
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
-  const [importPreview, setImportPreview] = useState<{ fileName: string; lines: ImportedLine[]; supplier: string; supplierGstin: string; fileHash: string | null } | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
   const [confirmingImport, setConfirmingImport] = useState(false);
   // Line index -> the part the owner linked it to, or NEW_PART for "keep this separate".
   // Only suggested (not exact) matches ever need an entry here.
@@ -1019,370 +1001,60 @@ export default function PurchasesPage() {
 
       {activeTab === 'invoices' && <div className="card empty-state"><div className="empty-state-icon"><FileCheck size={22} /></div><p className="empty-state-title">Supplier invoice matching isn&apos;t available yet</p><p className="empty-state-desc">This will let you upload supplier invoices and match them against purchases — not built yet.</p></div>}
 
-      {returningOrder && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '820px' }} role="dialog" aria-modal="true" aria-labelledby="purchase-return-title">
-        <div className="modal-header"><h3 id="purchase-return-title" className="modal-title">Return items to {returningOrder.supplier}</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingReturn} onClick={() => setReturningOrder(null)}>✕</button></div>
-        <div className="modal-body flex flex-col gap-4">
-          {returnError && <div className="alert alert-danger" role="alert">{returnError}</div>}
-          <div className="card card-sm bg-surface" style={{ padding: '12px' }}>
-            <p style={{ fontSize: '13px', margin: 0 }}><strong>{returningOrder.id}</strong> · received {formatDay(returningOrder.date)} · original total ₹{Number(returningOrder.total).toLocaleString()}</p>
-            <p className="text-muted" style={{ fontSize: '12px', margin: '6px 0 0' }}>{loadingReturnAvailability ? 'Checking what is still available from this purchase…' : 'Only enter items actually sent back. Saving reduces stock and the supplier payable together. If this purchase was already paid, the lower payable becomes supplier credit.'}</p>
-          </div>
-          <div className="table-wrap">
-            <div className="tbl-toolbar">
-              <div className="tbl-toolbar-title">
-                <strong>Items on {returningOrder.id}</strong>
-                <small>Available is what is still left to send back from this purchase</small>
-              </div>
-            </div>
+      {returningOrder && (
+        <SupplierReturnModal
+          returningOrder={returningOrder} returnError={returnError}
+          returnableItems={returnableItems} returnQuantities={returnQuantities}
+          returnableQtyByPoItemId={returnableQtyByPoItemId}
+          loadingReturnAvailability={loadingReturnAvailability}
+          updateReturnQuantity={updateReturnQuantity}
+          returnNote={returnNote} setReturnNote={setReturnNote}
+          selectedReturnLines={selectedReturnLines} returnTotal={returnTotal}
+          hasInvalidReturnQuantity={hasInvalidReturnQuantity}
+          savingReturn={savingReturn} setReturningOrder={setReturningOrder}
+          submitPurchaseReturn={submitPurchaseReturn} formatDay={formatDay}
+        />
+      )}
 
-            <div style={{ overflowX: 'auto' }}>
-              <table className="erp-table">
-                <thead><tr><th>Item</th><th>Part #</th><th className="text-right">Purchased</th><th className="text-right">Available</th><th className="text-right">Unit cost</th><th style={{ minWidth: '150px' }} className="text-right">Return now</th></tr></thead>
-                <tbody>{returnableItems.map((item) => {
-                  const selected = Number(returnQuantities[item.id] ?? 0);
-                  const availableQty = Number(returnableQtyByPoItemId?.[item.id] ?? 0);
-                  const invalid = selected > availableQty || selected < 0 || !Number.isFinite(selected);
-                  return <tr key={item.id} style={invalid ? { background: 'var(--color-danger-bg)' } : undefined}>
-                    <td style={{ fontWeight: 600 }}>{item.name}</td><td className="text-muted">{item.part_number || '—'}</td><td className="text-right">{Number(item.qty)}</td><td className="text-right">{returnableQtyByPoItemId === null ? '—' : availableQty}</td><td className="text-right">₹{Number(item.unit_cost).toLocaleString()}</td>
-                    <td><input type="number" min="0" max={availableQty} step="0.01" className="form-input text-right" aria-label={`Return quantity for ${item.name}`} value={returnQuantities[item.id] ?? 0} disabled={savingReturn || returnableQtyByPoItemId === null} onChange={(event) => updateReturnQuantity(item.id, event.target.value)} /></td>
-                  </tr>;
-                })}
-                {returnableItems.length === 0 && <tr><td colSpan={6}><div className="empty-state"><p className="empty-state-title">No returnable item lines found</p><p className="empty-state-desc">This older purchase has no linked PO lines, so it cannot be safely returned.</p></div></td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Reason / supplier reference <span className="text-muted">(optional)</span></label>
-            <textarea className="form-input" rows={3} maxLength={1000} placeholder="Example: damaged seal kit, supplier RMA 123" value={returnNote} disabled={savingReturn} onChange={(event) => setReturnNote(event.target.value)} />
-          </div>
-          <div className="flex justify-between items-center invoice-summary">
-            <span className="text-muted">{selectedReturnLines.length} selected line{selectedReturnLines.length === 1 ? '' : 's'}</span>
-            <div><strong>Supplier return total: </strong><span className="invoice-total">₹{returnTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div>
-          </div>
-        </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingReturn} onClick={() => setReturningOrder(null)}>Cancel</button><button type="button" className="btn btn-primary" disabled={savingReturn || loadingReturnAvailability || returnableQtyByPoItemId === null || selectedReturnLines.length === 0 || hasInvalidReturnQuantity || returnableItems.length === 0} onClick={submitPurchaseReturn}>{savingReturn ? 'Recording…' : loadingReturnAvailability ? 'Checking stock…' : 'Review & Record Return'}</button></div>
-      </div></div>}
+      {payingOrder && (
+        <RecordPaymentModal
+          payingOrder={payingOrder} payAmount={payAmount} setPayAmount={setPayAmount}
+          payError={payError} savingPayment={savingPayment} setPayingOrder={setPayingOrder}
+          submitPayment={submitPayment}
+        />
+      )}
 
-      {payingOrder && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="pay-modal-title"><form onSubmit={submitPayment}>
-        <div className="modal-header">
-          <h3 id="pay-modal-title" className="modal-title">Record Payment</h3>
-          <button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingPayment} onClick={() => setPayingOrder(null)}>✕</button>
-        </div>
-        <div className="modal-body">
-          {payError && <div className="alert alert-danger" role="alert">{payError}</div>}
-          <p className="text-muted" style={{ fontSize: '13px', marginTop: 0 }}>
-            <strong>{payingOrder.id}</strong> — {payingOrder.supplier}, dated {payingOrder.date}.
-          </p>
-          <div className="flex justify-between items-center invoice-summary" style={{ marginBottom: '12px' }}>
-            <div><span className="text-muted">Order total: </span><strong>₹{money(payingOrder.total)}</strong></div>
-            <div><span className="text-muted">Already paid: </span><strong className="text-success">₹{money(payingOrder.paid)}</strong></div>
-            <div><span className="text-muted">Still owing: </span><strong className="text-danger">₹{money(Number(payingOrder.total) - Number(payingOrder.paid))}</strong></div>
-          </div>
-          <div className="form-group">
-            <label className="form-label" htmlFor="pay-amount">Amount Paid Now (₹)</label>
-            <input id="pay-amount" type="number" min="0.01" step="0.01" max={Number(payingOrder.total) - Number(payingOrder.paid)}
-              className="form-input" value={payAmount} disabled={savingPayment}
-              onChange={(event) => setPayAmount(Number(event.target.value))} autoFocus />
-          </div>
-          <p className="text-muted" style={{ fontSize: '12px' }}>
-            This reduces what you owe {payingOrder.supplier} by the same amount. Nothing about the stock
-            already received changes.
-          </p>
-        </div>
-        <div className="modal-footer">
-          <button type="button" className="btn btn-secondary" disabled={savingPayment} onClick={() => setPayingOrder(null)}>Cancel</button>
-          <button type="submit" className="btn btn-primary" disabled={savingPayment || !(payAmount > 0)}>{savingPayment ? 'Recording…' : 'Record Payment'}</button>
-        </div>
-      </form></div></div>}
+      {importPreview && (
+        <ImportReviewModal
+          importPreview={importPreview} setImportPreview={setImportPreview}
+          importedPreviewTotal={importedPreviewTotal} importReviews={importReviews}
+          updateImportedLine={updateImportedLine}
+          importLinks={importLinks} setImportLinks={setImportLinks}
+          importNewPartCount={importNewPartCount} importPriceChangeCount={importPriceChangeCount}
+          importWarningCount={importWarningCount} importUndecidedCount={importUndecidedCount}
+          importFillCount={importFillCount} importHasInvalidLine={importHasInvalidLine}
+          importPaymentStatus={importPaymentStatus} setImportPaymentStatus={setImportPaymentStatus}
+          importAmountPaid={importAmountPaid} setImportAmountPaid={setImportAmountPaid}
+          importPaidAmount={importPaidAmount}
+          partOptions={partOptions} supplierOptions={supplierOptions} suppliers={suppliers}
+          importError={importError} confirmingImport={confirmingImport}
+          confirmImportedPO={confirmImportedPO}
+        />
+      )}
 
-      {importPreview && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
-        <div className="modal-header"><h3 id="import-preview-title" className="modal-title">Record Purchase from File</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={confirmingImport} onClick={() => { setImportPreview(null); setImportLinks({}); }}>✕</button></div>
-        <div className="modal-body flex flex-col gap-4">
-          {importError && <div className="alert alert-danger" role="alert">{importError}</div>}
-
-          <div className="flex justify-between items-center gap-3" style={{ flexWrap: 'wrap' }}>
-            <div className="flex items-center gap-3">
-              <div className="kpi-icon-wrap" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}><FileText size={18} /></div>
-              <div>
-                <strong style={{ fontSize: '13.5px' }}>{importPreview.fileName}</strong>
-                <p className="text-muted" style={{ fontSize: '12px' }}>
-                  Read <strong>{importPreview.lines.length} item(s)</strong>, total ₹{money(importedPreviewTotal)}
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-              <span className="badge badge-success">{importPreview.lines.length - importNewPartCount} matched</span>
-              {importNewPartCount > 0 && <span className="badge badge-warning">{importNewPartCount} new part{importNewPartCount === 1 ? '' : 's'}</span>}
-              {importPriceChangeCount > 0 && <span className="badge badge-warning">{importPriceChangeCount} price check{importPriceChangeCount === 1 ? '' : 's'}</span>}
-              {importWarningCount > 0 && <span className="badge badge-danger">{importWarningCount} review warning{importWarningCount === 1 ? '' : 's'}</span>}
-            </div>
-          </div>
-
-          <p className="text-muted" style={{ fontSize: '12px' }}>
-            Exact matches are attached to existing inventory. Unmatched rows create a new part when saved; review those carefully before continuing.
-          </p>
-          <div className="form-group">
-            <label className="form-label">Supplier</label>
-            <input list="purchase-supplier-options" className="form-input" placeholder="Type or select a supplier" value={importPreview.supplier} onChange={(event) => setImportPreview({ ...importPreview, supplier: event.target.value })} />
-            <datalist id="purchase-supplier-options">{supplierOptions.map((s) => <option key={s} value={s} />)}</datalist>
-            {importPreview.supplier.trim() && !suppliers.some((supplier) => supplier.name.toLowerCase() === importPreview.supplier.trim().toLowerCase()) && (
-              <small className="text-warning">New supplier — this name will be created when you record the purchase.</small>
-            )}
-            {importPreview.supplierGstin.trim() && (
-              <small style={{ color: 'var(--text-muted)' }}>
-                GSTIN read from document: {importPreview.supplierGstin.trim()} — saved against this supplier if it&apos;s a new one.
-              </small>
-            )}
-          </div>
-
-          {/* Exactly what was read out of the file — nothing added, nothing rounded away — so it
-              can be checked, and corrected, before it becomes stock and a supplier balance. */}
-          <datalist id="import-part-options">{partOptions.map((option) => <option key={option.value} value={option.value} />)}</datalist>
-
-          <div className="table-wrap">
-            <div className="tbl-toolbar">
-              <div className="tbl-toolbar-title">
-                <strong>Review imported items</strong>
-                <small>Edit a row to correct it before saving — a red row must be fixed first. Part no, HSN, OEM and brand are read from the document; fill in anything blank.</small>
-              </div>
-            </div>
-
-            <div style={{ overflowX: 'auto', maxHeight: '330px', overflowY: 'auto' }}>
-              <table className="erp-table">
-                <thead><tr><th>Item</th><th className="text-right">Qty</th><th className="text-right">Unit cost (₹)</th><th className="text-right">Amount (₹)</th><th>Inventory match / review</th></tr></thead>
-                <tbody>{importPreview.lines.map((line, index) => {
-                  const review = importReviews[index];
-                  const suggestion = review?.match.kind === 'suggested' ? review.match.product : null;
-                  const isInvalid = !line.description.trim() || line.quantity <= 0 || line.unit_price <= 0;
-                  return <tr key={index} style={isInvalid ? { background: 'var(--color-danger-bg)' } : undefined}>
-                    <td style={{ minWidth: '250px' }}>
-                      <input list="import-part-options" className="form-input" aria-label={`Item ${index + 1}`} value={line.description} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { description: event.target.value })} />
-                      {/* These are what let the next invoice from any supplier recognise this
-                          same part, whoever's name it is printed under, so they are worth
-                          checking now — while the document is still in front of you. */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '4px' }}>
-                        {IMPORT_IDENTIFIERS.map(({ field, label }) => (
-                          <input key={field} className="form-input" style={{ fontSize: '12px', padding: '4px 6px' }}
-                            placeholder={label} aria-label={`${label} for item ${index + 1}`}
-                            value={line[field] ?? ''} disabled={confirmingImport}
-                            onChange={(event) => updateImportedLine(index, { [field]: event.target.value })} />
-                        ))}
-                      </div>
-                    </td>
-                    <td style={{ minWidth: '82px' }}><input type="number" min="1" className="form-input text-right" aria-label={`Quantity for item ${index + 1}`} value={line.quantity} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { quantity: Number(event.target.value) })} /></td>
-                    <td style={{ minWidth: '118px' }}><input type="number" min="0.01" step="0.01" className="form-input text-right" aria-label={`Unit cost for item ${index + 1}`} value={line.unit_price} disabled={confirmingImport} onChange={(event) => updateImportedLine(index, { unit_price: Number(event.target.value) })} /></td>
-                    <td className="text-right font-semibold">₹{money(line.quantity * line.unit_price)}</td>
-                    <td style={{ minWidth: '300px' }}>
-                      {review?.needsDecision && review.match.kind === 'suggested' ? (
-                        // Deliberately unresolved until the owner says so: the names only look
-                        // alike, and guessing wrong puts this stock on the wrong part.
-                        <div>
-                          <span className="badge badge-warning">Same part?</span>
-                          <div style={{ fontSize: '12px', marginTop: '3px' }}>
-                            <strong>{review.match.product.part_number}</strong> — {review.match.product.name}
-                            <div className="text-muted">Already in stock: {review.match.product.current_stock} · {review.match.reason}</div>
-                          </div>
-                          <div style={{ display: 'flex', gap: '6px', marginTop: '5px' }}>
-                            <button type="button" className="btn btn-sm btn-primary" disabled={confirmingImport}
-                              onClick={() => setImportLinks((current) => ({ ...current, [index]: suggestion?.id ?? NEW_PART }))}>
-                              Same part
-                            </button>
-                            <button type="button" className="btn btn-sm btn-secondary" disabled={confirmingImport}
-                              onClick={() => setImportLinks((current) => ({ ...current, [index]: NEW_PART }))}>
-                              Different part
-                            </button>
-                          </div>
-                        </div>
-                      ) : review?.matchedProduct ? (
-                        <div>
-                          <span className="badge badge-success">{importLinks[index] ? 'Linked by you' : 'Matched'}</span>{' '}
-                          <strong style={{ fontSize: '12px' }}>{review.matchedProduct.part_number}</strong>
-                          <div className="text-muted" style={{ fontSize: '12px', marginTop: '3px' }}>
-                            {review.matchedProduct.name}
-                            {review.match.kind === 'exact' && !importLinks[index] ? ` · ${review.match.reason}` : ''}
-                          </div>
-                          {importLinks[index] && importLinks[index] !== NEW_PART && (
-                            <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '0', fontSize: '11px' }} disabled={confirmingImport}
-                              onClick={() => setImportLinks((current) => ({ ...current, [index]: NEW_PART }))}>
-                              Undo — make it a new part
-                            </button>
-                          )}
-                        </div>
-                      ) : <span className="badge badge-warning">New part</span>}
-                      {review && review.fills.length > 0 && (
-                        <div className="text-success" style={{ fontSize: '12px', marginTop: '4px' }}>
-                          Will fill in from this invoice: {review.fills.join(', ')}
-                        </div>
-                      )}
-                      {review?.conflicts.map((conflict) => <div key={conflict} className="text-warning" style={{ fontSize: '12px', marginTop: '4px' }}>{conflict}</div>)}
-                      {review?.warnings.map((warning) => <div key={warning} className={warning.includes('must be') ? 'text-danger' : 'text-warning'} style={{ fontSize: '12px', marginTop: '4px' }}>{warning}</div>)}
-                    </td>
-                  </tr>;
-                })}</tbody>
-              </table>
-            </div>
-
-            <div className="pager">
-              <div className="pager-info"><strong>{importPreview.lines.length}</strong> {importPreview.lines.length === 1 ? 'line item' : 'line items'}</div>
-              <div className="pager-info">Total <strong>₹{money(importedPreviewTotal)}</strong></div>
-            </div>
-          </div>
-
-          {importHasInvalidLine && <div className="alert alert-danger" role="alert">Fix the red rows before recording this purchase.</div>}
-          {importUndecidedCount > 0 && (
-            <div className="alert alert-warning" role="alert">
-              {importUndecidedCount === 1 ? 'One item looks' : `${importUndecidedCount} items look`} like {importUndecidedCount === 1 ? 'a part' : 'parts'} you already stock under a different name.
-              Choose <strong>Same part</strong> or <strong>Different part</strong> for each — otherwise a duplicate part gets created.
-            </div>
-          )}
-
-          <div className="form-grid-2">
-            <div className="form-group">
-              <label className="form-label" htmlFor="import-payment-status">Payment to Supplier</label>
-              <select id="import-payment-status" className="form-input form-select" value={importPaymentStatus} disabled={confirmingImport}
-                onChange={(event) => setImportPaymentStatus(event.target.value as PaymentStatus)}>
-                <option value="paid">Paid in Full</option>
-                <option value="partial">Partially Paid</option>
-                <option value="unpaid">Unpaid (Credit)</option>
-              </select>
-            </div>
-            {importPaymentStatus === 'partial' && (
-              <div className="form-group">
-                <label className="form-label" htmlFor="import-amount-paid">Amount Paid (₹)</label>
-                <input id="import-amount-paid" type="number" min="0" max={importedPreviewTotal} className="form-input" value={importAmountPaid}
-                  disabled={confirmingImport} onChange={(event) => setImportAmountPaid(Number(event.target.value))} />
-              </div>
-            )}
-          </div>
-
-          <div className="flex justify-between items-center invoice-summary">
-            <div><span className="text-muted">Paid: </span><strong className="text-success">₹{money(importPaidAmount)}</strong></div>
-            <div><span className="text-muted">Balance to supplier: </span><strong className={importedPreviewTotal - importPaidAmount > 0 ? 'text-danger' : 'text-muted'}>₹{money(importedPreviewTotal - importPaidAmount)}</strong></div>
-            <div><strong>Total: </strong><span className="invoice-total">₹{money(importedPreviewTotal)}</span></div>
-          </div>
-
-          <p className="text-muted" style={{ fontSize: '12px' }}>
-            Anything here that isn&apos;t already in Inventory is added as a new part when you record this purchase.
-            {importFillCount > 0 && ' Blank details on parts you already stock will be filled in from this invoice; anything you entered yourself is left alone.'}
-          </p>
-        </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={confirmingImport} onClick={() => { setImportPreview(null); setImportLinks({}); }}>Cancel</button><button type="button" className="btn btn-primary" onClick={confirmImportedPO} disabled={!importPreview.supplier.trim() || importHasInvalidLine || importUndecidedCount > 0 || confirmingImport}>{confirmingImport ? 'Saving…' : `Record Purchase${importWarningCount > 0 ? ' After Review' : ''}`}</button></div>
-      </div></div>}
-
-      {showPurchaseModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="purchase-modal-title"><form onSubmit={recordPurchase}>
-        <div className="modal-header"><h3 id="purchase-modal-title" className="modal-title">Record Purchase</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setShowPurchaseModal(false)}>✕</button></div>
-        <div className="modal-body flex flex-col gap-4">
-          {purchaseError && <div className="alert alert-danger" role="alert">{purchaseError}</div>}
-          <div className="form-grid-2">
-            <div className="form-group">
-              <label className="form-label">Supplier *</label>
-              <input list="purchase-supplier-options" className="form-input" required placeholder="Type or select a supplier" value={supplierName} onChange={(event) => setSupplierName(event.target.value)} />
-              <datalist id="purchase-supplier-options">{supplierOptions.map((s) => <option key={s} value={s} />)}</datalist>
-            </div>
-            <div className="form-group"><label className="form-label">Date</label><input type="date" className="form-input" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} /></div>
-          </div>
-
-          <datalist id="po-part-options">
-            {partOptions.map((option) => <option key={option.value} value={option.value} />)}
-          </datalist>
-
-          <div className="table-wrap">
-            <div className="tbl-toolbar">
-              <div className="tbl-toolbar-title">
-                <strong>Item details</strong>
-                <small>Anything not already in Inventory is added as a new part when this is saved</small>
-              </div>
-            </div>
-
-            <div style={{ overflowX: 'auto' }}>
-              <table className="erp-table">
-                <thead>
-                  <tr>
-                    <th>Product</th>
-                    <th className="text-center">Quantity</th>
-                    <th className="text-right">Unit Cost (₹)</th>
-                    <th className="text-right">Amount (₹)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((line, index) => {
-                    const matched = partOptions.find((option) => option.value === line.description);
-                    return (
-                      <tr key={index}>
-                        <td style={{ minWidth: '260px' }}>
-                          <input list="po-part-options" className="form-input" placeholder="Type a new part name or select an existing one" value={line.description} onChange={(event) => updateLine(index, { description: event.target.value })} />
-                          {matched
-                            ? <small className="text-muted" style={{ display: 'block', marginTop: '4px' }}>Stock: {matched.stock}{matched.category ? ` · ${matched.category}` : ''}</small>
-                            : line.description.trim()
-                              ? <small className="text-muted" style={{ display: 'block', marginTop: '4px' }}>New part — will be added to Inventory</small>
-                              : null}
-                        </td>
-                        <td>
-                          {/* Both steppers write through updateLine, exactly like typing in the box
-                              does — the field stays the single source of the quantity. */}
-                          <div className="flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-icon"
-                              aria-label={`Decrease quantity for line ${index + 1}`}
-                              disabled={Number(line.quantity) <= 1}
-                              onClick={() => updateLine(index, { quantity: Math.max(1, Number(line.quantity) - 1) })}
-                            >
-                              <Minus size={14} />
-                            </button>
-                            <input type="number" min="1" className="form-input text-center" style={{ width: '64px' }} value={line.quantity} onChange={(event) => updateLine(index, { quantity: Number(event.target.value) })} />
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-icon"
-                              aria-label={`Increase quantity for line ${index + 1}`}
-                              onClick={() => updateLine(index, { quantity: Number(line.quantity) + 1 })}
-                            >
-                              <Plus size={14} />
-                            </button>
-                          </div>
-                        </td>
-                        <td><input type="number" min="0" className="form-input text-right" value={line.unit_price} onChange={(event) => updateLine(index, { unit_price: Number(event.target.value) })} /></td>
-                        <td className="text-right font-semibold">₹{money(line.quantity * line.unit_price)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="pager">
-              <div className="pager-info"><strong>{lines.length}</strong> {lines.length === 1 ? 'line item' : 'line items'}</div>
-              <div className="flex gap-2 items-center">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLines((current) => [...current, { description: '', quantity: 1, unit_price: 0 }])}><Plus size={14} /> Add Item Row</button>
-                {lines.length > 1 && <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={() => setLines((current) => current.slice(0, -1))}>Remove Last Row</button>}
-              </div>
-            </div>
-          </div>
-
-          <div className="form-grid-2">
-            <div className="form-group">
-              <label className="form-label">Payment to Supplier</label>
-              <select className="form-input form-select" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)}>
-                <option value="paid">Paid in Full</option>
-                <option value="partial">Partially Paid</option>
-                <option value="unpaid">Unpaid (Credit)</option>
-              </select>
-            </div>
-            {paymentStatus === 'partial' && (
-              <div className="form-group"><label className="form-label">Amount Paid (₹)</label><input type="number" min="0" max={total} className="form-input" value={amountPaid} onChange={(event) => setAmountPaid(Number(event.target.value))} /></div>
-            )}
-          </div>
-
-          <div className="flex justify-between items-center invoice-summary">
-            <div><span className="text-muted">Line Items: </span><strong>{lines.length}</strong></div>
-            <div><span className="text-muted">Paid: </span><strong className="text-success">₹{money(paidAmount)}</strong></div>
-            <div><span className="text-muted">Balance: </span><strong className={total - paidAmount > 0 ? 'text-danger' : 'text-muted'}>₹{money(total - paidAmount)}</strong></div>
-            <div><strong>Total: </strong><span className="invoice-total">₹{money(total)}</span></div>
-          </div>
-        </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setShowPurchaseModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={!total || !supplierName.trim() || savingPurchase}>{savingPurchase ? 'Saving…' : 'Save Purchase'}</button></div>
-      </form></div></div>}
+      {showPurchaseModal && (
+        <PurchaseFormModal
+          supplierName={supplierName} setSupplierName={setSupplierName}
+          supplierOptions={supplierOptions}
+          purchaseDate={purchaseDate} setPurchaseDate={setPurchaseDate}
+          partOptions={partOptions} lines={lines} setLines={setLines} updateLine={updateLine}
+          paymentStatus={paymentStatus} setPaymentStatus={setPaymentStatus}
+          amountPaid={amountPaid} setAmountPaid={setAmountPaid}
+          total={total} paidAmount={paidAmount}
+          purchaseError={purchaseError} savingPurchase={savingPurchase}
+          setShowPurchaseModal={setShowPurchaseModal} recordPurchase={recordPurchase}
+        />
+      )}
     </div>
   );
 }
