@@ -1,11 +1,12 @@
 import { getActiveCompanyId, listRows } from '@/lib/db';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
 import { AGE_BUCKETS, agingRows } from '@/lib/aging';
+import { totalStockValue, type StockLayerLike } from '@/lib/stock-value';
 
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; };
 type PurchaseOrder = { total: number; supplier: string; date: string; paid: number; status: string };
 type Expense = { amount: number };
-type Product = { category: string; current_stock: number; cost_price: number; sale_price: number };
+type Product = { id: string; category: string; current_stock: number; cost_price: number; sale_price: number };
 type Customer = { balance: number };
 type Supplier = { balance: number };
 
@@ -28,7 +29,11 @@ async function buildExport(type: string): Promise<{ filename: string; rows: Arra
   const totalExpenses = expenses.reduce((t, e) => t + Number(e.amount || 0), 0);
 
   if (type === 'dashboard') {
-    const inventoryValue = products.reduce((t, p) => t + Number(p.current_stock || 0) * Number(p.cost_price || 0), 0);
+    // Same rule as every screen — each batch at its own cost (lib/stock-value.ts). This used to
+    // multiply by the cost_price field, so the CSV and the Dashboard reported different totals
+    // for the same stock.
+    const stockLayers = (await listRows('stock_layers', companyId)) as unknown as StockLayerLike[];
+    const inventoryValue = totalStockValue(products, stockLayers);
     const totalReceivables = customers.reduce((t, c) => t + Number(c.balance || 0), 0);
     const totalPayables = suppliers.reduce((t, s) => t + Number(s.balance || 0), 0);
     const lowStockCount = products.filter((p) => Number(p.current_stock) <= 0).length;

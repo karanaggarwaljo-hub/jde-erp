@@ -8,13 +8,14 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 import AIReportSummary from '@/components/AIReportSummary';
 import { AGE_BUCKETS, agingFrom, type AgeBucket } from '@/lib/aging';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
+import { stockValueLookup, type StockLayerLike } from '@/lib/stock-value';
 
 type ReportType = 'pnl' | 'sales' | 'stock' | 'gst' | 'aging';
 
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string };
 type Expense = { amount: number };
-type Product = { category: string; current_stock: number; cost_price: number; sale_price: number };
+type Product = { id: string; category: string; current_stock: number; cost_price: number; sale_price: number };
 
 const GST_RATE = 0.18;
 const BUCKET_COLORS: Record<AgeBucket, string> = { '0-30': 'var(--color-success)', '31-60': 'var(--chart-amber)', '61-90': 'var(--chart-orange)', '90+': 'var(--color-danger)' };
@@ -113,10 +114,16 @@ export default function ReportsPage() {
   const [reportType, setReportType] = useState<ReportType>('pnl');
   const [feedback, setFeedback] = useState('');
 
-  const { rows: invoices, activeCompany } = useCompanyTable<Invoice>('invoices');
-  const { rows: purchaseOrders } = useCompanyTable<PurchaseOrder>('purchase_orders');
-  const { rows: expenses } = useCompanyTable<Expense>('expenses');
-  const { rows: products } = useCompanyTable<Product>('products');
+  const { rows: invoices, activeCompany, error: invoicesError } = useCompanyTable<Invoice>('invoices');
+  const { rows: purchaseOrders, error: purchaseOrdersError } = useCompanyTable<PurchaseOrder>('purchase_orders');
+  const { rows: expenses, error: expensesError } = useCompanyTable<Expense>('expenses');
+  const { rows: products, error: productsError } = useCompanyTable<Product>('products');
+  const { rows: stockLayers, error: stockLayersError } = useCompanyTable<StockLayerLike>('stock_layers');
+
+  // Every report here is summed from those five tables. A failed read would simply produce smaller
+  // totals, which is indistinguishable from a quiet month — and these are the figures most likely
+  // to be read as fact, printed, or handed to an accountant.
+  const dataError = invoicesError ?? purchaseOrdersError ?? expensesError ?? productsError ?? stockLayersError;
 
   const totalRevenue = invoices.reduce((t, i) => t + Number(i.total || 0), 0);
   const totalPurchaseSpend = purchaseOrders.reduce((t, p) => t + Number(p.total || 0), 0);
@@ -128,12 +135,16 @@ export default function ReportsPage() {
   const avgOrderValue = invoices.length > 0 ? totalRevenue / invoices.length : 0;
   const salesOutstandingDue = invoices.reduce((t, i) => t + invoiceBalanceDue(i), 0);
 
+  // Valued by the one shared rule, each batch at what that batch cost (lib/stock-value.ts). This
+  // screen used to multiply by the cost_price field while Inventory and the Dashboard used the
+  // batches, so the same stock was reported here as ₹31,53,256 and there as ₹31,08,287.
+  const stockValueFor = stockValueLookup(stockLayers);
   const stockByCategory = new Map<string, { count: number; qty: number; cost: number; retail: number }>();
   for (const p of products) {
     const entry = stockByCategory.get(p.category) ?? { count: 0, qty: 0, cost: 0, retail: 0 };
     entry.count += 1;
     entry.qty += Number(p.current_stock || 0);
-    entry.cost += Number(p.current_stock || 0) * Number(p.cost_price || 0);
+    entry.cost += stockValueFor(p);
     entry.retail += Number(p.current_stock || 0) * Number(p.sale_price || 0);
     stockByCategory.set(p.category, entry);
   }
@@ -199,6 +210,12 @@ export default function ReportsPage() {
       <div className="flex gap-2"><button className="btn btn-secondary" onClick={printCurrentPage}><Printer size={16} /> Print Report</button><a className="btn btn-primary" href={`/api/export?type=${reportType}`} download onClick={() => setFeedback('Report export started.')}><Download size={16} /> Export CSV</a></div>
     </div>
     {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
+    {dataError && (
+      <div className="alert alert-danger mb-4" role="alert">
+        Some of this company&apos;s records could not be loaded, so every figure below is of only
+        part of the data. Reload before relying on, printing or exporting any of it — {dataError}
+      </div>
+    )}
 
     <div className="flex items-center justify-between gap-4 mb-6" style={{ flexWrap: 'wrap' }}>
       <div className="tabs report-tabs"><button className={`tab ${reportType === 'pnl' ? 'active' : ''}`} onClick={() => setReportType('pnl')}>Profit & Loss</button><button className={`tab ${reportType === 'sales' ? 'active' : ''}`} onClick={() => setReportType('sales')}>Sales Summary</button><button className={`tab ${reportType === 'stock' ? 'active' : ''}`} onClick={() => setReportType('stock')}>Stock Valuation</button><button className={`tab ${reportType === 'gst' ? 'active' : ''}`} onClick={() => setReportType('gst')}>GST Summary</button><button className={`tab ${reportType === 'aging' ? 'active' : ''}`} onClick={() => setReportType('aging')}>Aging</button></div>

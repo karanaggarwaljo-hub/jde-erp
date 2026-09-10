@@ -2,6 +2,69 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-10 — Acting on the outside audit: money, stock and the doors left open
+
+An independent review of the ERP was done on 9–10 September. It found real problems. This is the
+first block of work on them: the ones about money going astray, stock being valued three different
+ways, and screens quietly showing figures they could not actually stand behind. Two of its findings
+turned out to be already fixed since it was written; the rest of its list is still ahead.
+
+**Paying a supplier is now one action, not a chain of them.** Recording a payment used to send one
+message per unpaid purchase order and then a separate one to reduce what that supplier is owed. If
+the connection dropped halfway, some orders were marked paid while the balance stayed exactly where
+it was — and pressing the button again made it worse rather than better. It is now a single
+transaction: either the whole payment lands, or none of it does. Pressing the button twice records
+one payment, not two, however slow the line is.
+
+There is also a record of the payment itself now. Until today, paying JAIN AUTO SALES ₹33,000 left
+no document anywhere saying that had happened — only its side effects on other paperwork. Each
+payment is now kept with its date, amount, and which bills it covered, oldest first, the same way
+money coming in from customers has always been kept.
+
+**Only the plain things can be edited plainly.** There is a general-purpose door into the database
+that the screens use for straightforward edits — a customer's phone number, a part's price. Two
+kinds of record were fenced off from it; everything else was not. That meant a purchase order could
+be marked paid without a rupee moving off what the supplier was owed, or an invoice total changed
+without the customer's account following it. That door now only opens for the plain things: parts,
+customers, suppliers, staff, companies and the website catalogue. Everything that a sale, purchase,
+payment or return produces goes through its own path, which moves the stock and the balances along
+with it. Nothing you do on any screen changes; this is about what was possible, not what was
+happening.
+
+**Stock is worth one number now, and it is a truer one.** Inventory and the Dashboard said your
+stock was worth ₹31,08,287. Reports and the CSV export said ₹31,53,256. Both were wrong in the same
+way: they picked one price and applied it to every piece on the shelf. A part bought ten at ₹100
+and later ten at ₹200 is worth ₹3,000, but valuing all twenty at the older price reports ₹2,000.
+Every screen now values each batch at what that batch actually cost, and they all say ₹31,22,534.
+
+Where a batch was entered without a price, those pieces fall back to the part's cost price rather
+than being called worthless — stock is never free, a missing price is just a missing price. Two
+parts on file show negative stock (PIN (12400) at −5 and STEARING COUPLING 3DX at −1); those now
+count as nothing rather than as a negative amount of money.
+
+**Goods cannot be returned against an invoice whose history is broken.** Four returns, on INV-1011
+and INV-1013, no longer point at the invoice lines they came off — the result of invoices being
+edited before that was stopped. Because of it, the return window believes nothing has ever been
+returned on those two invoices and would happily let the same goods come back again. It now refuses
+and says why. The database itself also now refuses to create a return line pointing at nothing, or
+to delete an invoice line that goods came back against, so this cannot happen again from any
+direction. The four damaged returns are left exactly as they are: what physically came back is a
+question about the shop, not about the software.
+
+**Screens no longer show figures they could not load.** If a read failed, the Dashboard and Reports
+carried on and drew whatever had arrived. Nothing broke, no warning appeared, and the totals simply
+came out smaller — which looks exactly like a quiet month. Both screens now say plainly that the
+records could not be loaded, and show nothing rather than something misleading.
+
+**Reading a table no longer stops at a thousand rows.** Requests for a table were capped at 1,000
+rows without saying so. Nothing is near that today, so no figure changes — but the day it would
+have started quietly leaving stock out is an ordinary day of trading, not something anyone would
+have noticed.
+
+Also: an invoice now records whether its prices included GST as part of saving it, rather than in a
+second message afterwards that could fail on its own. And the new supplier payment records are in
+the daily backup.
+
 ## 2026-09-09 — Housekeeping: the Inventory screen split up
 
 No change to how anything works — this is the three pop-up windows on the Inventory screen moving

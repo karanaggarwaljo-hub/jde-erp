@@ -31,7 +31,7 @@ import { averageMarginPercent, marginPercent } from '@/lib/margin';
 import { buildPartsWorksheet, countUnanswered, worksheetToCsv, worksheetFileName } from '@/lib/parts-worksheet';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
-import { fifoCostLookup } from '@/lib/stock-value';
+import { fifoCostLookup, totalStockValue } from '@/lib/stock-value';
 import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
 import PartFormModal from '@/components/inventory/PartFormModal';
 import DeletePartModal from '@/components/inventory/DeletePartModal';
@@ -119,11 +119,10 @@ export default function InventoryPage() {
   const { rows: products, loading, create, update, remove, reload, activeCompany } = useCompanyTable<Product>('products');
   const { rows: stockLayers, reload: reloadStockLayers } = useCompanyTable<StockLayer>('stock_layers');
 
-  // Cost price shown per product = the oldest FIFO batch that still has stock left (i.e. what the
-  // next sale will actually cost), falling back to the static cost_price field when a product has
-  // no batches at all (e.g. it's never been purchased through the FIFO-tracked flow).
-  // Shared with the Dashboard's Inventory Value KPI — the two used to compute this separately and
-  // disagreed by ₹27,970 on real data. See lib/stock-value.ts.
+  // The per-unit cost shown next to a part: its oldest still-open priced batch, i.e. what the next
+  // sale of it will cost, which is also what its margin is worked out from. Deliberately NOT what
+  // the headline Stock Value uses — a part bought ten at ₹100 and ten at ₹200 holds ₹3,000, and
+  // one per-unit number cannot say that. See lib/stock-value.ts.
   const fifoCostFor = fifoCostLookup(stockLayers);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -274,7 +273,7 @@ export default function InventoryPage() {
   // Headline figures, every one of them summed from the parts this page has already loaded.
   const lowStockCount = products.filter(isLowStock).length;
   const outOfStockCount = products.filter(isOutOfStock).length;
-  const stockValue = products.reduce((total, p) => total + Number(p.current_stock || 0) * fifoCostFor(p), 0);
+  const stockValue = totalStockValue(products, stockLayers);
   const brandCount = new Set(products.map((p) => p.brand).filter(Boolean)).size;
   // Only parts that carry both a cost and a sale price have a margin at all — see lib/margin.ts,
   // which is now also what each row uses, so the average and the rows agree about the awkward ones.

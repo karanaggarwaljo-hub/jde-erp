@@ -1,19 +1,16 @@
 import { dbErrorMessage, isCompanyScoped, isKnownTable, updateRow, deleteRow, deleteCompany } from '@/lib/db';
 import { requireOwnCompanyRow } from '@/lib/auth/dal';
+import { refuseGenericWrite } from '@/lib/generic-write-guard';
 
 export const dynamic = 'force-dynamic';
-
-// See app/api/local/[table]/route.ts for why these two are read-only through this generic path.
-const PAYMENT_TABLES = new Set(['payments_received', 'payment_allocations']);
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ table: string; id: string }> }) {
   const { table, id } = await params;
   if (!isKnownTable(table)) {
     return Response.json({ error: `Unknown table: ${table}` }, { status: 404 });
   }
-  if (PAYMENT_TABLES.has(table)) {
-    return Response.json({ error: 'A recorded payment cannot be edited — delete it and record it again if it was wrong.' }, { status: 403 });
-  }
+  const refusal = refuseGenericWrite(table, 'edit');
+  if (refusal) return refusal;
   const decodedId = decodeURIComponent(id);
   // This route only ever received a bare row id, with nothing to check it against — any active
   // login could edit any row of any table belonging to any company. Looks up which company the
@@ -41,9 +38,8 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   if (!isKnownTable(table)) {
     return Response.json({ error: `Unknown table: ${table}` }, { status: 404 });
   }
-  if (PAYMENT_TABLES.has(table)) {
-    return Response.json({ error: 'Delete a payment through Sales, not this endpoint — that also puts its invoices back to how they were.' }, { status: 403 });
-  }
+  const refusal = refuseGenericWrite(table, 'delete');
+  if (refusal) return refusal;
   const decodedId = decodeURIComponent(id);
 
   try {

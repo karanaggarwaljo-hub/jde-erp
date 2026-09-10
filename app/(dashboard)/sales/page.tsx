@@ -102,7 +102,7 @@ function pageWindow(current: number, total: number): Array<number | 'gap'> {
 export default function SalesPage() {
   const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
   const { rows: customers, create: createCustomer, reload: reloadCustomers } = useCompanyTable<Customer>('customers');
-  const { rows: invoices, loading: invoicesLoading, reload: reloadInvoices, update: updateInvoiceRow } = useCompanyTable<Invoice>('invoices');
+  const { rows: invoices, loading: invoicesLoading, reload: reloadInvoices } = useCompanyTable<Invoice>('invoices');
   const { rows: quotations, loading: quotationsLoading, reload: reloadQuotations } = useCompanyTable<Quotation>('quotations');
   const { rows: invoiceItems, reload: reloadInvoiceItems } = useCompanyTable<InvoiceItem>('invoice_items');
   const { rows: payments, reload: reloadPayments } = useCompanyTable<Payment>('payments_received');
@@ -575,22 +575,6 @@ export default function SalesPage() {
       };
     });
 
-  // gst_percent and gst_amount are display-only columns: they exist so a saved invoice can print
-  // its correct tax split later. The invoice itself is already saved correctly by the atomic call
-  // that runs before this, so a failure here is logged and ignored — it must never turn a
-  // completed sale into an error on screen.
-  const rememberGstSplit = async (invoiceId: string, percent: number, amount: number) => {
-    try {
-      await updateInvoiceRow(invoiceId, {
-        gst_percent: percent,
-        gst_amount: amount,
-        gst_mode: gstInclusive ? 'inclusive' : 'exclusive',
-      });
-    } catch (error) {
-      console.error(`Could not record the GST split on ${invoiceId} — the invoice itself is saved.`, error);
-    }
-  };
-
   // Parks the sale on screen without billing it. Deliberately the same atomic call as Create
   // Invoice — so the FIFO stock is reserved there and then, which is what the owner asked for —
   // with nothing received and nothing added to the customer's balance, because nothing is owed
@@ -640,10 +624,12 @@ export default function SalesPage() {
         mode: 'Credit',
         discountPercent,
         discountAmount,
+        gstPercent,
+        gstAmount,
+        gstMode: gstInclusive ? 'inclusive' : 'exclusive',
       });
 
       const draftId = String(invoice.id);
-      await rememberGstSplit(draftId, gstPercent, gstAmount);
       // No customer reload: parking a draft leaves every balance exactly as it was.
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadProducts()]);
       setShowInvoiceModal(false);
@@ -718,9 +704,11 @@ export default function SalesPage() {
           mode: editingInvoice.mode,
           discountPercent,
           discountAmount,
+          gstPercent,
+          gstAmount,
+          gstMode: gstInclusive ? 'inclusive' : 'exclusive',
         });
 
-        await rememberGstSplit(editingInvoice.id, gstPercent, gstAmount);
         await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
         setShowInvoiceModal(false);
         setEditingInvoice(null);
@@ -753,10 +741,12 @@ export default function SalesPage() {
         mode: 'Credit',
         discountPercent,
         discountAmount,
+        gstPercent,
+        gstAmount,
+        gstMode: gstInclusive ? 'inclusive' : 'exclusive',
       });
 
       const createdId = String(invoice.id);
-      await rememberGstSplit(createdId, gstPercent, gstAmount);
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
       setShowInvoiceModal(false);
       setActiveTab('invoices');

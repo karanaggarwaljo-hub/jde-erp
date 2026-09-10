@@ -29,6 +29,12 @@ export type SaveSalesInvoiceInput = {
   mode: string;
   discountPercent: number;
   discountAmount: number;
+  /** The tax split, recorded by the same transaction that saves the invoice. It used to be sent
+   *  afterwards as a separate edit, which could fail on its own and leave a saved invoice unable
+   *  to print its own tax correctly. */
+  gstPercent: number;
+  gstAmount: number;
+  gstMode: 'inclusive' | 'exclusive';
 };
 
 async function sendJson<T>(method: 'POST' | 'DELETE', url: string, body: unknown): Promise<T> {

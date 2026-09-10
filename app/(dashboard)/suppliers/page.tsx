@@ -3,6 +3,7 @@
 import { Fragment, FormEvent, useMemo, useState } from 'react';
 import { Plus, Search, Phone, Mail, Sparkles, IndianRupee, Truck, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
 
 type Supplier = { id: string; company_id: string; name: string; category: string; phone: string; email: string; gstin: string; terms: number; balance: number };
@@ -32,12 +33,15 @@ const categoryChipColor = (category: string) => {
 };
 
 export default function SuppliersPage() {
-  const { rows: suppliers, loading, create, adjust } = useCompanyTable<Supplier>('suppliers');
-  const { rows: purchaseOrders, update: updatePurchaseOrder } = useCompanyTable<PurchaseOrder>('purchase_orders');
+  const { rows: suppliers, loading, create, reload: reloadSuppliers, activeCompany } = useCompanyTable<Supplier>('suppliers');
+  const { rows: purchaseOrders, reload: reloadPurchaseOrders } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [paymentSupplier, setPaymentSupplier] = useState<Supplier | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
+  // Fixed when the dialog opens and reused by every retry of that same payment, so a double-click
+  // or a re-submit after a timeout lands on the payment already recorded instead of a second one.
+  const [paymentReference, setPaymentReference] = useState('');
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState('');
   const [savingSupplier, setSavingSupplier] = useState(false);
@@ -89,41 +93,47 @@ export default function SuppliersPage() {
   const openPayment = (supplier: Supplier) => {
     setPaymentSupplier(supplier);
     setPaymentAmount(supplier.balance);
+    setPaymentReference(crypto.randomUUID());
     setPaymentError('');
   };
 
   const recordPayment = async (event: FormEvent) => {
     event.preventDefault();
-    // Guards against a double-click double-applying this payment: each PO update and the
-    // balance adjustment below are separate server calls, not one atomic transaction, so a
-    // second concurrent submit would subtract the paid amount from the payable balance twice
-    // while only crediting the purchase orders once.
-    if (!paymentSupplier || savingPayment) return;
+    if (!paymentSupplier || savingPayment || !activeCompany) return;
     setPaymentError('');
     setSavingPayment(true);
     const paid = Math.min(Math.max(paymentAmount, 0), paymentSupplier.balance);
 
     try {
-      let remaining = paid;
-      const outstandingPOs = purchaseOrders
-        .filter((po) => po.supplier === paymentSupplier.name && po.status === 'received' && Number(po.total) > Number(po.paid))
-        .sort((a, b) => a.date.localeCompare(b.date));
-      for (const po of outstandingPOs) {
-        if (remaining <= 0) break;
-        const due = Number(po.total) - Number(po.paid);
-        const apply = Math.min(due, remaining);
-        await updatePurchaseOrder(po.id, { paid: Number(po.paid) + apply });
-        remaining -= apply;
-      }
-
-      await adjust(paymentSupplier.id, -paid);
-      setFeedback(`₹${paid.toLocaleString()} payment recorded for ${paymentSupplier.name}.`);
+      // One request, one database transaction. The purchase orders, the payment record, its
+      // per-order allocations and the payable balance either all move or none of them do
+      // (jde_pay_supplier). This screen used to PATCH each purchase order from here in a loop and
+      // then adjust the balance separately, so a connection failure partway through could leave
+      // orders marked paid while nothing came off what the supplier was owed — and a retry made
+      // it worse rather than better.
+      const res = await fetch('/api/suppliers/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: activeCompany.id,
+          supplierId: paymentSupplier.id,
+          date: new Date().toISOString().slice(0, 10),
+          amount: paid,
+          note: '',
+          reference: paymentReference,
+        }),
+      });
+      const result = await parseJsonOrThrow(res, 'Failed to record this payment.');
+      await Promise.all([reloadSuppliers(), reloadPurchaseOrders()]);
+      const orders = (result as { orders_paid?: number }).orders_paid ?? 0;
+      setFeedback(
+        `₹${paid.toLocaleString()} payment recorded for ${paymentSupplier.name}` +
+          (orders > 0 ? ` against ${orders} purchase order${orders > 1 ? 's' : ''}.` : '.')
+      );
       setPaymentSupplier(null);
     } catch (error) {
-      // A failure partway through the PO loop above can leave some purchase orders already
-      // marked paid while the payable balance was never reduced — surfaced here rather than
-      // hidden, so it's at least visible that something needs checking in Purchases.
-      setPaymentError(error instanceof Error ? error.message : 'Failed to record this payment — check this supplier\'s purchase orders before retrying.');
+      // Nothing partial can be left behind now — the payment either landed whole or not at all.
+      setPaymentError(error instanceof Error ? error.message : 'Failed to record this payment.');
     } finally {
       setSavingPayment(false);
     }
