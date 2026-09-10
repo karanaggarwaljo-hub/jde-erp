@@ -1,11 +1,13 @@
 /**
- * Finding a part to bill, the way someone standing at a counter actually looks for one.
+ * Finding a part, the way someone standing at a counter actually looks for one.
  *
- * The sale form used a native <datalist>, which only ever matched the full concatenated label
- * ("SP-258 - STEARING COUPLING 3DX") character for character. Typing the part number alone
- * matched nothing, a barcode scanner's output matched nothing, and a hyphen in the wrong place
- * matched nothing — with 252 parts in the real catalogue and 944 across all companies, that is
- * the difference between billing a customer in ten seconds and hunting through a list.
+ * Used when billing a sale and when keying a supplier's invoice — the same catalogue, looked up
+ * the same way. Both forms previously used a native <datalist>, which only ever matched the full
+ * concatenated label ("SP-258 - STEARING COUPLING 3DX") character for character. Typing the part
+ * number alone matched nothing, a barcode scanner's output matched nothing, and a hyphen in the
+ * wrong place matched nothing — with 252 parts in the real catalogue and 944 across all
+ * companies, that is the difference between keying a document in a minute and hunting through
+ * a list.
  *
  * Three things this has to get right:
  *
@@ -14,13 +16,22 @@
  *      invoice from the supplier, and by whoever is typing.
  *   2. Several loose words match in any order — "bearing pinion" finds "BIG PINION BEARING".
  *      Nobody remembers a catalogue name in its exact word order.
- *   3. Out of stock never means hidden. A trader sells what they have to order in; the picker
- *      says the stock is zero and lets them decide.
+ *   3. Out of stock never means hidden. A trader sells what they have to order in, and buying is
+ *      precisely how a part with none on the shelf gets restocked.
  *
  * Pure and synchronous — no fetching, no React — so the ranking can be tested on its own.
  */
 
-import type { PartOption } from '@/lib/sales-types';
+/** The minimum a part has to expose to be findable. Both the sales catalogue and the purchases
+ *  one satisfy this structurally, so neither screen's row type is imported here — this module
+ *  ranks parts and knows nothing about what either screen does with the one that is picked. */
+export type SearchablePart = {
+  value: string;
+  partNumber: string;
+  name: string;
+  brand: string;
+  stock: number;
+};
 
 /** Strips punctuation and case so a code matches however it happens to be written down.
  *  "P00-12400", "p00 12400" and "P0012400" all normalize to the same thing. */
@@ -41,7 +52,7 @@ export type MatchReason =
   | 'brand'
   | 'all-words';
 
-export type PartMatch = { part: PartOption; score: number; why: MatchReason };
+export type PartMatch<T extends SearchablePart = SearchablePart> = { part: T; score: number; why: MatchReason };
 
 // Ordered so that a stronger reason always outranks a weaker one no matter how many weak
 // reasons a part collects. Nothing sums — each part is scored by its single best reason.
@@ -55,7 +66,7 @@ const SCORES: Record<MatchReason, number> = {
   'all-words': 80,
 };
 
-function bestReason(part: PartOption, rawQuery: string): MatchReason | null {
+function bestReason(part: SearchablePart, rawQuery: string): MatchReason | null {
   const code = normalizeCode(rawQuery);
   const partCode = normalizeCode(part.partNumber);
   if (code.length > 0) {
@@ -85,11 +96,11 @@ function bestReason(part: PartOption, rawQuery: string): MatchReason | null {
  * The ranked shortlist for what has been typed so far. Empty query gives an empty list — the
  * picker shows nothing until there is something to go on, rather than dumping 944 rows.
  */
-export function searchParts(rawQuery: string, parts: PartOption[], limit = 8): PartMatch[] {
+export function searchParts<T extends SearchablePart>(rawQuery: string, parts: T[], limit = 8): PartMatch<T>[] {
   const query = rawQuery.trim();
   if (!query) return [];
 
-  const matches: PartMatch[] = [];
+  const matches: PartMatch<T>[] = [];
   for (const part of parts) {
     const why = bestReason(part, query);
     if (why) matches.push({ part, score: SCORES[why], why });
@@ -111,7 +122,7 @@ export function searchParts(rawQuery: string, parts: PartOption[], limit = 8): P
 /** Every part whose number is exactly what was typed or scanned, punctuation aside. Usually none
  *  or one; more than one is the SP-258 case, which is real — three different products in the live
  *  catalogue carry that same number. */
-export function exactCodeMatches(rawQuery: string, parts: PartOption[]): PartOption[] {
+export function exactCodeMatches<T extends SearchablePart>(rawQuery: string, parts: T[]): T[] {
   const code = normalizeCode(rawQuery);
   if (!code) return [];
   return parts.filter((part) => normalizeCode(part.partNumber) === code);
@@ -125,13 +136,13 @@ export function exactCodeMatches(rawQuery: string, parts: PartOption[]): PartOpt
  * picking one: silently billing whichever sorted first is exactly the kind of wrong that reaches
  * a customer.
  */
-export function scannedPart(rawQuery: string, parts: PartOption[]): PartOption | null {
+export function scannedPart<T extends SearchablePart>(rawQuery: string, parts: T[]): T | null {
   const exact = exactCodeMatches(rawQuery, parts);
   return exact.length === 1 ? exact[0] : null;
 }
 
 /** True when what was typed is a part number that several parts share, so a keystroke must not
  *  resolve it. The picker leaves the list open and waits for a real choice instead. */
-export function isAmbiguousCode(rawQuery: string, parts: PartOption[]): boolean {
+export function isAmbiguousCode(rawQuery: string, parts: SearchablePart[]): boolean {
   return exactCodeMatches(rawQuery, parts).length > 1;
 }

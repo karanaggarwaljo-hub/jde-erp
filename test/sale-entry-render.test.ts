@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import PartPicker from '../components/sales/PartPicker';
+import PartPicker from '../components/PartPicker';
 import InvoiceFormModal from '../components/sales/InvoiceFormModal';
 import { buildLastSoldIndex, partLabel } from '../lib/sale-entry';
 import { billTotals } from '../lib/invoice-totals';

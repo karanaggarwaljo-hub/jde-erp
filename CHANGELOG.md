@@ -2,6 +2,36 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-10 — Recording a purchase works the same way, and warns you about the money
+
+The purchase form had every problem the sale form had. Click "Add Item Row", click the part box,
+type the full catalogue label exactly. The part number alone found nothing, a barcode scanner
+found nothing, and a scanner's Enter went to the Save button — which on this screen does not just
+save a wrong document, it puts stock on your shelves.
+
+**It is now the same box.** Scan or type, Enter, scan or type, Enter. Same search: the part number
+in any punctuation, the name, loose words in any order, the brand. The same part scanned twice
+becomes quantity two. Enter cannot save the form; Ctrl+Enter does.
+
+A part you have never bought before can still just be typed in, and it is added to Inventory when
+you save, exactly as before.
+
+**What is different from the sale screen is what it tells you about the money.** Three things,
+none of which stop you saving:
+
+- **"You sell this at ₹650 — buying at ₹3,900 loses money on every one."** Buying above your own
+  selling price is the one mistake at this desk that costs you on every single unit, for as long
+  as the stock lasts. It is now said before you save, in red.
+- **"900% more than the ₹390 you paid on PO-1004."** Every line is compared against what *that
+  supplier* last charged you for *that part*. This catches a supplier quietly raising a rate, and
+  it catches a typed extra zero, which look identical until someone checks. Anything more than
+  20% out is flagged, in either direction, because a dropped digit looks exactly like a bargain.
+- **"No cost entered — this stock would be valued at nothing."** A zero-cost line opens a stock
+  batch worth nothing, and then every sale drawn from it reports the whole sale value as profit.
+
+Each line also shows what the part sells for, how many are on the shelf, and what this supplier
+last charged, with a one-click button to use that rate again.
+
 ## 2026-09-10 — Acting on the outside audit: money, stock and the doors left open
 
 An independent review of the ERP was done on 9–10 September. It found real problems. This is the
