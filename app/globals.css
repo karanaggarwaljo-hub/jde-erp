@@ -1888,3 +1888,89 @@ Modal
 }
 
 .activity-stat-context { font-size: 11.5px; color: var(--ink-3); }
+
+/* ── Part picker ───────────────────────────────────────────────────────────
+   The single box a sale is typed into. Replaces a native <datalist>, which could
+   not show stock, rate or the last price this customer paid — the three things
+   actually being weighed while choosing a part.
+
+   The list is absolutely positioned, so it overlays the line table below rather
+   than pushing it down and moving the row someone is reading. */
+.part-picker { position: relative; }
+
+.part-picker-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+.part-picker-field:focus-within { border-color: var(--border-focus); }
+/* The input already carries the border and background of the wrapper. */
+.part-picker-field .form-input {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding-left: 0;
+}
+.part-picker-field .form-input:focus { box-shadow: none; }
+
+.part-picker-list {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.part-picker-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+/* One highlight state for both the keyboard and the mouse, so arrowing down and
+   hovering cannot disagree about which row Enter would take. */
+.part-picker-option.is-active { background: var(--amber-tint); }
+
+.part-picker-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.part-picker-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.part-picker-meta { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+
+.part-picker-empty { padding: 10px; }
+
+/* Said under the line it is about, never as a blocking error: selling below cost or
+   ahead of a delivery are both real, deliberate things to do here. */
+.line-warning {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--amber-3);
+}
+.line-warning.is-stock { color: var(--color-danger); }
+
+@media (max-width: 640px) {
+  .part-picker-option { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .part-picker-meta { gap: 8px; }
+}

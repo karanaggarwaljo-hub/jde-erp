@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useMemo, useState, type KeyboardEvent } from 'react';
 import {
   Plus,
   Printer,
@@ -18,6 +18,7 @@ import {
   Package,
   AlertTriangle,
   CheckCircle2,
+  X,
   XCircle,
   MapPin,
   Undo2,
@@ -28,13 +29,15 @@ import {
 import { saveSalesInvoice, deleteSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance, receiveCustomerPayment, getInvoiceCost } from '@/lib/client-sales';
 import { realisedProfit, type InvoiceCost } from '@/lib/invoice-profit';
 import { invoiceBalanceDue, invoiceWrittenOff, wasSettledShort } from '@/lib/invoice-balance';
+import { addCustomLine, addPartToLines, buildLastSoldIndex, partLabel } from '@/lib/sale-entry';
 import { createSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem } from '@/lib/client-sales-returns';
 import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } from '@/lib/client-quotations';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { buildCustomerLedger } from '@/lib/customer-ledger';
 import AddCustomerModal from '@/components/AddCustomerModal';
+import PartPicker from '@/components/sales/PartPicker';
 import ReceivePaymentModal from '@/components/ReceivePaymentModal';
-import { money, round2 } from '@/lib/money';
+import { money, paise, round2 } from '@/lib/money';
 import InvoiceFormModal from '@/components/sales/InvoiceFormModal';
 import { amountReceived, billTotals, lineDiscountAmount, lineDiscountPercent, lineGross, lineNet } from '@/lib/invoice-totals';
 import {
@@ -49,6 +52,7 @@ import {
   type PaymentAllocation,
   type PaymentStatus,
   type InvoiceLine,
+  type PartOption,
   type Product,
   type Quotation,
 } from '@/lib/sales-types';
@@ -110,18 +114,23 @@ export default function SalesPage() {
   // Only to grey out Edit and Delete on an invoice goods have already come back against.
   const { rows: salesReturns } = useCompanyTable<{ id: string; invoice_id: string }>('sales_returns');
 
-  // `value`, `price` and `category` are untouched — the save path matches lines on `value` and
-  // fills the rate from `price`. The rest are extra fields off the same already-loaded product
-  // row, used only to describe the line in the dialog.
-  const partOptions = products.map((product) => ({
-    value: `${product.part_number} - ${product.name}`,
-    price: product.sale_price,
+  // `value` is what a line stores and what the save path matches on, so it stays exactly the
+  // label it has always been. The rest are fields off the same already-loaded product row, used to
+  // search for the part and to describe the line once it is on the invoice.
+  //
+  // Numbers are coerced here rather than at each use: Postgres numeric columns arrive as strings
+  // over the REST API, and the search ranking and the stock/below-cost warnings compare them.
+  const partOptions = useMemo(() => products.map((product) => ({
+    value: partLabel(product.part_number, product.name),
+    price: Number(product.sale_price) || 0,
+    costPrice: Number(product.cost_price) || 0,
     category: product.category,
     partNumber: product.part_number,
+    name: product.name,
     brand: product.brand,
-    stock: product.current_stock,
+    stock: Number(product.current_stock) || 0,
     hsn: product.hsn_code,
-  }));
+  })), [products]);
 
   const [activeTab, setActiveTab] = useState<SalesTab>('invoices');
   const [search, setSearch] = useState('');
@@ -241,6 +250,14 @@ export default function SalesPage() {
   };
 
   const selectedCustomer = customers.find((c) => c.name === customer);
+
+  // What this customer was actually charged for each part last time, which is the question being
+  // asked whenever a rate is set at the counter. Built from invoices already loaded for the list,
+  // so it costs no extra fetch, and empty for a walk-in sale — there is no account to look back on.
+  const lastSold = useMemo(
+    () => buildLastSoldIndex(customer, invoices, invoiceItems, DRAFT_STATUS),
+    [customer, invoices, invoiceItems]
+  );
   const customerLabel = customer.trim() || WALK_IN_CUSTOMER;
   // A parked draft opens in this dialog exactly like an edit, with one difference that matters for
   // money: parking it added nothing to the customer's balance, so confirming it has to start from
@@ -347,7 +364,9 @@ export default function SalesPage() {
   const openInvoice = (presetCustomer?: string) => {
     setEditingInvoice(null);
     setCustomer(presetCustomer ?? '');
-    setLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0, discount: 0 }] : []);
+    // Starts empty on purpose: the part picker adds the first line the moment something is
+    // scanned or typed, so an opening blank row would only ever need deleting.
+    setLines([]);
     setDiscountPercent(0);
     setGstPercent(18);
     setGstInclusive(false);
@@ -401,7 +420,7 @@ export default function SalesPage() {
     setQuoteCustomer('');
     setQuoteDate(date);
     setQuoteValidity(validity.toISOString().split('T')[0]);
-    setQuoteLines(partOptions.length > 0 ? [{ part: '', qty: 1, price: 0, discount: 0 }] : []);
+    setQuoteLines([]);
     setQuoteDiscountPercent(0);
     setQuoteGstPercent(18);
     setQuoteGstInclusive(false);
@@ -445,6 +464,21 @@ export default function SalesPage() {
 
   const updateQuoteLine = (index: number, patch: Partial<InvoiceLine>) => {
     setQuoteLines((current) => current.map((line, lineIndex) => lineIndex === index ? { ...line, ...patch } : line));
+  };
+
+  // A quotation is priced from the same catalogue and turns into an invoice unchanged, so it gets
+  // the same entry: scan or type, Enter. Same merge rule too — quoting the same part twice means
+  // a quantity, not two identical rows the customer has to read past.
+  const addQuotePart = (part: PartOption) => setQuoteLines((current) => addPartToLines(current, part).lines);
+  const addQuoteCustomLine = (description: string) => setQuoteLines((current) => addCustomLine(current, description).lines);
+
+  // Enter inside either document form must add a part, never submit. Without this a barcode
+  // scanner's trailing Enter saves the document with whatever happens to be on it so far.
+  const swallowEnter = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key !== 'Enter') return;
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'BUTTON' || target.tagName === 'TEXTAREA') return;
+    event.preventDefault();
   };
 
   // Saves the quotation on screen, either parked as a draft or confirmed as final. Deliberately
@@ -1468,12 +1502,59 @@ export default function SalesPage() {
         <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/quotation/${viewingQuotation.id}`, '_blank')}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingQuotation(null)}>Close</button></div>
       </div></div>}
 
-      {showQuotationModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="quotation-modal-title"><form onSubmit={saveQuote}>
+      {showQuotationModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="quotation-modal-title"><form onSubmit={saveQuote} onKeyDown={swallowEnter}>
         <div className="modal-header"><div><h3 id="quotation-modal-title" className="modal-title">{editingQuotation ? `Edit ${editingQuotation.id}` : 'Create Quotation'}</h3><p className="text-muted text-sm">Saving a quotation never changes inventory or customer balances.</p></div><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => { setShowQuotationModal(false); setEditingQuotation(null); }}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
           {quotationError && <div className="alert alert-danger" role="alert">{quotationError}</div>}
           <div className="form-grid-2"><div className="form-group"><label className="form-label">Customer</label><select required className="form-input form-select" value={quoteCustomer} onChange={(event) => setQuoteCustomer(event.target.value)}><option value="">Select customer…</option>{customers.map((entry) => <option key={entry.id} value={entry.name}>{entry.name}</option>)}</select></div><div className="form-group"><label className="form-label">Quote Date</label><input required type="date" className="form-input" value={quoteDate} onChange={(event) => setQuoteDate(event.target.value)} /></div><div className="form-group"><label className="form-label">Valid Until</label><input required type="date" min={quoteDate} className="form-input" value={quoteValidity} onChange={(event) => setQuoteValidity(event.target.value)} /></div></div>
-          <div className="card card-sm bg-surface"><h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Quoted Parts</h4>{partOptions.length === 0 && <p className="text-muted text-sm">Add parts in Inventory before creating a quotation.</p>}<datalist id="quotation-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>{quoteLines.map((line, index) => { const matched = partOptions.find((part) => part.value === line.part); return <div key={index} className="form-grid-5 mb-2"><div className="form-group"><label className="form-label">Part</label><input list="quotation-part-options" className="form-input" placeholder="Type to search a part…" value={line.part} onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateQuoteLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }} />{line.part.trim() && !matched && <small className="text-danger">No matching part in Inventory</small>}</div><div className="form-group"><label className="form-label">Category</label><input className="form-input" value={matched?.category ?? '—'} disabled /></div><div className="form-group"><label className="form-label">Qty</label><input required type="number" min="1" className="form-input" value={line.qty} onChange={(event) => updateQuoteLine(index, { qty: Number(event.target.value) })} /></div><div className="form-group"><label className="form-label">Unit Price (₹)</label><input required type="number" min="0" className="form-input" value={line.price} onChange={(event) => updateQuoteLine(index, { price: Number(event.target.value) })} /></div><div className="form-group"><label className="form-label">Disc %</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={line.discount ?? 0} onChange={(event) => updateQuoteLine(index, { discount: Math.min(100, Math.max(0, Number(event.target.value))) })} /><small className="text-muted">{quoteLineDiscount(line) > 0 ? `Line: ₹${quoteLineNet(line).toFixed(2)} (was ₹${quoteLineGross(line).toFixed(2)})` : `Line: ₹${quoteLineNet(line).toFixed(2)}`}</small></div></div>; })}{partOptions.length > 0 && <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setQuoteLines((current) => [...current, { part: '', qty: 1, price: 0, discount: 0 }])}>+ Add Item Row</button>}</div>
+          <div className="card card-sm bg-surface">
+            <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Quoted Parts</h4>
+            {partOptions.length === 0
+              ? <p className="text-muted text-sm">Add parts in Inventory before creating a quotation.</p>
+              : <PartPicker parts={partOptions} onPick={addQuotePart} onCustom={addQuoteCustomLine} disabled={savingQuotation || savingQuoteDraft} />}
+            <div style={{ overflowX: 'auto', marginTop: '10px' }}>
+              <table className="erp-table" style={{ minWidth: '620px' }}>
+                <thead><tr>
+                  <th>Part</th>
+                  <th className="text-right" style={{ width: '92px' }}>Qty</th>
+                  <th className="text-right" style={{ width: '124px' }}>Rate</th>
+                  <th className="text-right" style={{ width: '92px' }}>Disc %</th>
+                  <th className="text-right" style={{ width: '132px' }}>Amount</th>
+                  <th style={{ width: '52px' }} aria-label="Remove line"></th>
+                </tr></thead>
+                <tbody>
+                  {quoteLines.map((line, index) => {
+                    const matched = partOptions.find((part) => part.value === line.part);
+                    return <tr key={`${line.part}-${index}`}>
+                      <td>
+                        {matched ? <>
+                          <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}><span className="pn-chip">{matched.partNumber}</span><strong style={{ fontSize: '13px' }}>{matched.name}</strong></div>
+                          <div className="text-muted text-sm mt-1">{matched.brand ? `${matched.brand} · ` : ''}{matched.stock} in stock</div>
+                        </> : <>
+                          <strong style={{ fontSize: '13px' }}>{line.part}</strong>
+                          <div className="text-muted text-sm mt-1">One-off line — not in Inventory</div>
+                        </>}
+                      </td>
+                      <td><input required type="number" min="1" className="form-input" style={{ textAlign: 'right' }} aria-label={`Quantity on quoted line ${index + 1}`} value={line.qty} onChange={(event) => updateQuoteLine(index, { qty: Number(event.target.value) })} /></td>
+                      <td><input required type="number" min="0" className="form-input" style={{ textAlign: 'right' }} aria-label={`Rate on quoted line ${index + 1}`} value={line.price} onChange={(event) => updateQuoteLine(index, { price: Number(event.target.value) })} /></td>
+                      <td><input type="number" min="0" max="100" step="0.1" className="form-input" style={{ textAlign: 'right' }} aria-label={`Discount percent on quoted line ${index + 1}`} value={line.discount ?? 0} onChange={(event) => updateQuoteLine(index, { discount: Math.min(100, Math.max(0, Number(event.target.value))) })} /></td>
+                      <td className="text-right font-semibold">
+                        {quoteLineDiscount(line) > 0 && <div style={{ fontSize: '11px', fontWeight: 400, color: 'var(--text-muted)', textDecoration: 'line-through' }}>₹{paise(quoteLineGross(line))}</div>}
+                        ₹{paise(quoteLineNet(line))}
+                      </td>
+                      <td className="text-center"><button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove quoted line ${index + 1}`} title="Remove this line" style={{ color: 'var(--color-danger)' }} onClick={() => setQuoteLines((current) => current.filter((_, lineIndex) => lineIndex !== index))}><X size={14} /></button></td>
+                    </tr>;
+                  })}
+                  {quoteLines.length === 0 && partOptions.length > 0 && (
+                    <tr><td colSpan={6}><div className="empty-state" style={{ padding: '22px 20px' }}>
+                      <p className="empty-state-title">Nothing quoted yet</p>
+                      <p className="empty-state-desc">Scan or type a part number in the box above, then press Enter.</p>
+                    </div></td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
           <div className="form-grid-2"><div className="form-group"><label className="form-label">Discount (%)</label><input type="number" min="0" max="100" step="0.1" className="form-input" value={quoteDiscountPercent} onChange={(event) => setQuoteDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} /></div><div className="form-group"><label className="form-label">Discount Amount (₹)</label><input className="form-input" value={quoteDiscountAmount.toFixed(2)} disabled /></div><div className="form-group"><label className="form-label">GST Rate (%)</label><input type="number" min="0" max="28" step="0.1" className="form-input" value={quoteGstPercent} onChange={(event) => setQuoteGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} /><div className="flex gap-2 mt-2" role="group" aria-label="How the quoted rates are priced"><button type="button" className={'btn btn-sm ' + (quoteGstInclusive ? 'btn-secondary' : 'btn-primary')} onClick={() => setQuoteGstInclusive(false)}>GST extra</button><button type="button" className={'btn btn-sm ' + (quoteGstInclusive ? 'btn-primary' : 'btn-secondary')} onClick={() => setQuoteGstInclusive(true)}>GST included</button></div><small className="text-muted">{quoteGstInclusive ? 'Quoted rates already include GST — the tax is taken out of them.' : 'Quoted rates are before GST — the tax is added on top.'}</small></div><div className="form-group"><label className="form-label">GST Amount (₹)</label><input className="form-input" value={quoteGstAmount.toFixed(2)} disabled /></div></div>
           <div className="flex justify-between items-center invoice-summary">{quoteItemDiscountTotal > 0 && <div><span className="text-muted">Item discounts: </span><strong className="text-danger">-₹{quoteItemDiscountTotal.toFixed(2)}</strong></div>}<div><span className="text-muted">Subtotal: </span><strong>₹{quoteSubtotal.toLocaleString()}</strong></div>{quoteDiscountAmount > 0 && <div><span className="text-muted">Whole-quote discount: </span><strong className="text-danger">-₹{quoteDiscountAmount.toFixed(2)}</strong></div>}<div><span className="text-muted">Taxable value: </span><strong>₹{quoteNetTaxableValue.toFixed(2)}</strong></div><div><span className="text-muted">GST ({quoteGstPercent}%){quoteGstInclusive ? ' incl.' : ''}: </span><strong>₹{quoteGstAmount.toFixed(2)}</strong></div><div><strong>Quote Total: </strong><span className="invoice-total">₹{quoteTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></div></div>
         </div>
@@ -1655,7 +1736,7 @@ export default function SalesPage() {
           editingInvoice={editingInvoice} setEditingInvoice={setEditingInvoice} editingDraft={editingDraft}
           invoiceError={invoiceError} savingInvoice={savingInvoice} savingDraft={savingDraft}
           selectedCustomer={selectedCustomer} creditSaleNeedsCustomer={creditSaleNeedsCustomer}
-          partOptions={partOptions} customers={customers} placeOfSupply={placeOfSupply}
+          partOptions={partOptions} customers={customers} placeOfSupply={placeOfSupply} lastSold={lastSold}
           halfGstPercent={halfGstPercent} supplyKind={supplyKind}
           setShowInvoiceModal={setShowInvoiceModal} setShowAddCustomer={setShowAddCustomer}
           saveInvoice={saveInvoice} saveDraftInvoice={saveDraftInvoice}
