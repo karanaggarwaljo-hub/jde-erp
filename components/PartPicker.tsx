@@ -20,25 +20,31 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Search, Plus, AlertTriangle } from 'lucide-react';
 import { money } from '@/lib/money';
-import { isAmbiguousCode, searchParts, scannedPart } from '@/lib/part-search';
-import type { LastSold } from '@/lib/sale-entry';
-import type { PartOption } from '@/lib/sales-types';
+import { isAmbiguousCode, searchParts, scannedPart, type SearchablePart } from '@/lib/part-search';
+import type { LastTraded } from '@/lib/trade-history';
 
-export type PartPickerProps = {
-  parts: PartOption[];
-  onPick: (part: PartOption) => void;
-  /** Billing something that is not in the catalogue. Omitted hides the option entirely. */
+/** Anything this can offer: findable, plus the rate it fills into a new line — the sale price
+ *  when selling, the cost when buying. Deliberately structural, so neither screen's row type is
+ *  imported here and neither screen constrains the other. */
+export type PickablePart = SearchablePart & { price: number };
+
+export type PartPickerProps<T extends PickablePart> = {
+  parts: T[];
+  onPick: (part: T) => void;
+  /** Recording something that is not in the catalogue. Omitted hides the option entirely. */
   onCustom?: (description: string) => void;
-  /** What this customer last paid, keyed by part label — shown on the row being considered. */
-  lastSold?: Map<string, LastSold>;
+  /** What this customer or supplier last traded this part at, keyed by part label. */
+  lastTraded?: Map<string, LastTraded>;
+  /** How that figure is introduced on a row: "last" when selling, "last paid" when buying. */
+  lastLabel?: string;
   disabled?: boolean;
-  /** Set by the form after a save so the box takes focus again for the next sale. */
+  /** Takes focus on open so the first part can be typed without reaching for the mouse. */
   autoFocus?: boolean;
 };
 
 const MAX_RESULTS = 8;
 
-export default function PartPicker({ parts, onPick, onCustom, lastSold, disabled, autoFocus }: PartPickerProps) {
+export default function PartPicker<T extends PickablePart>({ parts, onPick, onCustom, lastTraded, lastLabel = 'last', disabled, autoFocus }: PartPickerProps<T>) {
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
   const [open, setOpen] = useState(false);
@@ -59,7 +65,7 @@ export default function PartPicker({ parts, onPick, onCustom, lastSold, disabled
     if (autoFocus) inputRef.current?.focus();
   }, [autoFocus]);
 
-  const pick = (part: PartOption) => {
+  const pick = (part: T) => {
     onPick(part);
     setQuery('');
     setOpen(false);
@@ -144,7 +150,7 @@ export default function PartPicker({ parts, onPick, onCustom, lastSold, disabled
         <ul className="part-picker-list" id={listId} role="listbox" aria-label="Matching parts">
           {matches.map((match, index) => {
             const part = match.part;
-            const previous = lastSold?.get(part.value);
+            const previous = lastTraded?.get(part.value);
             const outOfStock = part.stock <= 0;
             return (
               <li
@@ -168,7 +174,7 @@ export default function PartPicker({ parts, onPick, onCustom, lastSold, disabled
                   <strong>₹{money(part.price)}</strong>
                   {/* Only ever the rate on a real past invoice to this same customer. */}
                   {previous && (
-                    <span className="text-muted text-sm">last: ₹{money(previous.rate)}</span>
+                    <span className="text-muted text-sm">{lastLabel}: ₹{money(previous.rate)}</span>
                   )}
                 </div>
               </li>

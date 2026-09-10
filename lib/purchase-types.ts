@@ -26,12 +26,18 @@ export type PurchaseOrder = { id: string; company_id: string; supplier: string; 
 
 export type PoItem = { id: string; po_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_cost: number };
 
-/** A part as offered in the "type a part" datalists on this screen: the label the owner picks,
- *  plus what the row shows underneath once it matches. */
+/** A part as offered by the picker on this screen: what makes it findable, plus what the row
+ *  shows once it is on the purchase. `price` is the cost, the rate that fills into a new line,
+ *  and `salePrice` is what the part sells for, so a cost typed at or above it can be flagged.
+ *  Structurally satisfies PickablePart in components/PartPicker.tsx. */
 export type PartOption = {
   value: string;
   price: number;
+  salePrice: number;
   category: string;
+  partNumber: string;
+  name: string;
+  brand: string;
   stock: number;
 };
 

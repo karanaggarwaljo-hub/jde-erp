@@ -35,7 +35,7 @@ import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } f
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { buildCustomerLedger } from '@/lib/customer-ledger';
 import AddCustomerModal from '@/components/AddCustomerModal';
-import PartPicker from '@/components/sales/PartPicker';
+import PartPicker from '@/components/PartPicker';
 import ReceivePaymentModal from '@/components/ReceivePaymentModal';
 import { money, paise, round2 } from '@/lib/money';
 import InvoiceFormModal from '@/components/sales/InvoiceFormModal';

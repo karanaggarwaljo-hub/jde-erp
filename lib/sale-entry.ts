@@ -15,13 +15,10 @@
  * tomorrow. Being told is the point; being stopped is not.
  */
 
+import { buildLastTradedIndex, partLabel, type LastTraded } from '@/lib/trade-history';
 import type { InvoiceLine, PartOption } from '@/lib/sales-types';
 
-/** The label a line carries, and the key everything here matches on. Matches how the edit path
- *  rebuilds lines from saved invoice items, so a reopened invoice lines up with the catalogue. */
-export function partLabel(partNumber: string, name: string): string {
-  return `${partNumber} - ${name}`;
-}
+export { partLabel };
 
 export type AddPartResult = {
   lines: InvoiceLine[];
@@ -67,7 +64,9 @@ export type SoldItem = {
   unit_price: number | string;
 };
 
-export type LastSold = { rate: number; date: string; invoiceId: string };
+/** Kept as a name the sales screens read well with. The shape is the shared one — buying asks the
+ *  same question of a supplier, so the rule for answering it lives in lib/trade-history.ts. */
+export type LastSold = LastTraded;
 
 /**
  * What this customer last actually paid for each part, keyed by the same label a line carries.
@@ -82,32 +81,22 @@ export function buildLastSoldIndex(
   items: SoldItem[],
   draftStatus = 'draft'
 ): Map<string, LastSold> {
-  const index = new Map<string, LastSold>();
-  if (!customerName) return index;
-
-  const billed = new Map<string, SoldInvoice>();
-  for (const invoice of invoices) {
-    if (invoice.customer !== customerName) continue;
-    if (invoice.status === draftStatus) continue;
-    billed.set(invoice.id, invoice);
-  }
-  if (billed.size === 0) return index;
-
-  for (const item of items) {
-    const invoice = billed.get(item.invoice_id);
-    if (!invoice) continue;
-    const rate = Number(item.unit_price);
-    if (!Number.isFinite(rate)) continue;
-
-    const key = partLabel(item.part_number, item.name);
-    const previous = index.get(key);
-    const isNewer =
-      !previous ||
-      invoice.date > previous.date ||
-      (invoice.date === previous.date && invoice.id > previous.invoiceId);
-    if (isNewer) index.set(key, { rate, date: invoice.date, invoiceId: invoice.id });
-  }
-  return index;
+  return buildLastTradedIndex(
+    customerName,
+    invoices.map((invoice) => ({
+      id: invoice.id,
+      counterparty: invoice.customer,
+      date: invoice.date,
+      status: invoice.status,
+    })),
+    items.map((item) => ({
+      documentId: item.invoice_id,
+      partNumber: item.part_number,
+      name: item.name,
+      rate: Number(item.unit_price),
+    })),
+    draftStatus
+  );
 }
 
 export type LineWarning = { kind: 'stock' | 'below-cost' | 'no-rate'; message: string };

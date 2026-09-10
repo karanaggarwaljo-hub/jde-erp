@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, FormEvent, useState } from 'react';
+import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
 import {
   Plus,
   FileCheck,
@@ -22,6 +22,7 @@ import {
 import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_ACCEPT, isSpreadsheetFileName, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
 import { matchImportedLine, normalizeImportText, planFieldUpdates, type MatchableProduct } from '@/lib/import-matching';
 import { savePurchase, receivePurchaseStock, recordPurchasePayment } from '@/lib/client-purchases';
+import { buildLastPaidIndex, partLabel } from '@/lib/purchase-entry';
 import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-purchase-returns';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { money, wholeMoney } from '@/lib/money';
@@ -47,7 +48,7 @@ type PurchaseTab = 'purchases' | 'invoices';
 
 // Only this page reads these two: a product row as Inventory stores it, and the goods-received
 // note the save writes. Everything the dialogs also need lives in lib/purchase-types.ts.
-type Product = { id: string; company_id: string; part_number: string; oem_number: string; hsn_code: string; brand: string; name: string; category: string; cost_price: number; current_stock: number };
+type Product = { id: string; company_id: string; part_number: string; oem_number: string; hsn_code: string; brand: string; name: string; category: string; cost_price: number; sale_price: number; current_stock: number };
 type Grn = { id: string; company_id: string; po_number: string; supplier: string; received_at: string; status: string };
 
 /** Which purchase orders the table is showing. Purely a view filter — it never changes what is
@@ -151,12 +152,21 @@ export default function PurchasesPage() {
   const { reload: reloadGrns } = useCompanyTable<Grn>('grns');
   const { rows: poItems, reload: reloadPoItems } = useCompanyTable<PoItem>('po_items');
 
-  const partOptions = products.map((product) => ({
-    value: `${product.part_number} - ${product.name}`,
-    price: product.cost_price,
+  // `value` is what a line stores and what the save path matches on, so it stays exactly the
+  // label it has always been. The rest is what the picker searches on and what the row shows.
+  //
+  // Numbers are coerced here rather than at each use: Postgres numeric columns arrive as strings
+  // over the REST API, and the cost warnings compare them.
+  const partOptions = useMemo(() => products.map((product) => ({
+    value: partLabel(product.part_number, product.name),
+    price: Number(product.cost_price) || 0,
+    salePrice: Number(product.sale_price) || 0,
     category: product.category,
-    stock: product.current_stock,
-  }));
+    partNumber: product.part_number,
+    name: product.name,
+    brand: product.brand,
+    stock: Number(product.current_stock) || 0,
+  })), [products]);
   const supplierOptions = suppliers.map((s) => s.name);
 
   const [activeTab, setActiveTab] = useState<PurchaseTab>('purchases');
@@ -229,7 +239,7 @@ export default function PurchasesPage() {
     setPurchaseDate(todayIso());
     setPaymentStatus('unpaid');
     setAmountPaid(0);
-    setLines([{ description: '', quantity: 1, unit_price: 0 }]);
+    setLines([]);
     setImportError('');
     setPurchaseError('');
     setShowPurchaseModal(true);
@@ -296,6 +306,15 @@ export default function PurchasesPage() {
       setSavingReturn(false);
     }
   };
+
+  // What this supplier last charged for each part — the question actually being asked whenever a
+  // cost is typed, and the only way a supplier quietly raising a rate is visible at this desk.
+  // Built from orders already loaded for the list, so it costs no extra fetch.
+  const lastPaid = useMemo(
+    () => buildLastPaidIndex(supplierName, purchaseOrders, poItems),
+    [supplierName, purchaseOrders, poItems]
+  );
+
 
   const updateLine = (index: number, patch: Partial<POLine>) => {
     setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
@@ -1047,7 +1066,7 @@ export default function PurchasesPage() {
           supplierName={supplierName} setSupplierName={setSupplierName}
           supplierOptions={supplierOptions}
           purchaseDate={purchaseDate} setPurchaseDate={setPurchaseDate}
-          partOptions={partOptions} lines={lines} setLines={setLines} updateLine={updateLine}
+          partOptions={partOptions} lines={lines} setLines={setLines} updateLine={updateLine} lastPaid={lastPaid}
           paymentStatus={paymentStatus} setPaymentStatus={setPaymentStatus}
           amountPaid={amountPaid} setAmountPaid={setAmountPaid}
           total={total} paidAmount={paidAmount}

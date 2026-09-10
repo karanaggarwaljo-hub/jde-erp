@@ -76,7 +76,7 @@ const ITEMS = [
 test('the last rate is the one on this customer most recent billed invoice', () => {
   const index = buildLastSoldIndex('jasspal', INVOICES, ITEMS);
   assert.equal(index.get(PIN.value)?.rate, 700);
-  assert.equal(index.get(PIN.value)?.invoiceId, 'INV-1015');
+  assert.equal(index.get(PIN.value)?.ref, 'INV-1015');
 });
 
 test('a draft is not a price anyone agreed to', () => {

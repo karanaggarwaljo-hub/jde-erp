@@ -25,7 +25,7 @@ import { Plus, Minus, X, AlertTriangle, Keyboard } from 'lucide-react';
 import { money, paise } from '@/lib/money';
 import { lineDiscountPercent, lineGross, lineNet, type Totals } from '@/lib/invoice-totals';
 import { addCustomLine, addPartToLines, lineWarnings, type LastSold } from '@/lib/sale-entry';
-import PartPicker from '@/components/sales/PartPicker';
+import PartPicker from '@/components/PartPicker';
 import {
   DRAFT_STATUS,
   type Customer,
@@ -193,7 +193,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                   parts={partOptions}
                   onPick={handlePick}
                   onCustom={handleCustom}
-                  lastSold={lastSold}
+                  lastTraded={lastSold}
                   disabled={savingInvoice || savingDraft}
                   autoFocus
                 />
@@ -237,7 +237,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                                 {matched.brand && <span className="text-muted text-sm">{matched.brand}</span>}
                                 <span className="text-muted text-sm">{matched.stock} in stock</span>
                                 {previous && (
-                                  <span className="text-muted text-sm">· last billed at ₹{money(previous.rate)} on {previous.invoiceId}</span>
+                                  <span className="text-muted text-sm">· last billed at ₹{money(previous.rate)} on {previous.ref}</span>
                                 )}
                               </div>
                             </>
