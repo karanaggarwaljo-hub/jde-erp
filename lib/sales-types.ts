@@ -20,6 +20,8 @@ export type Product = {
   hsn_code: string;
   category: string;
   sale_price: number;
+  /** What the part cost to buy, used to warn before it is billed below cost. */
+  cost_price: number;
   current_stock: number;
 };
 
@@ -173,8 +175,12 @@ export type InvoiceLine = { part: string; qty: number; price: number; discount?:
 export type PartOption = {
   value: string;
   price: number;
+  /** Catalogue cost, for the below-cost warning while a rate is being typed. */
+  costPrice: number;
   category: string;
   partNumber: string;
+  /** The catalogue name on its own, so search can rank a name match apart from a code match. */
+  name: string;
   brand: string;
   stock: number;
   hsn: string;

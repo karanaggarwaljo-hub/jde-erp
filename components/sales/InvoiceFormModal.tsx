@@ -1,21 +1,31 @@
 'use client';
 
 /**
- * The invoice write/edit dialog, lifted out of app/(dashboard)/sales/page.tsx.
+ * The invoice write/edit dialog.
  *
- * Deliberately presentational: every value and every setter arrives as a prop, and the page still
- * owns the state. That keeps this a pure move with no behaviour change — the compiler checks each
- * prop is supplied and correctly typed, which is the only safety net available for a screen with
- * no automated UI coverage and money running through it.
+ * Entry used to be: click "Add line", click the part box, type the exact full catalogue label
+ * into a native <datalist>, tab across, click "Add line" again. A part number on its own matched
+ * nothing, a barcode scanner matched nothing — and worse, a scanner's trailing Enter reached the
+ * surrounding <form> and submitted a half-typed invoice.
  *
- * The long prop list is the honest shape of the thing rather than a smell to hide: it is exactly
- * what the form reads from the page, and it is the map for later moving that state in here.
+ * It is now one box at the top: scan or type, Enter, scan or type, Enter. Focus never leaves that
+ * box, so parts go on as fast as they can be read off a shelf. Enter is intercepted at the form
+ * so it can never submit by accident; Ctrl+Enter is the deliberate save.
+ *
+ * The rules behind the entry — merging a repeated part into one line, the last rate this customer
+ * paid, and the stock and below-cost warnings — live in lib/sale-entry.ts so they can be tested
+ * away from the DOM. This file decides how they look, not what they are.
+ *
+ * Still deliberately presentational for the invoice's own state: every value and setter arrives
+ * as a prop and the page owns them. The only state here is what belongs to the act of typing.
  */
 
-import type { Dispatch, FormEvent, SetStateAction } from 'react';
-import { Plus, Minus, X } from 'lucide-react';
-import { paise } from '@/lib/money';
+import { useState, type Dispatch, type FormEvent, type KeyboardEvent, type SetStateAction } from 'react';
+import { Plus, Minus, X, AlertTriangle, Keyboard } from 'lucide-react';
+import { money, paise } from '@/lib/money';
 import { lineDiscountPercent, lineGross, lineNet, type Totals } from '@/lib/invoice-totals';
+import { addCustomLine, addPartToLines, lineWarnings, type LastSold } from '@/lib/sale-entry';
+import PartPicker from '@/components/sales/PartPicker';
 import {
   DRAFT_STATUS,
   type Customer,
@@ -59,6 +69,8 @@ export type InvoiceFormModalProps = {
   placeOfSupply: string;
   halfGstPercent: number;
   supplyKind: 'intra' | 'inter' | 'unknown';
+  /** What the selected customer last paid per part, keyed by part label. Empty for a walk-in. */
+  lastSold: Map<string, LastSold>;
   setShowInvoiceModal: (open: boolean) => void;
   setShowAddCustomer: (open: boolean) => void;
   saveInvoice: (event: FormEvent) => void;
@@ -73,7 +85,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
     totals, paidAmount, newOutstanding,
     editingInvoice, setEditingInvoice, editingDraft, invoiceError, savingInvoice, savingDraft,
     selectedCustomer, creditSaleNeedsCustomer, partOptions, customers, placeOfSupply, halfGstPercent, supplyKind,
-    setShowInvoiceModal, setShowAddCustomer, saveInvoice, saveDraftInvoice,
+    lastSold, setShowInvoiceModal, setShowAddCustomer, saveInvoice, saveDraftInvoice,
   } = props;
 
   const {
@@ -81,9 +93,42 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
     taxableAmount, gstAmount, netTaxableValue, total,
   } = totals;
 
+  // Which part was put on last, so its row can be picked out of a long invoice. Held as the part
+  // label rather than an index: a scanner can fire twice inside one React batch, and an index
+  // captured from a stale render would point at the wrong row.
+  const [lastAdded, setLastAdded] = useState('');
+
+  const canSubmit = Boolean(total) && !savingInvoice && !savingDraft && !creditSaleNeedsCustomer;
+
+  const handlePick = (part: PartOption) => {
+    // Functional form for the same reason: two fast scans must both land.
+    setLines((current) => addPartToLines(current, part).lines);
+    setLastAdded(part.value);
+  };
+
+  const handleCustom = (description: string) => {
+    setLines((current) => addCustomLine(current, description).lines);
+    setLastAdded(description);
+  };
+
+  /**
+   * Enter must never submit this form implicitly. A barcode scanner ends every scan with one, and
+   * a browser turns Enter in any text input into a click on the submit button — which is how a
+   * scan could save an invoice with one line on it. Enter is swallowed here; Ctrl+Enter is the
+   * deliberate save, and requestSubmit runs the same path and the same validation as the button.
+   */
+  const onFormKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key !== 'Enter') return;
+    const target = event.target as HTMLElement;
+    // Buttons and textareas keep their normal behaviour — Enter on a focused button is a click.
+    if (target.tagName === 'BUTTON' || target.tagName === 'TEXTAREA') return;
+    event.preventDefault();
+    if ((event.ctrlKey || event.metaKey) && canSubmit) event.currentTarget.requestSubmit();
+  };
+
   return (
-    <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '900px' }} role="dialog" aria-modal="true" aria-labelledby="invoice-modal-title">
-      <form onSubmit={saveInvoice}>
+    <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '920px' }} role="dialog" aria-modal="true" aria-labelledby="invoice-modal-title">
+      <form onSubmit={saveInvoice} onKeyDown={onFormKeyDown}>
         <div className="modal-header">
           <div>
             <h3 id="invoice-modal-title" className="modal-title">{editingInvoice ? `Edit ${editingInvoice.id}` : 'Create Sales Invoice'}</h3>
@@ -134,24 +179,38 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
           </div>
 
           <div className="table-wrap">
-            <div className="tbl-toolbar">
-              <div className="tbl-toolbar-title">
+            <div className="tbl-toolbar" style={{ display: 'block' }}>
+              <div className="tbl-toolbar-title" style={{ marginBottom: '8px' }}>
                 <strong>Line items</strong>
-                <small>Pick a part from Inventory — its rate fills in from the catalogue sale price</small>
+                <small>
+                  {selectedCustomer
+                    ? `Rates fill in from the catalogue — what ${selectedCustomer.name} paid last time is shown beside each part`
+                    : 'Rates fill in from the catalogue sale price'}
+                </small>
               </div>
+              {partOptions.length > 0 ? (
+                <PartPicker
+                  parts={partOptions}
+                  onPick={handlePick}
+                  onCustom={handleCustom}
+                  lastSold={lastSold}
+                  disabled={savingInvoice || savingDraft}
+                  autoFocus
+                />
+              ) : (
+                <span className="text-muted text-sm">Add parts in Inventory before creating an invoice.</span>
+              )}
             </div>
 
-            <datalist id="sales-part-options">{partOptions.map((part) => <option key={part.value} value={part.value} />)}</datalist>
-
             <div style={{ overflowX: 'auto' }}>
-              <table className="erp-table" style={{ minWidth: '780px' }}>
+              <table className="erp-table" style={{ minWidth: '760px' }}>
                 <thead>
                   <tr>
                     <th>Part &amp; Description</th>
                     <th style={{ width: '96px' }}>HSN</th>
-                    <th className="text-right" style={{ width: '168px' }}>Qty</th>
+                    <th className="text-right" style={{ width: '160px' }}>Qty</th>
                     <th className="text-right" style={{ width: '132px' }}>Rate</th>
-                    <th className="text-right" style={{ width: '104px' }}>Disc %</th>
+                    <th className="text-right" style={{ width: '96px' }}>Disc %</th>
                     <th className="text-right" style={{ width: '150px' }}>Amount</th>
                     <th style={{ width: '54px' }} aria-label="Remove line"></th>
                   </tr>
@@ -159,25 +218,40 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                 <tbody>
                   {lines.map((line, index) => {
                     const matched = partOptions.find((part) => part.value === line.part);
+                    const warnings = lineWarnings(line, matched);
+                    const previous = lastSold.get(line.part);
                     return (
-                      <tr key={index}>
+                      <tr key={`${line.part}-${index}`} style={line.part === lastAdded ? { background: 'var(--amber-tint)' } : undefined}>
                         <td>
-                          <input
-                            list="sales-part-options"
-                            className="form-input"
-                            placeholder="Type or scan a part number…"
-                            value={line.part}
-                            onChange={(event) => { const selected = partOptions.find((part) => part.value === event.target.value); updateLine(index, { part: event.target.value, price: selected?.price ?? line.price }); }}
-                          />
-                          {/* Brand and stock are read straight off the matched product row. */}
-                          {matched && (
-                            <div className="flex items-center gap-2 mt-1" style={{ flexWrap: 'wrap' }}>
-                              <span className="pn-chip">{matched.partNumber}</span>
-                              {matched.brand && <span className="text-muted text-sm">{matched.brand} ·</span>}
-                              <span className="text-muted text-sm">{matched.stock} in stock</span>
-                            </div>
+                          {/* The part is chosen in the picker above, so this states what was
+                              chosen rather than offering a second, weaker way to search. An
+                              invoice reopened for editing can carry a part that has since been
+                              renamed or removed, so an unmatched label still shows as itself. */}
+                          {matched ? (
+                            <>
+                              <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+                                <span className="pn-chip">{matched.partNumber}</span>
+                                <strong style={{ fontSize: '13px' }}>{matched.name}</strong>
+                              </div>
+                              <div className="flex items-center gap-2 mt-1" style={{ flexWrap: 'wrap' }}>
+                                {matched.brand && <span className="text-muted text-sm">{matched.brand}</span>}
+                                <span className="text-muted text-sm">{matched.stock} in stock</span>
+                                {previous && (
+                                  <span className="text-muted text-sm">· last billed at ₹{money(previous.rate)} on {previous.invoiceId}</span>
+                                )}
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <strong style={{ fontSize: '13px' }}>{line.part}</strong>
+                              <div className="text-muted text-sm mt-1">One-off line — not in Inventory, so no stock moves</div>
+                            </>
                           )}
-                          {line.part.trim() && !matched && <small className="text-danger">No matching part in Inventory</small>}
+                          {warnings.map((warning) => (
+                            <div key={warning.kind} className={'line-warning' + (warning.kind === 'stock' ? ' is-stock' : '')}>
+                              <AlertTriangle size={12} aria-hidden="true" /> {warning.message}
+                            </div>
+                          ))}
                         </td>
                         <td>
                           {matched?.hsn
@@ -223,6 +297,16 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                             value={line.price}
                             onChange={(event) => updateLine(index, { price: Number(event.target.value) })}
                           />
+                          {/* One click to charge what this customer was charged last time, which
+                              is the question being asked whenever this field is touched. */}
+                          {previous && Number(line.price) !== previous.rate && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ padding: '2px 4px', fontSize: '11px' }}
+                              onClick={() => updateLine(index, { price: previous.rate })}
+                            >use ₹{money(previous.rate)}</button>
+                          )}
                         </td>
                         <td>
                           <input
@@ -260,8 +344,8 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                   })}
                   {lines.length === 0 && (
                     <tr><td colSpan={7}><div className="empty-state" style={{ padding: '28px 20px' }}>
-                      <p className="empty-state-title">{partOptions.length === 0 ? 'No parts to sell yet' : 'No lines on this invoice'}</p>
-                      <p className="empty-state-desc">{partOptions.length === 0 ? 'Add parts in Inventory before creating an invoice.' : 'Add a line below to start billing.'}</p>
+                      <p className="empty-state-title">{partOptions.length === 0 ? 'No parts to sell yet' : 'Nothing on this invoice yet'}</p>
+                      <p className="empty-state-desc">{partOptions.length === 0 ? 'Add parts in Inventory before creating an invoice.' : 'Scan a barcode or type a part number in the box above, then press Enter.'}</p>
                     </div></td></tr>
                   )}
                 </tbody>
@@ -269,10 +353,14 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
             </div>
 
             <div className="pager">
-              {partOptions.length > 0
-                ? <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLines((current) => [...current, { part: '', qty: 1, price: 0, discount: 0 }])}><Plus size={14} /> Add line — type or scan a part number</button>
-                : <span className="pager-info">Add parts in Inventory before creating an invoice.</span>}
-              <div className="pager-info"><strong>{lines.length}</strong> {lines.length === 1 ? 'line' : 'lines'}</div>
+              <span className="pager-info flex items-center gap-2">
+                <Keyboard size={13} aria-hidden="true" />
+                Enter adds the highlighted part · ↑↓ to choose · Ctrl+Enter saves
+              </span>
+              <div className="pager-info">
+                <strong>{lines.length}</strong> {lines.length === 1 ? 'line' : 'lines'}
+                {lines.length > 0 && <> · <strong>{lines.reduce((sum, line) => sum + (Number(line.qty) || 0), 0)}</strong> items</>}
+              </div>
             </div>
           </div>
 
@@ -393,7 +481,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
         <div className="modal-footer">
           <div className="text-muted text-sm" style={{ marginRight: 'auto', maxWidth: '340px' }}>
             {total <= 0
-              ? 'Add at least one line to bill this sale.'
+              ? 'Scan or type a part above to bill this sale.'
               : newOutstanding > 0
                 ? <>₹{paise(paidAmount)} received now · <strong>₹{paise(newOutstanding)}</strong> stays outstanding{selectedCustomer ? ` on ${selectedCustomer.name}'s account` : ' on this invoice'}.</>
                 : 'Settled in full — nothing will be added to any outstanding balance.'}
@@ -417,7 +505,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
               {savingDraft ? 'Saving…' : editingDraft ? 'Save & Keep as Draft' : 'Save as Draft'}
             </button>
           )}
-          <button type="submit" className="btn btn-primary" disabled={!total || savingInvoice || savingDraft || creditSaleNeedsCustomer}>
+          <button type="submit" className="btn btn-primary" disabled={!canSubmit}>
             {savingInvoice
               ? 'Saving…'
               : editingInvoice
