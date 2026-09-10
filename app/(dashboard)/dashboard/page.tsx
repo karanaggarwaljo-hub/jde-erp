@@ -60,18 +60,24 @@ function pctChange(current: number, previous: number): { label: string; positive
 
 export default function DashboardPage() {
   const { configError, activeCompany } = useCompany();
-  const { rows: products } = useCompanyTable<Product>('products');
-  const { rows: customers } = useCompanyTable<Customer>('customers');
-  const { rows: suppliers } = useCompanyTable<Supplier>('suppliers');
-  const { rows: invoices } = useCompanyTable<Invoice>('invoices');
-  const { rows: purchaseOrders } = useCompanyTable<PurchaseOrder>('purchase_orders');
-  const { rows: grns } = useCompanyTable<Grn>('grns');
-  const { rows: quotations } = useCompanyTable<Quotation>('quotations');
+  const { rows: products, error: productsError } = useCompanyTable<Product>('products');
+  const { rows: customers, error: customersError } = useCompanyTable<Customer>('customers');
+  const { rows: suppliers, error: suppliersError } = useCompanyTable<Supplier>('suppliers');
+  const { rows: invoices, error: invoicesError } = useCompanyTable<Invoice>('invoices');
+  const { rows: purchaseOrders, error: purchaseOrdersError } = useCompanyTable<PurchaseOrder>('purchase_orders');
+  const { rows: grns, error: grnsError } = useCompanyTable<Grn>('grns');
+  const { rows: quotations, error: quotationsError } = useCompanyTable<Quotation>('quotations');
   // Only for the activity calendar — an expense is a day's work recorded like any other.
-  const { rows: expenses } = useCompanyTable<Expense>('expenses');
-  // Needed to value stock the same way Inventory does — at each part's oldest open
-  // purchase batch rather than its static cost_price field.
-  const { rows: stockLayers } = useCompanyTable<StockLayerLike>('stock_layers');
+  const { rows: expenses, error: expensesError } = useCompanyTable<Expense>('expenses');
+  // Needed to value stock the same way every other screen does — each purchase batch at what that
+  // batch cost, rather than one cost for every unit. See lib/stock-value.ts.
+  const { rows: stockLayers, error: stockLayersError } = useCompanyTable<StockLayerLike>('stock_layers');
+
+  // Every figure on this screen is summed from the tables above. If any of them failed to load,
+  // the sums are of whatever did arrive — and a smaller number reads exactly like a quieter month
+  // rather than like missing data. Say so instead of drawing them.
+  const dataError = productsError ?? customersError ?? suppliersError ?? invoicesError
+    ?? purchaseOrdersError ?? grnsError ?? quotationsError ?? expensesError ?? stockLayersError;
 
   const [activePeriod, setActivePeriod] = useState<TrendPeriod>('7 Days');
 
@@ -264,7 +270,14 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {!configError && (
+      {!configError && dataError && (
+        <div className="alert alert-danger mb-4" role="alert">
+          Some of this company&apos;s records could not be loaded, so nothing below would be the
+          whole picture — {dataError}
+        </div>
+      )}
+
+      {!configError && !dataError && (
       <>
       <div className="kpi-grid">
         {kpis.map((kpi) => {

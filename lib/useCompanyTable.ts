@@ -68,10 +68,16 @@ export function useCompanyTable<T extends Record<string, unknown>>(table: string
   const { activeCompany } = useCompany();
   const [rows, setRows] = useState<T[]>([]);
   const [loading, setLoading] = useState(true);
+  // A failed read used to be logged and nothing else, so a screen kept whatever it already had —
+  // which, on a first load, is an empty array. Zeroes drawn from a failed read are indistinguishable
+  // from a company that genuinely has no sales, no stock and no debtors. Callers that state
+  // financial conclusions read this and say so instead.
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async (force: boolean) => {
     if (!activeCompany) {
       setRows([]);
+      setError(null);
       setLoading(false);
       return;
     }
@@ -85,10 +91,14 @@ export function useCompanyTable<T extends Record<string, unknown>>(table: string
     setLoading(true);
     try {
       setRows((await loadTableRows(table, activeCompany.id, force)) as T[]);
-    } catch (error) {
-      // A failed reload shouldn't crash the page (it commonly runs right after a mutation that
-      // already succeeded) — log it and leave whatever rows are already showing.
-      console.error(`Failed to reload ${table}:`, error);
+      setError(null);
+    } catch (cause) {
+      // Still never throws: a reload commonly runs right after a mutation that already succeeded,
+      // and crashing the page then would be worse than showing slightly stale rows. What changed
+      // is that the failure is now reported as well as logged, so a screen can say the figures
+      // are not to be trusted rather than quietly presenting them as complete.
+      console.error(`Failed to load ${table}:`, cause);
+      setError(cause instanceof Error ? cause.message : `Could not load ${table}.`);
     } finally {
       setLoading(false);
     }
@@ -159,5 +169,5 @@ export function useCompanyTable<T extends Record<string, unknown>>(table: string
     return updated as T;
   }, [table, reload]);
 
-  return { rows, setRows, loading, reload, create, update, remove, adjust, activeCompany };
+  return { rows, setRows, loading, error, reload, create, update, remove, adjust, activeCompany };
 }

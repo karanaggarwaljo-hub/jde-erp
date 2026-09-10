@@ -1,5 +1,6 @@
 import { dbErrorMessage, getActiveCompanyId, insertRows, isCompanyScoped, isKnownTable, listRows, insertRow } from '@/lib/db';
 import { checkCompanyAccess, getCurrentUser } from '@/lib/auth/dal';
+import { refuseGenericWrite } from '@/lib/generic-write-guard';
 import { createClient } from '@/lib/supabase/server';
 import { after } from 'next/server';
 import {
@@ -32,20 +33,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ tabl
   }
 }
 
-// Reachable for GET (the ledger and Receive Payment screens read them) but never written to
-// directly here: a raw insert would create a payment with no invoice update, no id from the
-// RCPT-#### sequence, and no customer balance change. jde_receive_customer_payment
-// (app/api/sales/payments) is the only path that keeps those four things in step.
-const PAYMENT_TABLES = new Set(['payments_received', 'payment_allocations']);
-
 export async function POST(request: Request, { params }: { params: Promise<{ table: string }> }) {
   const { table } = await params;
   if (!isKnownTable(table)) {
     return Response.json({ error: `Unknown table: ${table}` }, { status: 404 });
   }
-  if (PAYMENT_TABLES.has(table)) {
-    return Response.json({ error: 'Record a payment through Sales, not this endpoint.' }, { status: 403 });
-  }
+  // Only master data may be created here. Everything a sale, purchase, payment or return
+  // produces is written by its own route, in one transaction with the stock and balance changes
+  // that belong to it. Two tables used to be excluded by name; every transaction table is now.
+  const refusal = refuseGenericWrite(table, 'create');
+  if (refusal) return refusal;
   try {
     const body = await request.json();
 

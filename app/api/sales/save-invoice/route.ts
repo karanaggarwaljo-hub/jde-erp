@@ -8,7 +8,7 @@ export async function POST(request: Request) {
   const {
     companyId, invoiceId, isEdit, customerLabel, oldCustomerId, newCustomerId,
     oldOutstanding, newOutstanding, date, items, total, paid, status, mode,
-    discountPercent, discountAmount,
+    discountPercent, discountAmount, gstPercent, gstAmount, gstMode,
   } = body ?? {};
 
   if (typeof companyId !== 'string' || !companyId) {
@@ -44,6 +44,9 @@ export async function POST(request: Request) {
       mode: String(mode ?? 'Credit'),
       discountPercent: Number(discountPercent) || 0,
       discountAmount: Number(discountAmount) || 0,
+      gstPercent: Number(gstPercent) || 0,
+      gstAmount: Number(gstAmount) || 0,
+      gstMode: gstMode === 'inclusive' ? 'inclusive' : 'exclusive',
     });
     return Response.json(invoice, { status: 201 });
   } catch (error) {

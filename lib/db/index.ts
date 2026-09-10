@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
-import { BACKUP_TABLES, TABLES, type TableName } from './schema';
+import { BACKUP_TABLES, TABLES, isWritableTable, type TableName } from './schema';
 
 export type { TableName };
 
@@ -51,6 +51,8 @@ export function isKnownTable(name: string): name is TableName {
 export function isCompanyScoped(table: TableName): boolean {
   return Boolean(TABLES[table].companyScoped);
 }
+
+export { isWritableTable };
 
 export async function getActiveCompanyId(): Promise<string | undefined> {
   const { data, error } = await getClient()
@@ -104,14 +106,54 @@ export async function getStorefrontCompanyId(): Promise<string | undefined> {
   return (data as { id: string } | null)?.id;
 }
 
+/** Every row a screen asks for, paged past Supabase's API row cap.
+ *
+ *  This used to be a single unpaginated `select('*')`, which the API silently truncates at its
+ *  "Max rows" setting — 1000 by default. Nothing failed and nothing warned: the screen simply
+ *  received the first thousand rows and drew its totals from those. On a Dashboard, that reads as
+ *  a smaller business rather than as a missing page of data.
+ *
+ *  Today the largest per-company table is well under the cap, so this changes no figure now. It
+ *  is here because the day it would have started lying is a day of ordinary trading, not an
+ *  incident anybody would notice.
+ *
+ *  The first request asks for the true row count alongside the first page, so a table that fits —
+ *  which is all of them at present — still costs exactly one round trip. Ordered by primary key
+ *  so page boundaries are stable: without an explicit order Postgres promises nothing about the
+ *  sequence two requests see, and a write landing between pages could shuffle a row across a
+ *  boundary and have it dropped or counted twice. */
 export async function listRows(table: TableName, companyId?: string): Promise<Array<Record<string, unknown>>> {
-  let query = getClient().from(supaTable(table)).select('*');
-  if (isCompanyScoped(table) && companyId) {
-    query = query.eq('company_id', companyId);
-  }
-  const { data, error } = await query;
+  const pageSize = 1000;
+  const scoped = isCompanyScoped(table) && companyId;
+  const primaryKey = TABLES[table].primaryKey;
+
+  const page = (from: number, withCount: boolean) => {
+    let query = getClient()
+      .from(supaTable(table))
+      .select('*', withCount ? { count: 'exact' } : undefined)
+      .order(primaryKey, { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (scoped) query = query.eq('company_id', companyId);
+    return query;
+  };
+
+  const { data, error, count } = await page(0, true);
   if (error) throw error;
-  return (data as Array<Record<string, unknown>>) ?? [];
+  const rows = (data as Array<Record<string, unknown>>) ?? [];
+  // count is what the table really holds; rows.length is what the API was willing to hand over.
+  const total = count ?? rows.length;
+
+  while (rows.length < total) {
+    const { data: more, error: pageError } = await page(rows.length, false);
+    if (pageError) throw pageError;
+    const next = (more as Array<Record<string, unknown>>) ?? [];
+    // Stop only on a genuinely empty page. A short one is expected whenever the server's own cap
+    // is below pageSize, and treating it as the end would hand back a partial table as a whole one.
+    if (next.length === 0) break;
+    rows.push(...next);
+  }
+
+  return rows;
 }
 
 /** Every row of a table, across all companies, fetched in pages.
@@ -314,6 +356,12 @@ export type SaveSalesInvoiceInput = {
   mode: string;
   discountPercent: number;
   discountAmount: number;
+  /** The tax split, recorded by the same transaction that saves the invoice. It used to be sent
+   *  afterwards as a separate edit, which could fail on its own and leave a saved invoice unable
+   *  to print its own tax correctly. */
+  gstPercent: number;
+  gstAmount: number;
+  gstMode: 'inclusive' | 'exclusive';
 };
 
 /** Atomically creates or edits a sales invoice — header, line items, FIFO stock
@@ -339,6 +387,9 @@ export async function saveSalesInvoice(input: SaveSalesInvoiceInput): Promise<Re
       p_mode: input.mode,
       p_discount_percent: input.discountPercent,
       p_discount_amount: input.discountAmount,
+      p_gst_percent: input.gstPercent,
+      p_gst_amount: input.gstAmount,
+      p_gst_mode: input.gstMode,
     })
     .single();
   if (error) throw error;
@@ -394,6 +445,45 @@ export async function receiveCustomerPayment(input: ReceiveCustomerPaymentInput)
     .single();
   if (error) throw error;
   return data as { payment_id: string; applied_total: number };
+}
+
+export type PaySupplierInput = {
+  companyId: string;
+  supplierId: string;
+  /** The day the money actually left, not the day it was typed in. */
+  date: string;
+  amount: number;
+  note: string;
+  /** One submission's own id, generated by the browser before the request goes out and reused on
+   *  every retry of that same submission. The database returns the payment already recorded
+   *  rather than recording a second one, so a double-click or a lost response cannot pay twice. */
+  reference: string;
+};
+
+export type PaySupplierResult = { payment_id: string; applied_total: number; orders_paid: number };
+
+/** Atomically records one payment to a supplier and spreads it across their unpaid purchase
+ *  orders, oldest first — the payment row, its per-order allocations, each order's paid amount,
+ *  and the supplier's running balance all land together (jde_pay_supplier).
+ *
+ *  The Suppliers screen used to do this from the browser: one PATCH per purchase order through
+ *  the generic table route, then a separate balance adjustment. A connection failure partway
+ *  through left orders marked paid while the payable was untouched, and there was no record of
+ *  the payment itself — only its effects on other documents. This is the supplier-side mirror of
+ *  receiveCustomerPayment above, which has always worked this way. */
+export async function paySupplier(input: PaySupplierInput): Promise<PaySupplierResult> {
+  const { data, error } = await getClient()
+    .rpc('jde_pay_supplier', {
+      p_company_id: input.companyId,
+      p_supplier_id: input.supplierId,
+      p_date: input.date,
+      p_amount: input.amount,
+      p_note: input.note,
+      p_reference: input.reference,
+    })
+    .single();
+  if (error) throw error;
+  return data as PaySupplierResult;
 }
 
 export type WriteOffInvoiceBalanceInput = {

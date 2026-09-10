@@ -1,7 +1,8 @@
 import { listRows, getActiveCompanyId } from '@/lib/db';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
+import { totalStockValue, type StockLayerLike } from '@/lib/stock-value';
 
-type Product = { name: string; part_number: string; brand: string; category: string; current_stock: number; min_stock: number; cost_price: number };
+type Product = { id: string; name: string; part_number: string; brand: string; category: string; current_stock: number; min_stock: number; cost_price: number };
 type Customer = { balance: number };
 type Supplier = { name: string; balance: number };
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; };
@@ -49,7 +50,10 @@ export async function buildBusinessDigest() {
     .filter((p) => Number(p.min_stock) > 0 && Number(p.current_stock) <= Number(p.min_stock))
     .map((p) => ({ name: p.name, part_number: p.part_number, brand: p.brand, current_stock: p.current_stock, min_stock: p.min_stock }));
 
-  const stockValue = products.reduce((t, p) => t + (Number(p.current_stock) || 0) * (Number(p.cost_price) || 0), 0);
+  // Same rule as every screen (lib/stock-value.ts). This used to multiply by the cost_price field,
+  // so the daily briefing could quote a stock value the owner could not find anywhere in the app.
+  const stockLayers = (await listRows('stock_layers', companyId)) as unknown as StockLayerLike[];
+  const stockValue = totalStockValue(products, stockLayers);
 
   const expenseByCategory: Record<string, number> = {};
   for (const e of expenses90) {

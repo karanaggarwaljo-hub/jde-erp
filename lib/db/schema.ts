@@ -2,13 +2,29 @@ export type TableSchema = {
   primaryKey: string;
   /** When true, rows belong to a company (company_id column) and reads/writes are scoped to the active company. */
   companyScoped?: boolean;
+  /**
+   * When true, the browser may create, edit and delete these rows through /api/local/[table].
+   *
+   * This is an allowlist, and the default is no. Everything the business runs on — invoices and
+   * their lines, purchase orders, goods received, stock batches and what consumed them, returns,
+   * quotations, payments, write-offs — is a TRANSACTION: writing one row of it correctly means
+   * writing several others in the same breath (stock drawn or put back, a balance moved, a
+   * document numbered). Those writes go through their own routes, which call one database
+   * function that does the whole thing or none of it.
+   *
+   * Left generic, a single PATCH could mark a purchase order paid without touching the payable,
+   * or change an invoice total without the customer's balance following. The rows below are the
+   * ones where a plain edit really is the whole change: names, prices, contact details, catalogue
+   * copy — master data, not events that already happened.
+   */
+  writable?: boolean;
 };
 
 export const TABLES: Record<string, TableSchema> = {
-  companies: { primaryKey: 'id' },
-  products: { primaryKey: 'id', companyScoped: true },
-  customers: { primaryKey: 'id', companyScoped: true },
-  suppliers: { primaryKey: 'id', companyScoped: true },
+  companies: { primaryKey: 'id', writable: true },
+  products: { primaryKey: 'id', companyScoped: true, writable: true },
+  customers: { primaryKey: 'id', companyScoped: true, writable: true },
+  suppliers: { primaryKey: 'id', companyScoped: true, writable: true },
   invoices: { primaryKey: 'id', companyScoped: true },
   quotations: { primaryKey: 'id', companyScoped: true },
   purchase_orders: { primaryKey: 'id', companyScoped: true },
@@ -16,11 +32,11 @@ export const TABLES: Record<string, TableSchema> = {
   invoice_items: { primaryKey: 'id', companyScoped: true },
   po_items: { primaryKey: 'id', companyScoped: true },
   expenses: { primaryKey: 'id', companyScoped: true },
-  users: { primaryKey: 'email', companyScoped: true },
+  users: { primaryKey: 'email', companyScoped: true, writable: true },
   stock_layers: { primaryKey: 'id', companyScoped: true },
   stock_consumptions: { primaryKey: 'id', companyScoped: true },
-  catalog_products: { primaryKey: 'id', companyScoped: true },
-  catalog_leads: { primaryKey: 'id', companyScoped: true },
+  catalog_products: { primaryKey: 'id', companyScoped: true, writable: true },
+  catalog_leads: { primaryKey: 'id', companyScoped: true, writable: true },
   catalog_events: { primaryKey: 'id', companyScoped: true },
   payments_received: { primaryKey: 'id', companyScoped: true },
   payment_allocations: { primaryKey: 'id', companyScoped: true },
@@ -51,6 +67,11 @@ export const BACKUP_ONLY_TABLES: Record<string, TableSchema> = {
   // The settlement audit trail: WOFF-#### rows saying how much a customer was let off, when, and
   // why. The invoices themselves carry the amount, but only this says who decided it.
   invoice_writeoffs: { primaryKey: 'id', companyScoped: true },
+  // SPAY-#### rows: what was actually paid to a supplier, when, and which purchase orders it was
+  // put against. The orders carry their own paid amounts, but only these say that one payment
+  // happened and covered them — the same reason the customer side keeps payments_received.
+  supplier_payments: { primaryKey: 'id', companyScoped: true },
+  supplier_payment_allocations: { primaryKey: 'id', companyScoped: true },
 };
 
 /**
@@ -65,3 +86,12 @@ export const NOT_BACKED_UP = ['ai_cache', 'adaptive_platform_outbox'] as const;
 export const BACKUP_TABLES: Record<string, TableSchema> = { ...TABLES, ...BACKUP_ONLY_TABLES };
 
 export type TableName = keyof typeof TABLES;
+
+/** Whether /api/local/[table] may create, edit or delete rows of this table. See `writable` above:
+ *  anything that is part of a transaction is deliberately absent, and stays read-only there. */
+export function isWritableTable(table: TableName): boolean {
+  // Defensive on a name that is not in TABLES at all: the routes reject those with a 404 before
+  // reaching this, and a table that is only in BACKUP_ONLY_TABLES is not browser-reachable at
+  // all, but "unknown" must never read as "writable".
+  return Boolean(TABLES[table]?.writable);
+}
