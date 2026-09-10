@@ -64,6 +64,57 @@ have noticed.
 Also: an invoice now records whether its prices included GST as part of saving it, rather than in a
 second message afterwards that could fail on its own. And the new supplier payment records are in
 the daily backup.
+## 2026-09-10 — Billing a sale is now one box: scan, Enter, scan, Enter
+
+Reported: recording a sale is boring and confusing, and does not work like a proper ERP.
+
+**It was slower than writing the bill by hand.** For every part you had to click "Add line", click
+into the part box, and type the full catalogue label exactly — "SP-258 - STEARING COUPLING 3DX",
+character for character. Typing just the part number found nothing. Typing the name found nothing.
+A barcode scanner found nothing, and worse, the Enter a scanner sends at the end of every scan
+went to the Save button and could save the invoice with one line on it.
+
+**There is now one box at the top of the invoice.** Scan or type, press Enter, and the part is on
+the bill. The box empties itself and keeps the cursor, so the next part starts immediately. You
+can bill a whole invoice without touching the mouse.
+
+**Finding a part now works the way you would say it out loud.**
+
+- The part number in any form. `p0012400`, `P00-12400` and `P00 12400` are the same part, because
+  that is how it is written on the box, on the supplier's invoice, and by whoever is typing.
+- The name, or part of it. "stearing" finds it.
+- Loose words in any order. "bearing pinion" finds BIG PINION BEARING 803149/10.
+- The brand. "SKF" lists everything you stock of theirs.
+
+Each result shows the part number, the name, the brand, **how many are on the shelf**, the rate,
+and — when the sale is to a named customer — **what that customer paid for it last time**. Parts
+you have none of still appear, marked "none on shelf", because ordering something in is a normal
+sale here.
+
+**Scanning the same part twice now means quantity two**, not two identical rows. And where three
+different products share one number, as SP-258 does in your catalogue, Enter deliberately refuses
+to guess: the list stays open until you pick one with the arrow keys. Billing whichever sorted
+first is exactly the mistake that reaches a customer.
+
+**Three things it now tells you before you save, not a month later in a report:**
+
+- **"Only 5 on the shelf, 9 being billed"** — you can still do it, it just says so.
+- **"None on the shelf — this will show as negative stock until a purchase is recorded"** — this
+  is precisely what happened to two parts on 1 September and went unnoticed until now.
+- **"Below cost of ₹390"** — when the rate you typed is under what the part cost you.
+
+None of these blocks the save. Selling at a loss to clear stock and selling ahead of a delivery
+are both real decisions; being told is the point, being stopped is not.
+
+**And the rate you charged this customer last time sits on the line, with a one-click button to
+charge it again.** That is the question actually being asked at the counter, and until now the
+only way to answer it was to go and find the old invoice.
+
+**Enter can no longer save an invoice by accident.** It adds a part, always. Ctrl+Enter is the
+deliberate save, and it is written on the form.
+
+**Quotations got the same box**, since they are priced from the same catalogue and turn into an
+invoice unchanged.
 
 ## 2026-09-09 — Housekeeping: the Inventory screen split up
 
