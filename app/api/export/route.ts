@@ -1,16 +1,16 @@
 import { getActiveCompanyId, listRows } from '@/lib/db';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
 import { AGE_BUCKETS, agingRows } from '@/lib/aging';
-import { totalStockValue, type StockLayerLike } from '@/lib/stock-value';
+import { stockValueLookup, totalStockValue, type StockLayerLike } from '@/lib/stock-value';
+import { costOfSales, grossProfit, gstPosition, type PeriodConsumption, type PeriodInvoiceItem } from '@/lib/period-accounts';
 
-type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; };
-type PurchaseOrder = { total: number; supplier: string; date: string; paid: number; status: string };
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; gst_amount: number | null; };
+type PurchaseOrder = { total: number; supplier: string; date: string; paid: number; status: string; gst_amount: number | null };
 type Expense = { amount: number };
 type Product = { id: string; category: string; current_stock: number; cost_price: number; sale_price: number };
 type Customer = { balance: number };
 type Supplier = { balance: number };
 
-const GST_RATE = 0.18;
 function toCsv(rows: Array<Array<string | number>>): string {
   return rows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n');
 }
@@ -23,6 +23,9 @@ async function buildExport(type: string): Promise<{ filename: string; rows: Arra
   const products = (await listRows('products', companyId)) as unknown as Product[];
   const customers = (await listRows('customers', companyId)) as unknown as Customer[];
   const suppliers = (await listRows('suppliers', companyId)) as unknown as Supplier[];
+  // What each sale actually cost, batch by batch, and what tax each document actually carries.
+  const invoiceItems = (await listRows('invoice_items', companyId)) as unknown as PeriodInvoiceItem[];
+  const consumptions = (await listRows('stock_consumptions', companyId)) as unknown as PeriodConsumption[];
 
   const totalRevenue = invoices.reduce((t, i) => t + Number(i.total || 0), 0);
   const totalPurchaseSpend = purchaseOrders.reduce((t, p) => t + Number(p.total || 0), 0);
@@ -60,12 +63,15 @@ async function buildExport(type: string): Promise<{ filename: string; rows: Arra
   }
 
   if (type === 'stock') {
+    // The one shared valuation, so this CSV cannot disagree with the screen it came from.
+    const stockLayers = (await listRows('stock_layers', companyId)) as unknown as StockLayerLike[];
+    const stockValueFor = stockValueLookup(stockLayers);
     const byCategory = new Map<string, { count: number; qty: number; cost: number; retail: number }>();
     for (const p of products) {
       const entry = byCategory.get(p.category) ?? { count: 0, qty: 0, cost: 0, retail: 0 };
       entry.count += 1;
       entry.qty += Number(p.current_stock || 0);
-      entry.cost += Number(p.current_stock || 0) * Number(p.cost_price || 0);
+      entry.cost += stockValueFor(p);
       entry.retail += Number(p.current_stock || 0) * Number(p.sale_price || 0);
       byCategory.set(p.category, entry);
     }
@@ -79,18 +85,21 @@ async function buildExport(type: string): Promise<{ filename: string; rows: Arra
   }
 
   if (type === 'gst') {
-    const taxableSales = totalRevenue / (1 + GST_RATE);
-    const outputGst = totalRevenue - taxableSales;
-    const taxablePurchases = totalPurchaseSpend / (1 + GST_RATE);
-    const inputTaxCredit = totalPurchaseSpend - taxablePurchases;
+    // Only what the documents record. This used to divide the totals by 1.18 and export the
+    // difference as tax collected, whatever the invoices actually charged.
+    const gst = gstPosition(invoices, purchaseOrders);
     return {
       filename: 'jde-gst-summary.csv',
       rows: [
         ['Metric', 'Amount'],
-        ['Taxable sales', Math.round(taxableSales)],
-        ['Output GST', Math.round(outputGst)],
-        ['Input tax credit', Math.round(inputTaxCredit)],
-        ['Net GST payable', Math.round(Math.max(0, outputGst - inputTaxCredit))],
+        ['Sales invoiced', Math.round(totalRevenue)],
+        ['Output GST charged', gst.outputTax],
+        ['Input tax credit', gst.inputTax],
+        ['Net GST payable', gst.netPayable],
+        ['Invoices', gst.invoiceCount],
+        ['Invoices carrying GST', gst.invoicesWithTax],
+        ['Purchase orders', gst.purchaseCount],
+        ['Purchase orders carrying GST', gst.purchasesWithTax],
       ],
     };
   }
@@ -116,16 +125,22 @@ async function buildExport(type: string): Promise<{ filename: string; rows: Arra
     };
   }
 
-  const grossMargin = totalRevenue - totalPurchaseSpend;
+  // Sales less what those sales cost, from the batches the goods came out of — not sales less
+  // everything bought in the same window, which is a different figure entirely.
+  const cost = costOfSales(invoices, invoiceItems, consumptions);
+  const profit = grossProfit(invoices, cost);
+  const notKnown = 'Not known';
   return {
     filename: 'jde-profit-and-loss.csv',
     rows: [
       ['Line Item', 'Amount'],
       ['Total Sales Revenue', totalRevenue],
-      ['Purchases (COGS proxy)', -totalPurchaseSpend],
-      ['Gross Margin', grossMargin],
+      ['Cost of Goods Sold', cost.complete ? -cost.cost : notKnown],
+      ['Gross Profit', profit ? profit.grossProfit : notKnown],
       ['Operating Expenses', -totalExpenses],
-      ['Net Result', grossMargin - totalExpenses],
+      ['Net Result', profit ? profit.grossProfit - totalExpenses : notKnown],
+      ['Purchases in this period', -totalPurchaseSpend],
+      ...(cost.complete ? [] : [['Invoice lines with no recorded cost', cost.linesWithoutCost]]),
     ],
   };
 }

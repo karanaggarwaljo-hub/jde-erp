@@ -22,7 +22,15 @@ const SYSTEM_PROMPT =
   'screen for one report tab, as JSON. Write a short (2-4 sentence) explanation of what these numbers mean and what, ' +
   'if anything, stands out — do not just restate the figures back, and do not invent numbers, dates, or names not present ' +
   'in the data. If the data is sparse or all-zero, say plainly that there is not enough history yet rather than inventing ' +
-  'a narrative. Currency is INR (₹).';
+  'a narrative. Currency is INR (₹). ' +
+  // The audit's specific complaint: the profit report labelled purchases as a stand-in for cost of
+  // sales, and the summary read that back as healthy trading and a strong mark-up. A summary must
+  // carry the same limits as the figures it is describing, or it turns a provisional number into a
+  // confident conclusion the owner acts on.
+  'A field that is null, or a flag such as cost_is_incomplete or no_tax_recorded_anywhere being ' +
+  'true, means that figure is NOT KNOWN. Never estimate it, never substitute a different figure ' +
+  'for it, and never describe profitability or tax owed from figures marked unknown — say plainly ' +
+  'what is missing and what would have to be recorded to answer it.';
 
 const REPORT_LABELS: Record<string, string> = {
   pnl: 'Profit & Loss statement',

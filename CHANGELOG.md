@@ -2,6 +2,44 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-10 — Reports was telling you the wrong profit, and a tax nobody had charged
+
+Second block of work from the outside audit. Both of these are on the Reports screen, and both
+produced confident numbers that were not true.
+
+**Profit is now measured against what the goods actually cost.** The screen took everything bought
+in the period and called it the cost of what was sold. Those are different things. Buying a load of
+stock made the shop look less profitable the moment the stock arrived, and selling something bought
+two months ago looked like pure profit. What every sale really cost has been recorded all along,
+batch by batch, against each line of each invoice — nothing new had to be captured, it simply was
+not being used.
+
+On your own records: sales of ₹76,563, and the old screen showed a gross margin of ₹38,892 by
+subtracting ₹37,670 of purchases. The goods on those invoices actually cost **₹31,845**, so the
+gross profit was **₹44,718**. Roughly ₹5,800 of profit the screen was not showing you.
+
+Where a line has no recorded cost — usually something typed in by hand with no part behind it — the
+screen now says "Not known" instead of a figure. A wrong profit is worse than no profit, because it
+is the kind of number somebody acts on. It also says how many lines are missing a cost and on how
+many invoices, so it can be fixed.
+
+**The GST summary was reporting tax that was never charged.** It took every invoice total, divided
+it by 1.18, and reported the difference as GST collected — regardless of what the invoices said. Not
+one of your seven invoices charges any GST at all, and neither purchase order records any. The
+screen was nonetheless reporting **₹11,679** of output tax, which would be a serious thing to carry
+into a return.
+
+It now adds up only the tax the documents themselves record, and says plainly when that is nothing.
+Where tax is recorded it also shows on how many documents, so a partial picture is visible as one
+rather than reading as a complete return. The note about CGST/SGST being a guess at supply within
+the state is still there, alongside a new one: returned goods are not adjusted here.
+
+**The Profit & Loss and GST spreadsheet exports were changed the same way**, so the CSV and the
+screen can no longer disagree. The Stock Valuation export now uses the shared valuation too. The
+plain-English summary above each report is now told which figures are unknown, and instructed never
+to describe profitability or tax from them — it previously read the made-up gross margin back as
+healthy trading and a strong mark-up.
+
 ## 2026-09-10 — Recording a purchase works the same way, and warns you about the money
 
 The purchase form had every problem the sale form had. Click "Add Item Row", click the part box,
