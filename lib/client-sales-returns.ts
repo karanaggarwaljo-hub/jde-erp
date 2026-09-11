@@ -17,7 +17,10 @@ export type SalesReturnInput = {
   invoiceId: string;
   customerId: string | null;
   reason: string;
-  items: Array<{ invoice_item_id: string; qty: number }>;
+  /** `condition` says whether the goods can be sold again. Damaged goods still credit the
+   *  customer in full; they simply do not go back on the sellable shelf. Omitted means resellable,
+   *  which is what the database assumes too. */
+  items: Array<{ invoice_item_id: string; qty: number; condition?: 'resellable' | 'damaged' }>;
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {

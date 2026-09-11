@@ -2,10 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 import { requireOwner } from '@/lib/auth/dal';
 import { isBusinessRuleError } from '@/lib/db';
 import { money, recordAudit } from '@/lib/audit-log';
+import { damagedUnits, parseReturnLines } from '@/lib/sales-return-lines';
 
 export const dynamic = 'force-dynamic';
-
-type ReturnLine = { invoice_item_id: string; qty: number };
 
 function getDatabase() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -58,21 +57,12 @@ export async function POST(request: Request) {
   const invoiceId = typeof value.invoiceId === 'string' ? value.invoiceId : '';
   const customerId = typeof value.customerId === 'string' ? value.customerId : null;
   const reason = typeof value.reason === 'string' ? value.reason.trim().slice(0, 500) : '';
-  const rawItems = Array.isArray(value.items) ? value.items : [];
-  const items: ReturnLine[] = rawItems.flatMap((raw) => {
-    if (!raw || typeof raw !== 'object') return [];
-    const line = raw as Record<string, unknown>;
-    const invoiceItemId = typeof line.invoice_item_id === 'string' ? line.invoice_item_id : '';
-    const qty = Number(line.qty);
-    return invoiceItemId && Number.isFinite(qty) && qty > 0 && Number.isInteger(qty)
-      ? [{ invoice_item_id: invoiceItemId, qty }]
-      : [];
-  });
+  const parsed = parseReturnLines(value.items);
   if (!companyId || !invoiceId) return Response.json({ error: 'companyId and invoiceId are required.' }, { status: 400 });
   await requireOwner();
   if (!reason) return Response.json({ error: 'Add a brief return reason before continuing.' }, { status: 400 });
-  if (items.length === 0 || items.length !== rawItems.length) return Response.json({ error: 'Select one or more whole-number quantities to return.' }, { status: 400 });
-  if (new Set(items.map((item) => item.invoice_item_id)).size !== items.length) return Response.json({ error: 'Each invoice line may appear only once in a return.' }, { status: 400 });
+  if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
+  const items = parsed.lines;
 
   try {
     const { data, error } = await getDatabase().rpc('jde_create_sales_return', {
@@ -88,7 +78,8 @@ export async function POST(request: Request) {
     await recordAudit({
       companyId, action: 'sales.return', entity: 'sales_returns', entityId: created.id ?? null,
       summary: `Took back ${units} item${units === 1 ? '' : 's'} against ${invoiceId}, crediting ${money(Number(created.credit_total ?? 0))}`,
-      details: { invoice_id: invoiceId, reason, lines: items, credit_total: created.credit_total },
+      details: { invoice_id: invoiceId, reason, lines: items, credit_total: created.credit_total,
+        damaged_units: damagedUnits(items) },
     });
     return Response.json(data, { status: 201 });
   } catch (error) {

@@ -2,6 +2,31 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-11 — A damaged return no longer goes back on the shelf to be sold again
+
+Fifth block of work from the outside audit. When a customer brought something back, it went
+straight into sellable stock whatever state it was in. A cracked casting returned on Monday was
+available to sell to somebody else on Tuesday, counted in your stock figure, counted in the stock
+valuation, and offered up by the part picker on the next invoice. The return form asked for a
+quantity and a reason, and there was nowhere to say the part was broken.
+
+**The return dialog now asks what condition each line came back in.** Two choices per line:
+
+- **Can be sold again** — exactly what happened before. The goods go back into stock, into their
+  original purchase batch at their original cost, and the customer is credited.
+- **Damaged, do not restock** — the customer is credited in full, the same money as before, but the
+  goods never re-enter sellable stock.
+
+It is per line, not per return, because one customer can bring back two good filters and one
+cracked housing in the same visit.
+
+The confirmation box now tells you which way each half will go before you commit, and the message
+afterwards says how many units were kept out of stock. Nothing about the money changes: a damaged
+return credits the customer exactly as a resellable one does.
+
+Every return already recorded stays as it was, counted as resellable, because that is what the app
+did at the time and pretending otherwise would be rewriting history.
+
 ## 2026-09-11 — One part number now means one part
 
 Fourth block of work from the outside audit. Five of your internal codes each named more than one
