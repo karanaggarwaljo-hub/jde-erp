@@ -27,6 +27,7 @@ import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-p
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { money, wholeMoney } from '@/lib/money';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { createPart } from '@/lib/client-inventory';
 import { amountReceived } from '@/lib/invoice-totals';
 import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
 import {
@@ -364,17 +365,27 @@ export default function PurchasesPage() {
     if (existing) return existing;
 
     const separatorIndex = splitOnDash ? trimmed.indexOf(' - ') : -1;
-    // A part number printed on the document beats both the " - " convention and the SP-### stand-in:
-    // it is the real code, and recording it now is what lets the next invoice recognise this part.
+    // A part number printed on the document beats the " - " convention: it is the real code, and
+    // recording it now is what lets the next invoice recognise this part.
     const documentPartNumber = (source?.part_number ?? '').trim();
     const partNumber = documentPartNumber
-      || (separatorIndex > 0 ? trimmed.slice(0, separatorIndex).trim() : `SP-${String(knownProducts.length + 1).padStart(3, '0')}`);
+      || (separatorIndex > 0 ? trimmed.slice(0, separatorIndex).trim() : '');
     const name = separatorIndex > 0 && !documentPartNumber ? trimmed.slice(separatorIndex + 3).trim() : trimmed;
 
-    const res = await fetch('/api/local/products', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    // A code already on the shelf means this IS that part, whatever the supplier called it on this
+    // document. Reusing it is the whole point of a part number; creating a second part with the
+    // same code is how five different things ended up sharing SP-239.
+    if (partNumber) {
+      const sameCode = knownProducts.find((p) => (p.part_number ?? '').trim().toLowerCase() === partNumber.toLowerCase());
+      if (sameCode) return sameCode;
+    }
+
+    // Blank part number means "give it one": the database picks the next free code for this
+    // company inside the same transaction. This used to be `SP-` + the length of the list the
+    // browser had loaded, which collides with any code already in use.
+    const created = await createPart({
+      companyId: activeCompany?.id ?? '',
+      product: {
         part_number: partNumber,
         oem_number: (source?.oem_number ?? '').trim(),
         hsn_code: (source?.hsn_code ?? '').trim(),
@@ -384,16 +395,16 @@ export default function PurchasesPage() {
         compatibility: '',
         // Sale price starts equal to cost (0% margin) rather than a guessed markup — an honest
         // placeholder that's obviously not final, editable in Inventory once a real price is set.
-        cost_price: unitCost,
         mrp: unitCost,
         sale_price: unitCost,
-        current_stock: 0,
         min_stock: 0,
         location: '',
-        company_id: activeCompany?.id,
-      }),
-    });
-    const created = await parseJsonOrThrow(res, 'Failed to create part.') as Product;
+      },
+      // Nothing is on the shelf yet: the goods are booked in by the purchase itself, which opens
+      // the batch at the price actually paid.
+      openingQty: 0,
+      openingCost: unitCost,
+    }) as unknown as Product;
     knownProducts.push(created);
     return created;
   }

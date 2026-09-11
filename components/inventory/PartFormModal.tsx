@@ -83,10 +83,13 @@ export default function PartFormModal(props: PartFormModalProps) {
                     A part named &quot;{possibleDuplicate.name}&quot; already exists ({possibleDuplicate.part_number}, {possibleDuplicate.current_stock} in stock) — this will add a separate, second entry rather than update it. If you meant to edit the existing one, cancel and use its Edit button instead.
                   </div>
                 )}
+                {/* The database refuses a second part with the same number, so this is no longer a
+                    warning about what saving would create — it is a warning that saving will be
+                    refused. Said here, before the button, rather than as an error afterwards. */}
                 {duplicatePartNumbers.length > 0 && (
                   <div className="alert alert-warning" role="alert">
                     <strong>{formData.part_number.trim()}</strong> is already on {duplicatePartNumbers.length === 1 ? 'another part' : `${duplicatePartNumbers.length} other parts`}:{' '}
-                    {duplicatePartNumbers.map((p) => p.name).join(', ')}. Saving this makes {duplicatePartNumbers.length === 1 ? 'two' : `${duplicatePartNumbers.length + 1}`} parts share one number, so scanning it can no longer tell them apart — every sale and purchase will stop and ask which one was meant. Give this one its own number if you can.
+                    {duplicatePartNumbers.map((p) => p.name).join(', ')}. A part number has to name one part, so this will not save as it stands. Give this one its own number, or clear the box and one will be made for it.
                   </div>
                 )}
                 {/* ── What the part is ───────────────────────────────────────── */}
@@ -152,8 +155,18 @@ export default function PartFormModal(props: PartFormModalProps) {
                       survives an edit here instead of being blanked. */}
                   <div className="form-grid-2">
                     <div className="form-group">
-                      <label className="form-label">Part Number *</label>
-                      <input className="form-input" required value={formData.part_number} onChange={e => setFormData({ ...formData, part_number: e.target.value })} />
+                      <label className="form-label">Part Number</label>
+                      {/* Not required. Left blank, the database gives this part the next free
+                          internal code for the company — which is the only place that can see
+                          every code already in use. Typing a real supplier code is always better
+                          than a generated one, so the field stays first and empty rather than
+                          pre-filled with a stand-in somebody might keep by accident. */}
+                      <input
+                        className="form-input"
+                        placeholder="The supplier's code, or leave blank for one of ours"
+                        value={formData.part_number}
+                        onChange={e => setFormData({ ...formData, part_number: e.target.value })}
+                      />
                     </div>
                     <div className="form-group">
                       <label className="form-label">HSN Code</label>

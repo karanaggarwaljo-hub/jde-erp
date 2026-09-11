@@ -30,6 +30,7 @@ import { matchesProductSearch, duplicatePartNumbers as findDuplicatePartNumbers 
 import { averageMarginPercent, marginPercent } from '@/lib/margin';
 import { buildPartsWorksheet, countUnanswered, worksheetToCsv, worksheetFileName } from '@/lib/parts-worksheet';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
+import { createPart } from '@/lib/client-inventory';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { fifoCostLookup, totalStockValue } from '@/lib/stock-value';
 import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
@@ -116,7 +117,7 @@ function pageWindow(current: number, total: number): Array<number | 'gap'> {
 
 export default function InventoryPage() {
   const { configError } = useCompany();
-  const { rows: products, loading, create, update, remove, reload, activeCompany } = useCompanyTable<Product>('products');
+  const { rows: products, loading, update, remove, reload, activeCompany } = useCompanyTable<Product>('products');
   const { rows: stockLayers, reload: reloadStockLayers } = useCompanyTable<StockLayer>('stock_layers');
 
   // The per-unit cost shown next to a part: its oldest still-open priced batch, i.e. what the next
@@ -316,7 +317,11 @@ export default function InventoryPage() {
     setSuggestFailed(false);
     setSavedThisSession(0);
     setFormData({
-      part_number: `SP-00${products.length + 1}`,
+      // Left blank on purpose. The database gives a new part the next free code for this company
+      // when this is empty — the browser only sees the parts it has loaded, and counting them was
+      // how five different parts came to share SP-239. Typing a real supplier code here still
+      // wins; it is only the stand-in that is no longer guessed here.
+      part_number: '',
       oem_number: '',
       hsn_code: '',
       name: '',
@@ -349,6 +354,10 @@ export default function InventoryPage() {
       if (!editingProduct && newStock <= 0) {
         throw new Error('Initial stock must be greater than 0 for a new part — enter the quantity you actually have on hand.');
       }
+      const companyId = activeCompany?.id;
+      if (!editingProduct && !companyId) {
+        throw new Error('No company is active — reload the page and try again.');
+      }
       const payload = {
         ...formData,
         cost_price: newCostPrice,
@@ -376,12 +385,15 @@ export default function InventoryPage() {
           await correctOldestLayerCost(editingProduct.id, newCostPrice);
         }
       } else {
-        const created = await create(payload);
-        if (newStock > 0) {
-          // adjustStock=false: current_stock was already set by the insert above, so this only
-          // opens the matching opening batch without bumping stock a second time.
-          await addStockLayer(created.id, newStock, newCostPrice, null, false);
-        }
+        // One call, one transaction: the part and its opening batch land together, or neither
+        // does (jde_create_product). These used to be two calls, and a failure between them left a
+        // part whose stock count had no purchase history behind it.
+        await createPart({
+          companyId: companyId as string,
+          product: { ...payload, current_stock: undefined },
+          openingQty: newStock,
+          openingCost: newCostPrice,
+        });
       }
       // Same class of bug, two different tables: update()/create() above reload `products`, but
       // both run *before* addStockLayer/consumeStockFifo — which are what actually change

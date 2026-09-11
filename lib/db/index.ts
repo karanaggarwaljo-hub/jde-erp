@@ -456,6 +456,35 @@ export async function receiveCustomerPayment(input: ReceiveCustomerPaymentInput)
   return data as { payment_id: string; applied_total: number };
 }
 
+export type CreateProductInput = {
+  companyId: string;
+  /** Every field the part carries. A blank `part_number` means "give it one" — the database picks
+   *  the next free code for this company, which is the only place that can see them all. */
+  product: Record<string, unknown>;
+  openingQty: number;
+  openingCost: number;
+};
+
+/** Atomically creates a part and its opening stock batch (jde_create_product).
+ *
+ *  These were two calls from the browser — insert the part, then open its batch — and a failure
+ *  between them left a part whose stock count had no purchase history behind it, so every FIFO
+ *  figure for it was guesswork. The part number is generated inside the same transaction from the
+ *  true maximum, not from the length of whatever list the browser happened to have loaded: that
+ *  was how five different parts came to share the code SP-239. */
+export async function createProduct(input: CreateProductInput): Promise<Record<string, unknown>> {
+  const { data, error } = await getClient()
+    .rpc('jde_create_product', {
+      p_company_id: input.companyId,
+      p_product: input.product,
+      p_opening_qty: input.openingQty,
+      p_opening_cost: input.openingCost,
+    })
+    .single();
+  if (error) throw error;
+  return data as Record<string, unknown>;
+}
+
 /** Writes one audit entry. Deliberately a plain insert with no business logic of its own: the
  *  caller has already decided what happened and how to describe it. See lib/audit-log.ts for why
  *  this runs after the action rather than inside its transaction. */

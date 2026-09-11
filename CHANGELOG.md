@@ -2,6 +2,42 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-11 — One part number now means one part
+
+Fourth block of work from the outside audit. Five of your internal codes each named more than one
+part. The worst was **SP-239**, which named five completely different things: a brake plate, a
+hydraulic pump shaft, a shovel rod, a slew tube and a stabiliser ram assembly. Looking a part up
+by that code could not tell you which one you meant.
+
+**The cause.** When the app invents a code for a part that has none, it was counting the parts on
+screen and adding one. A count is not a sequence. Delete a part, or work from a filtered list, and
+the next code lands on one already in use. Two screens did it — Inventory and the purchase
+importer — so both produced collisions. This is the same mistake that was fixed for invoice and
+purchase order numbers in August: those are now worked out by the database from the real highest
+number, and part numbers now are too.
+
+**What changed for the 15 parts caught in this.** Each one that was sharing a code has been given
+its own. The part holding the most stock kept the original code, since that is most likely what
+the code has come to mean on your shelf; the others were renumbered from SP-00259 upwards. Every
+one of those changes is in the new Audit Logs tab, saying what the code was and what it became, so
+if you recognise an old code you can still find where it went.
+
+**What changed going forward.**
+
+- The database refuses a second part with the same number, so this cannot happen again from any
+  screen, import or scan.
+- **Part Number is no longer a required field.** Leave it blank and you get the next free code
+  automatically. Typing the supplier's real code is still better, and still wins.
+- A purchase that arrives with a code you already stock is now matched to that part instead of
+  creating a second one beside it.
+- Importing a spreadsheet that repeats a code, or reuses one you already have, now tells you which
+  codes and which rows, and imports nothing, rather than quietly creating duplicates.
+
+**Also fixed while in here:** adding a part used to be two separate saves — the part, then its
+opening stock. If the second failed, you had a part whose stock count had no purchase history
+behind it, which made every cost and margin figure for it guesswork. It is now one save that
+either completes or does nothing.
+
 ## 2026-09-11 — Enter no longer saves a half-typed form, anywhere in the ERP
 
 The sale and purchase screens got this last week. Every other form that records something still
