@@ -20,7 +20,7 @@
  * as a prop and the page owns them. The only state here belongs to the act of typing.
  */
 
-import { useState, type Dispatch, type FormEvent, type KeyboardEvent, type SetStateAction } from 'react';
+import { useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import { Plus, Minus, X, AlertTriangle, Keyboard } from 'lucide-react';
 import { money } from '@/lib/money';
 import PartPicker from '@/components/PartPicker';
@@ -30,6 +30,7 @@ import {
   purchaseLineWarnings,
   type LastPaid,
 } from '@/lib/purchase-entry';
+import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import type { PartOption, PaymentStatus, POLine } from '@/lib/purchase-types';
 
 export type PurchaseFormModalProps = {
@@ -80,24 +81,9 @@ export default function PurchaseFormModal(props: PurchaseFormModalProps) {
     setLastAdded(description);
   };
 
-  /**
-   * Enter must never submit this form implicitly. A barcode scanner ends every scan with one, and
-   * a browser turns Enter in any text input into a click on the submit button. On this screen that
-   * would not merely save a wrong document — jde_save_purchase opens FIFO stock batches, so it
-   * would move stock. Enter is swallowed here; Ctrl+Enter is the deliberate save, and requestSubmit
-   * runs the same path and the same validation as the button.
-   */
-  const onFormKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
-    if (event.key !== 'Enter') return;
-    const target = event.target as HTMLElement;
-    if (target.tagName === 'BUTTON' || target.tagName === 'TEXTAREA') return;
-    event.preventDefault();
-    if ((event.ctrlKey || event.metaKey) && canSubmit) event.currentTarget.requestSubmit();
-  };
-
   return (
     <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '920px' }} role="dialog" aria-modal="true" aria-labelledby="purchase-modal-title">
-      <form onSubmit={recordPurchase} onKeyDown={onFormKeyDown}>
+      <form onSubmit={recordPurchase} onKeyDown={(event) => keepEnterInsideForm(event, canSubmit)}>
         <div className="modal-header">
           <div>
             <h3 id="purchase-modal-title" className="modal-title">Record Purchase</h3>
@@ -255,7 +241,7 @@ export default function PurchaseFormModal(props: PurchaseFormModalProps) {
             <div className="pager">
               <span className="pager-info flex items-center gap-2">
                 <Keyboard size={13} aria-hidden="true" />
-                Enter adds the highlighted part · ↑↓ to choose · Ctrl+Enter saves
+                Enter adds the highlighted part · ↑↓ to choose · {SAVE_SHORTCUT_HINT}
               </span>
               <div className="pager-info">
                 <strong>{lines.length}</strong> {lines.length === 1 ? 'line item' : 'line items'}

@@ -26,7 +26,7 @@ import { useCompany } from '@/components/CompanyProvider';
 import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sheetFromScannedParts, fileToBase64, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
 import { planCostUpdates, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { planDetailUpdates, looksLikeAnInventedCode } from '@/lib/detail-import';
-import { matchesProductSearch } from '@/lib/product-search';
+import { matchesProductSearch, duplicatePartNumbers as findDuplicatePartNumbers } from '@/lib/product-search';
 import { averageMarginPercent, marginPercent } from '@/lib/margin';
 import { buildPartsWorksheet, countUnanswered, worksheetToCsv, worksheetFileName } from '@/lib/parts-worksheet';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
@@ -190,6 +190,11 @@ export default function InventoryPage() {
   const possibleDuplicate = !editingProduct && formData.name.trim()
     ? products.find((p) => p.name.trim().toLowerCase() === formData.name.trim().toLowerCase())
     : undefined;
+
+  // A part number already on another part. Separate from the name check above, and worth its own
+  // warning: a repeated name is usually someone re-adding a part they could not see, while a
+  // repeated number is what makes a catalogue permanently ambiguous to a scanner.
+  const duplicateNumbers = findDuplicatePartNumbers(formData.part_number, products, editingProduct?.id);
 
   // Margin implied by whatever cost and sale price are currently typed into the form. Null until
   // both are genuine positive numbers — a part priced at zero has no meaningful margin, and a
@@ -1055,7 +1060,7 @@ export default function InventoryPage() {
         <PartFormModal
           formData={formData} setFormData={setFormData}
           editingProduct={editingProduct} products={products}
-          categoryOptions={categoryOptions} possibleDuplicate={possibleDuplicate}
+          categoryOptions={categoryOptions} possibleDuplicate={possibleDuplicate} duplicatePartNumbers={duplicateNumbers}
           draft={draft} draftMargin={draftMargin}
           saveError={saveError} savingProduct={savingProduct} savedThisSession={savedThisSession}
           suggesting={suggesting} suggestFailed={suggestFailed} suggestPartDetails={suggestPartDetails}

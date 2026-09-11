@@ -75,3 +75,29 @@ export function compatibilitySuggestions(products: SearchableProduct[], limit = 
     .slice(0, limit)
     .map((entry) => entry.label);
 }
+
+/** The minimum needed to spot a part number already in use. */
+export type NumberedProduct = { id: string; part_number?: string | null; name?: string | null };
+
+/**
+ * Other parts already carrying this number.
+ *
+ * Kept apart from the same-name duplicate check, because they catch different mistakes and
+ * deserve different words. A repeated name is usually someone re-adding a part they could not
+ * see; a repeated number is the thing that makes a catalogue permanently ambiguous. Three
+ * different products in this catalogue share SP-258, which is exactly why a scan of it cannot
+ * resolve to one part and every sale and purchase has to stop and ask which was meant.
+ *
+ * Compared with punctuation and case removed, matching how lib/part-search.ts resolves a scanned
+ * code — otherwise "SP-258" and "sp258" would look like different numbers here and the same
+ * number there, and the warning would miss the case it exists for.
+ */
+export function duplicatePartNumbers<T extends NumberedProduct>(
+  partNumber: string,
+  products: T[],
+  excludeId?: string
+): T[] {
+  const code = squashed(partNumber);
+  if (!code) return [];
+  return products.filter((product) => product.id !== excludeId && squashed(product.part_number) === code);
+}
