@@ -54,6 +54,14 @@ export function isCompanyScoped(table: TableName): boolean {
 
 export { isWritableTable };
 
+/**
+ * The installation-wide default company, from `jde_companies.is_active`.
+ *
+ * NOT the company a logged-in person is working in — that is per person and per browser now; see
+ * resolveRequestCompanyId in lib/company-context.ts, which is what routes should call. This is the
+ * last resort behind it, and the only thing available to something with no session at all: the
+ * nightly backup, the cron job, a server-side import.
+ */
 export async function getActiveCompanyId(): Promise<string | undefined> {
   const { data, error } = await getClient()
     .from(supaTable('companies'))
@@ -72,13 +80,6 @@ export async function companyExists(id: string): Promise<boolean> {
   return data !== null;
 }
 
-export async function activateCompany(id: string): Promise<Record<string, unknown> | undefined> {
-  const { error } = await getClient().rpc('jde_activate_company', { target_id: id });
-  if (error) throw error;
-  const { data, error: fetchError } = await getClient().from(supaTable('companies')).select('*').eq('id', id).maybeSingle();
-  if (fetchError) throw fetchError;
-  return (data as Record<string, unknown> | null) ?? undefined;
-}
 
 /** Which single company's published catalog is shown on the public /catalog pages —
  *  deliberately separate from "active company" (which is which company an admin is
@@ -775,12 +776,16 @@ export async function createExpense(input: CreateExpenseInput): Promise<Record<s
   return data as Record<string, unknown>;
 }
 
-export async function deleteCompany(id: string): Promise<{ error: string } | { ok: true }> {
-  const companies = (await listRows('companies')) as Array<{ id: string; is_active: boolean }>;
+/** `currentCompanyId` is the company the person asking is working in right now. Deleting that one
+ *  is refused: every screen they have open is reading it, and they would be left pointed at a
+ *  company that no longer exists. This used to test the installation-wide `is_active` flag, which
+ *  answered the same question only while everyone shared one company. */
+export async function deleteCompany(id: string, currentCompanyId?: string): Promise<{ error: string } | { ok: true }> {
+  const companies = (await listRows('companies')) as Array<{ id: string }>;
   const target = companies.find((c) => c.id === id);
   if (!target) return { error: 'Company not found.' };
   if (companies.length <= 1) return { error: 'At least one company must remain.' };
-  if (target.is_active) return { error: 'Set another company active before deleting this one.' };
+  if (id === currentCompanyId) return { error: 'Switch to another company before deleting this one.' };
 
   const { error } = await getClient().rpc('jde_delete_company', { target_id: id });
   if (error) throw error;

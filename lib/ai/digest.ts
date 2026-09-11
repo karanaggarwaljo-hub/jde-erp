@@ -1,4 +1,5 @@
-import { listRows, getActiveCompanyId } from '@/lib/db';
+import { listRows } from '@/lib/db';
+import { resolveRequestCompanyId } from '@/lib/company-context';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
 import { totalStockValue, type StockLayerLike } from '@/lib/stock-value';
 
@@ -30,7 +31,7 @@ function countByStatus(rows: Array<{ status: string }>): Record<string, number> 
 }
 
 export async function buildBusinessDigest() {
-  const companyId = await getActiveCompanyId();
+  const companyId = await resolveRequestCompanyId();
   const products = (await listRows('products', companyId)) as unknown as Product[];
   const customers = (await listRows('customers', companyId)) as unknown as Customer[];
   const suppliers = (await listRows('suppliers', companyId)) as unknown as Supplier[];
@@ -121,7 +122,7 @@ const REORDER_RATIO_CUTOFF = 1.5;
 const MAX_CANDIDATES = 40;
 
 export async function buildReorderDigest() {
-  const companyId = await getActiveCompanyId();
+  const companyId = await resolveRequestCompanyId();
   const products = (await listRows('products', companyId)) as unknown as Product[];
 
   // Deliberately not every product. The model may recommend at most 8 and is told to judge on

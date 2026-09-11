@@ -72,7 +72,7 @@ export default function SettingsClient() {
   const [roleSubmitting, setRoleSubmitting] = useState(false);
   const [userFilter, setUserFilter] = useState<UserFilter>('all');
 
-  const { companies, loading: companiesLoading, addCompany, updateCompany, switchCompany, setStorefrontCompany, removeCompany } = useCompany();
+  const { companies, activeCompany, loading: companiesLoading, addCompany, updateCompany, switchCompany, setStorefrontCompany, removeCompany } = useCompany();
   const [companyModalOpen, setCompanyModalOpen] = useState(false);
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
   const [companyForm, setCompanyForm] = useState(emptyCompanyForm);
@@ -154,7 +154,7 @@ export default function SettingsClient() {
     setCompanyListError('');
     try {
       await switchCompany(id);
-      setFeedback(`${target?.name ?? 'Company'} is now the active company.`);
+      setFeedback(`You are now working in ${target?.name ?? 'that company'}. This changes what you see, not what anyone else sees.`);
     } catch (error) {
       setCompanyListError(error instanceof Error ? error.message : 'Could not switch the active company.');
     }
@@ -204,11 +204,13 @@ export default function SettingsClient() {
     hasOwnerAccount ? 'the owner account cannot be edited or removed' : '',
   ].filter(Boolean).join(' · ');
 
-  const activeCompanyRow = companies.find((c) => c.is_active);
+  // Which company YOU are working in — your own choice, not a shared setting. Switching here
+  // moves this browser only; it used to move everybody, including anyone mid-invoice.
+  const activeCompanyRow = activeCompany;
   const storefrontCompanyRow = companies.find((c) => c.is_storefront);
   const companySentence = [
     `${companies.length} ${companies.length === 1 ? 'company' : 'companies'}`,
-    activeCompanyRow ? `${activeCompanyRow.name} is active` : '',
+    activeCompanyRow ? `you are working in ${activeCompanyRow.name}` : '',
     storefrontCompanyRow
       ? `${storefrontCompanyRow.name} is on the public Website Catalog`
       : 'no company is on the public Website Catalog',
@@ -395,7 +397,7 @@ export default function SettingsClient() {
                   <td>{c.gstin ? <span className="pn-chip">{c.gstin}</span> : <span className="text-muted">Not provided</span>}</td>
                   <td>{c.invoice_prefix ? <span className="pn-chip">{c.invoice_prefix}</span> : <span className="text-muted">—</span>}</td>
                   <td>{c.po_prefix ? <span className="pn-chip">{c.po_prefix}</span> : <span className="text-muted">—</span>}</td>
-                  <td>{c.is_active ? <span className="badge badge-success"><CheckCircle2 size={12} /> Active</span> : <span className="badge badge-muted">Inactive</span>}</td>
+                  <td>{c.id === activeCompany?.id ? <span className="badge badge-success"><CheckCircle2 size={12} /> You are in this one</span> : <span className="badge badge-muted">Not open</span>}</td>
                   <td>
                     {c.is_storefront ? (
                       <span className="badge badge-success"><Globe size={12} /> Live on /catalog</span>
@@ -405,13 +407,13 @@ export default function SettingsClient() {
                   </td>
                   <td>
                     <div className="flex items-center justify-end gap-2">
-                      {!c.is_active && <button className="btn btn-secondary btn-sm" onClick={() => handleSetActiveCompany(c.id)}>Set Active</button>}
+                      {c.id !== activeCompany?.id && <button className="btn btn-secondary btn-sm" onClick={() => handleSetActiveCompany(c.id)}>Switch to this</button>}
                       <button className="btn btn-ghost btn-sm" onClick={() => openEditCompany(c)}><Edit size={14} /> Edit</button>
                       <button
                         className="btn btn-ghost btn-sm"
                         style={{ color: 'var(--color-danger)' }}
-                        disabled={!!c.is_active || companies.length <= 1}
-                        title={c.is_active ? 'Set another company active before deleting this one' : companies.length <= 1 ? 'At least one company must remain' : undefined}
+                        disabled={c.id === activeCompany?.id || companies.length <= 1}
+                        title={c.id === activeCompany?.id ? 'Switch to another company before deleting this one' : companies.length <= 1 ? 'At least one company must remain' : undefined}
                         onClick={() => { setDeleteCompanyError(''); setDeleteCompanyCandidate(c); }}
                       >
                         <Trash2 size={14} /> Delete

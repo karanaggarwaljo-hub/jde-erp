@@ -1,6 +1,7 @@
 import { dbErrorMessage, getRow, isCompanyScoped, isKnownTable, updateRow, deleteRow, deleteCompany } from '@/lib/db';
 import { requireOwnCompanyRow } from '@/lib/auth/dal';
 import { refuseGenericWrite } from '@/lib/generic-write-guard';
+import { resolveRequestCompanyId } from '@/lib/company-context';
 import { describeRow, pick, recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
@@ -54,7 +55,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
   try {
     if (table === 'companies') {
       const before = await getRow('companies', decodedId);
-      const result = await deleteCompany(decodedId);
+      const result = await deleteCompany(decodedId, await resolveRequestCompanyId());
       if ('error' in result) {
         return Response.json({ error: result.error }, { status: 400 });
       }

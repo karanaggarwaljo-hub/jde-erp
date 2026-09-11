@@ -36,14 +36,19 @@ const CompanyContext = createContext<CompanyContextValue | null>(null);
 
 export function CompanyProvider({ children }: { children: ReactNode }) {
   const [companies, setCompanies] = useState<Company[]>([]);
+  // Which company THIS person is working in, as answered by the server for this browser. It is
+  // not read off the rows: `is_active` is a single installation-wide flag, so picking the active
+  // company from it meant every browser showed the same one and switching moved everybody.
+  const [activeCompany, setActiveCompany] = useState<Company | null>(null);
   const [loading, setLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const res = await fetchGetWithRetry('/api/companies/active');
-      const body = (await parseJsonOrThrow(res, 'Failed to load company data.')) as { companies?: Company[] } | undefined;
+      const body = (await parseJsonOrThrow(res, 'Failed to load company data.')) as { companies?: Company[]; active?: Company | null } | undefined;
       setCompanies(body?.companies ?? []);
+      setActiveCompany(body?.active ?? null);
       setConfigError(null);
     } catch (error) {
       // Mirrors useCompanyTable's reload(): a failed refresh shouldn't wipe out whatever company
@@ -114,8 +119,6 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
       await refresh();
     }
   }, [refresh]);
-
-  const activeCompany = companies.find((c) => c.is_active) ?? null;
 
   return (
     <CompanyContext.Provider value={{ companies, activeCompany, loading, configError, refresh, switchCompany, setStorefrontCompany, addCompany, updateCompany, removeCompany }}>

@@ -2,6 +2,31 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-12 — Switching company no longer switches it for everybody else
+
+Which company you are working in was a single setting shared by the whole installation. There was
+one row in the database marked "active", and every screen, on every computer, read that same row.
+
+That was fine while the ERP ran on one PC in the shop. It stopped being fine the day it moved to a
+web address with real logins for different people. If you switched company while someone else was
+halfway through entering an invoice, their next save went into the other company's books — and
+nothing on their screen changed to warn them.
+
+**Your company is now your own.** It is remembered per person and per browser. Switching moves
+what you see and nothing else. The Settings screen says so plainly: the company you are in reads
+"You are in this one", and the others offer "Switch to this" instead of "Set Active".
+
+Two smaller things that came with it:
+
+- **Staff only see companies they can actually open.** The switcher used to list every company in
+  the database to anyone signed in, including ones they would be refused if they picked them. An
+  owner still sees all of them.
+- **Deleting a company now asks you to switch away from it first**, rather than checking the old
+  shared flag. Same protection, but it now means what it says.
+
+Nothing about your data changed. The old shared setting is still there, used only as the starting
+point for someone who has never chosen, and by the nightly backup, which runs with nobody signed in.
+
 ## 2026-09-11 — A damaged return no longer goes back on the shelf to be sold again
 
 Fifth block of work from the outside audit. When a customer brought something back, it went

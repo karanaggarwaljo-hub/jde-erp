@@ -1,4 +1,5 @@
-import { dbErrorMessage, getActiveCompanyId, insertRows, isCompanyScoped, isKnownTable, listRows, insertRow } from '@/lib/db';
+import { dbErrorMessage, insertRows, isCompanyScoped, isKnownTable, listRows, insertRow } from '@/lib/db';
+import { resolveRequestCompanyId } from '@/lib/company-context';
 import { checkCompanyAccess, getCurrentUser } from '@/lib/auth/dal';
 import { refuseGenericWrite } from '@/lib/generic-write-guard';
 import { describeRow, recordAudit } from '@/lib/audit-log';
@@ -75,7 +76,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tab
     let verifiedCompanyId: string | undefined;
     if (isCompanyScoped(table)) {
       const claimed = typeof body?.company_id === 'string' && body.company_id ? body.company_id : undefined;
-      const companyId = claimed ?? (await getActiveCompanyId());
+      const companyId = claimed ?? (await resolveRequestCompanyId());
       if (!companyId) return Response.json({ error: 'company_id is required.' }, { status: 400 });
       const access = await checkCompanyAccess(companyId);
       if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
