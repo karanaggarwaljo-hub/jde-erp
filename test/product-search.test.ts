@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compatibilitySuggestions, matchesProductSearch } from '../lib/product-search';
+import { compatibilitySuggestions, matchesProductSearch, duplicatePartNumbers } from '../lib/product-search';
 
 /** The nine compatibility values actually on file, spellings and all. */
 const REAL_COMPATIBILITY = [
@@ -100,4 +100,44 @@ test('parts with nothing filled in contribute no suggestions', () => {
 test('the suggestion list is capped', () => {
   const products = Array.from({ length: 100 }, (_, i) => part({ compatibility: `Machine ${i}` }));
   assert.equal(compatibilitySuggestions(products, 30).length, 30);
+});
+
+test('a part number already in use is reported', () => {
+  // SP-258 really is on three different products in the live catalogue. Every further reuse makes
+  // a scan of it permanently unable to resolve to one part.
+  const catalogue = [
+    { id: 'a', part_number: 'SP-258', name: 'STEARING COUPLING 3DX' },
+    { id: 'b', part_number: 'SP-258', name: 'DIPPER ROD 3DX' },
+    { id: 'c', part_number: 'P00-12400', name: 'PIN (12400)' },
+  ];
+  const clashes = duplicatePartNumbers('SP-258', catalogue);
+  assert.equal(clashes.length, 2);
+  assert.deepEqual(clashes.map((p) => p.name), ['STEARING COUPLING 3DX', 'DIPPER ROD 3DX']);
+});
+
+test('a number is judged however its punctuation is written', () => {
+  // "sp258" and "SP-258" are one number to a scanner, so they must be one number here too.
+  const catalogue = [{ id: 'a', part_number: 'SP-258', name: 'STEARING COUPLING 3DX' }];
+  for (const typed of ['sp258', 'SP 258', 'sp-258']) {
+    assert.equal(duplicatePartNumbers(typed, catalogue).length, 1, `failed for "${typed}"`);
+  }
+});
+
+test('editing a part does not report that part against itself', () => {
+  const catalogue = [{ id: 'a', part_number: 'SP-258', name: 'STEARING COUPLING 3DX' }];
+  assert.deepEqual(duplicatePartNumbers('SP-258', catalogue, 'a'), []);
+});
+
+test('a free number and an empty box report nothing', () => {
+  const catalogue = [{ id: 'a', part_number: 'SP-258', name: 'STEARING COUPLING 3DX' }];
+  assert.deepEqual(duplicatePartNumbers('BRAND-NEW-1', catalogue), []);
+  assert.deepEqual(duplicatePartNumbers('', catalogue), []);
+  assert.deepEqual(duplicatePartNumbers('   ', catalogue), []);
+  // Punctuation alone squashes to nothing, and must not match every part with a blank number.
+  assert.deepEqual(duplicatePartNumbers('---', catalogue), []);
+});
+
+test('a part with no number on file is never a clash', () => {
+  const catalogue = [{ id: 'a', part_number: '', name: 'UNNUMBERED' }, { id: 'b', part_number: null, name: 'ALSO NONE' }];
+  assert.deepEqual(duplicatePartNumbers('SP-258', catalogue), []);
 });

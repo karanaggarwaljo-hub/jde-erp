@@ -6,6 +6,7 @@ import { useCompany } from './CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { receiveCustomerPayment, writeOffInvoiceBalance } from '@/lib/client-sales';
 import { invoiceBalanceDue, isInvoiceOpen } from '@/lib/invoice-balance';
+import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 
 type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
 type Invoice = { id: string; company_id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; };
@@ -170,7 +171,9 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
   return (
     <div className="modal-overlay">
       <div className="modal-box" style={{ maxWidth: '640px' }} role="dialog" aria-modal="true" aria-labelledby="receive-payment-title">
-        <form onSubmit={submit}>
+        {/* Enter while typing one invoice's share would otherwise record the payment with the
+            rest of the allocation still blank. */}
+        <form onSubmit={submit} onKeyDown={(event) => keepEnterInsideForm(event, balanced && !saving)}>
           <div className="modal-header">
             <div>
               <h3 id="receive-payment-title" className="modal-title flex items-center gap-2"><IndianRupee size={16} /> Receive Payment</h3>
@@ -277,6 +280,7 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
           </div>
 
           <div className="modal-footer">
+            <span className="text-muted text-sm" style={{ marginRight: 'auto' }}>{SAVE_SHORTCUT_HINT}</span>
             <button type="button" className="btn btn-secondary" disabled={saving} onClick={onClose}>Cancel</button>
             <button type="submit" className="btn btn-primary" disabled={saving || !balanced}>{saving ? 'Saving…' : 'Record Payment'}</button>
           </div>

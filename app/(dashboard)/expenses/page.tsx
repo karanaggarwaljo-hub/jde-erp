@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useState } from 'react';
+import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import { Plus, Sparkles, IndianRupee, PieChart, Receipt, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { createExpense } from '@/lib/client-expenses';
@@ -287,7 +288,9 @@ export default function ExpensesPage() {
               <h3 className="modal-title">Log Operational Expense</h3>
               <button className="btn btn-ghost btn-sm" onClick={() => setShowModal(false)}>✕</button>
             </div>
-            <form onSubmit={handleAdd}>
+            {/* The description field runs an AI category suggestion on blur; pressing Enter to
+                leave it used to save the expense instead of moving on. */}
+            <form onSubmit={handleAdd} onKeyDown={(event) => keepEnterInsideForm(event, !savingExpense)}>
               <div className="modal-body flex flex-col gap-4">
                 {expenseError && <div className="alert alert-danger" role="alert">{expenseError}</div>}
                 <div className="form-grid-2">
@@ -333,6 +336,7 @@ export default function ExpensesPage() {
               </div>
 
               <div className="modal-footer">
+                <span className="text-muted text-sm" style={{ marginRight: 'auto' }}>{SAVE_SHORTCUT_HINT}</span>
                 <button type="button" className="btn btn-secondary" disabled={savingExpense} onClick={() => setShowModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={savingExpense}>{savingExpense ? 'Saving…' : 'Save Expense Entry'}</button>
               </div>

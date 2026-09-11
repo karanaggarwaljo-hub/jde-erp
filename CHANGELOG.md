@@ -38,6 +38,35 @@ opening stock. If the second failed, you had a part whose stock count had no pur
 behind it, which made every cost and margin figure for it guesswork. It is now one save that
 either completes or does nothing.
 
+## 2026-09-11 — Enter no longer saves a half-typed form, anywhere in the ERP
+
+The sale and purchase screens got this last week. Every other form that records something still
+had the old behaviour, so this closes it everywhere at once.
+
+**What was happening.** A browser turns Enter in any text box into a click on the Save button.
+That is right on a login screen. On a form where you are filling in a customer, a part, an expense
+or a payment, it means that pressing Enter to move on saved whatever was filled in so far. On the
+Add Customer box — which opens in the middle of writing an invoice — Enter after typing the name
+saved a customer with no phone, no GSTIN and no address, attached to a real sale.
+
+**Now, on every form that records something:** Enter does nothing to the form, and **Ctrl+Enter
+saves**. Every one of those forms says so in its footer. Enter on a button still clicks it, and
+Enter in an address box still makes a new line, because those already worked.
+
+The forms covered are the sales invoice, quotation, purchase, add customer, add supplier, add or
+edit part, record expense, and receive customer payment. Login, password reset and the public
+enquiry form are deliberately left alone — there, Enter meaning "done" is the whole point.
+
+**One extra thing on the Add Part screen.** It now warns when the part number you are typing is
+already on another part:
+
+> **SP-258** is already on 2 other parts: STEARING COUPLING 3DX, DIPPER ROD 3DX. Saving this makes
+> 3 parts share one number, so scanning it can no longer tell them apart — every sale and purchase
+> will stop and ask which one was meant.
+
+This is not hypothetical. SP-258 is on three different products in your catalogue right now, which
+is exactly why scanning it makes the sale and purchase screens stop and ask. The warning does not
+block you, and it ignores punctuation, so "sp258" and "SP-258" are recognised as the same number.
 ## 2026-09-11 — Settings now records who changed what, instead of saying it doesn't
 
 Third block of work from the outside audit. The Settings screen has had an "Audit Logs" tab since

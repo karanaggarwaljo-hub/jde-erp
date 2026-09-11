@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useMemo, useState, type KeyboardEvent } from 'react';
+import { FormEvent, useMemo, useState } from 'react';
 import {
   Plus,
   Printer,
@@ -30,6 +30,7 @@ import { saveSalesInvoice, deleteSalesInvoice, deleteCustomerPayment, writeOffIn
 import { realisedProfit, type InvoiceCost } from '@/lib/invoice-profit';
 import { invoiceBalanceDue, invoiceWrittenOff, wasSettledShort } from '@/lib/invoice-balance';
 import { addCustomLine, addPartToLines, buildLastSoldIndex, partLabel } from '@/lib/sale-entry';
+import { keepEnterInsideForm } from '@/lib/form-keys';
 import { createSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem } from '@/lib/client-sales-returns';
 import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } from '@/lib/client-quotations';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -471,15 +472,6 @@ export default function SalesPage() {
   // a quantity, not two identical rows the customer has to read past.
   const addQuotePart = (part: PartOption) => setQuoteLines((current) => addPartToLines(current, part).lines);
   const addQuoteCustomLine = (description: string) => setQuoteLines((current) => addCustomLine(current, description).lines);
-
-  // Enter inside either document form must add a part, never submit. Without this a barcode
-  // scanner's trailing Enter saves the document with whatever happens to be on it so far.
-  const swallowEnter = (event: KeyboardEvent<HTMLFormElement>) => {
-    if (event.key !== 'Enter') return;
-    const target = event.target as HTMLElement;
-    if (target.tagName === 'BUTTON' || target.tagName === 'TEXTAREA') return;
-    event.preventDefault();
-  };
 
   // Saves the quotation on screen, either parked as a draft or confirmed as final. Deliberately
   // one path for both, exactly like the invoice side: a draft and a confirmed quote are stored
@@ -1492,7 +1484,7 @@ export default function SalesPage() {
         <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/quotation/${viewingQuotation.id}`, '_blank')}><Printer size={14} /> Print</button><button type="button" className="btn btn-primary" onClick={() => setViewingQuotation(null)}>Close</button></div>
       </div></div>}
 
-      {showQuotationModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="quotation-modal-title"><form onSubmit={saveQuote} onKeyDown={swallowEnter}>
+      {showQuotationModal && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '880px' }} role="dialog" aria-modal="true" aria-labelledby="quotation-modal-title"><form onSubmit={saveQuote} onKeyDown={(event) => keepEnterInsideForm(event, quoteLines.length > 0 && !savingQuotation && !savingQuoteDraft)}>
         <div className="modal-header"><div><h3 id="quotation-modal-title" className="modal-title">{editingQuotation ? `Edit ${editingQuotation.id}` : 'Create Quotation'}</h3><p className="text-muted text-sm">Saving a quotation never changes inventory or customer balances.</p></div><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => { setShowQuotationModal(false); setEditingQuotation(null); }}>✕</button></div>
         <div className="modal-body flex flex-col gap-4">
           {quotationError && <div className="alert alert-danger" role="alert">{quotationError}</div>}
