@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
+import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 
 const emptyForm = { name: '', phone: '', email: '', gstin: '', address: '', type: 'retail' };
 
@@ -32,7 +33,7 @@ export default function AddCustomerModal({ onClose, onSave, onCreated }: AddCust
   };
 
   return (
-    <div className="modal-overlay"><div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="add-customer-modal-title"><form onSubmit={handleSubmit}>
+    <div className="modal-overlay"><div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="add-customer-modal-title"><form onSubmit={handleSubmit} onKeyDown={(event) => keepEnterInsideForm(event, !saving)}>
       <div className="modal-header"><h3 id="add-customer-modal-title" className="modal-title">Add Customer Account</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={onClose}>✕</button></div>
       <div className="modal-body flex flex-col gap-4">
         {error && <div className="alert alert-danger" role="alert">{error}</div>}
@@ -47,7 +48,7 @@ export default function AddCustomerModal({ onClose, onSave, onCreated }: AddCust
         </div>
         <div className="form-group"><label className="form-label">Billing Address</label><textarea className="form-input" rows={2} placeholder="Full postal address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></div>
       </div>
-      <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Customer'}</button></div>
+      <div className="modal-footer"><span className="text-muted text-sm" style={{ marginRight: 'auto' }}>{SAVE_SHORTCUT_HINT}</span><button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Customer'}</button></div>
     </form></div></div>
   );
 }

@@ -20,11 +20,12 @@
  * as a prop and the page owns them. The only state here is what belongs to the act of typing.
  */
 
-import { useState, type Dispatch, type FormEvent, type KeyboardEvent, type SetStateAction } from 'react';
+import { useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import { Plus, Minus, X, AlertTriangle, Keyboard } from 'lucide-react';
 import { money, paise } from '@/lib/money';
 import { lineDiscountPercent, lineGross, lineNet, type Totals } from '@/lib/invoice-totals';
 import { addCustomLine, addPartToLines, lineWarnings, type LastSold } from '@/lib/sale-entry';
+import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import PartPicker from '@/components/PartPicker';
 import {
   DRAFT_STATUS,
@@ -111,24 +112,9 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
     setLastAdded(description);
   };
 
-  /**
-   * Enter must never submit this form implicitly. A barcode scanner ends every scan with one, and
-   * a browser turns Enter in any text input into a click on the submit button — which is how a
-   * scan could save an invoice with one line on it. Enter is swallowed here; Ctrl+Enter is the
-   * deliberate save, and requestSubmit runs the same path and the same validation as the button.
-   */
-  const onFormKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
-    if (event.key !== 'Enter') return;
-    const target = event.target as HTMLElement;
-    // Buttons and textareas keep their normal behaviour — Enter on a focused button is a click.
-    if (target.tagName === 'BUTTON' || target.tagName === 'TEXTAREA') return;
-    event.preventDefault();
-    if ((event.ctrlKey || event.metaKey) && canSubmit) event.currentTarget.requestSubmit();
-  };
-
   return (
     <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '920px' }} role="dialog" aria-modal="true" aria-labelledby="invoice-modal-title">
-      <form onSubmit={saveInvoice} onKeyDown={onFormKeyDown}>
+      <form onSubmit={saveInvoice} onKeyDown={(event) => keepEnterInsideForm(event, canSubmit)}>
         <div className="modal-header">
           <div>
             <h3 id="invoice-modal-title" className="modal-title">{editingInvoice ? `Edit ${editingInvoice.id}` : 'Create Sales Invoice'}</h3>
@@ -355,7 +341,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
             <div className="pager">
               <span className="pager-info flex items-center gap-2">
                 <Keyboard size={13} aria-hidden="true" />
-                Enter adds the highlighted part · ↑↓ to choose · Ctrl+Enter saves
+                Enter adds the highlighted part · ↑↓ to choose · {SAVE_SHORTCUT_HINT}
               </span>
               <div className="pager-info">
                 <strong>{lines.length}</strong> {lines.length === 1 ? 'line' : 'lines'}

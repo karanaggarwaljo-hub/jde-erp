@@ -16,6 +16,7 @@ import type { Dispatch, FormEvent, RefObject, SetStateAction } from 'react';
 import { Plus, Sparkles } from 'lucide-react';
 import { money, wholeMoney } from '@/lib/money';
 import { compatibilitySuggestions } from '@/lib/product-search';
+import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import type { PartDraftSummary, PartFormData, Product } from '@/lib/inventory-types';
 
 export type PartFormModalProps = {
@@ -25,6 +26,9 @@ export type PartFormModalProps = {
   products: Product[];
   categoryOptions: string[];
   possibleDuplicate: Product | undefined;
+  /** Other parts already carrying the number being typed. Usually empty; more than one is how a
+   *  catalogue ends up with three different products under SP-258. */
+  duplicatePartNumbers: Product[];
   draft: PartDraftSummary;
   draftMargin: number | null;
   saveError: string;
@@ -45,7 +49,7 @@ export type PartFormModalProps = {
 
 export default function PartFormModal(props: PartFormModalProps) {
   const {
-    formData, setFormData, editingProduct, products, categoryOptions, possibleDuplicate,
+    formData, setFormData, editingProduct, products, categoryOptions, possibleDuplicate, duplicatePartNumbers,
     draft, draftMargin, saveError, savingProduct, savedThisSession,
     suggesting, suggestFailed, suggestPartDetails,
     addAnotherRef, handleSave, setShowModal, brandChipColor,
@@ -65,7 +69,9 @@ export default function PartFormModal(props: PartFormModalProps) {
               </div>
               <button className="btn btn-ghost btn-sm" disabled={savingProduct} onClick={() => setShowModal(false)}>✕</button>
             </div>
-            <form onSubmit={handleSave}>
+            {/* Sixteen fields, and "Save & add another" keeps it open for the next part —
+                Enter partway through used to save whatever had been filled in so far. */}
+            <form onSubmit={handleSave} onKeyDown={(event) => keepEnterInsideForm(event, !savingProduct)}>
               {/* Form on the left, a live picture of the part on the right — the same split the
                   invoice dialog uses, so what you are about to create is visible while you type
                   rather than only after saving. */}
@@ -75,6 +81,12 @@ export default function PartFormModal(props: PartFormModalProps) {
                 {possibleDuplicate && (
                   <div className="alert alert-warning" role="alert">
                     A part named &quot;{possibleDuplicate.name}&quot; already exists ({possibleDuplicate.part_number}, {possibleDuplicate.current_stock} in stock) — this will add a separate, second entry rather than update it. If you meant to edit the existing one, cancel and use its Edit button instead.
+                  </div>
+                )}
+                {duplicatePartNumbers.length > 0 && (
+                  <div className="alert alert-warning" role="alert">
+                    <strong>{formData.part_number.trim()}</strong> is already on {duplicatePartNumbers.length === 1 ? 'another part' : `${duplicatePartNumbers.length} other parts`}:{' '}
+                    {duplicatePartNumbers.map((p) => p.name).join(', ')}. Saving this makes {duplicatePartNumbers.length === 1 ? 'two' : `${duplicatePartNumbers.length + 1}`} parts share one number, so scanning it can no longer tell them apart — every sale and purchase will stop and ask which one was meant. Give this one its own number if you can.
                   </div>
                 )}
                 {/* ── What the part is ───────────────────────────────────────── */}
@@ -280,7 +292,8 @@ export default function PartFormModal(props: PartFormModalProps) {
                     ? `${savedThisSession} ${savedThisSession === 1 ? 'part' : 'parts'} added so far`
                     : ''}
                 </span>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
+                  <span className="text-muted text-sm">{SAVE_SHORTCUT_HINT}</span>
                   <button type="button" className="btn btn-secondary" disabled={savingProduct} onClick={() => setShowModal(false)}>
                     {savedThisSession > 0 ? 'Done' : 'Cancel'}
                   </button>

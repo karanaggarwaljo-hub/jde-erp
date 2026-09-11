@@ -4,6 +4,7 @@ import { Fragment, FormEvent, useMemo, useState } from 'react';
 import { Plus, Search, Phone, Mail, Sparkles, IndianRupee, Truck, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
 
 type Supplier = { id: string; company_id: string; name: string; category: string; phone: string; email: string; gstin: string; terms: number; balance: number };
@@ -381,14 +382,14 @@ export default function SuppliersPage() {
       )}
     </div>
 
-    {showModal && <div className="modal-overlay"><div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="supplier-modal-title"><form onSubmit={saveSupplier}>
+    {showModal && <div className="modal-overlay"><div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="supplier-modal-title"><form onSubmit={saveSupplier} onKeyDown={(event) => keepEnterInsideForm(event, !savingSupplier)}>
       <div className="modal-header"><h3 id="supplier-modal-title" className="modal-title">Add Supplier Profile</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setShowModal(false)}>✕</button></div>
       <div className="modal-body flex flex-col gap-4"><div className="form-group"><label className="form-label">Supplier Company Name *</label><input className="form-input" required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></div>
         <div className="form-grid-2"><div className="form-group"><label className="form-label">Category</label><select className="form-input form-select" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{categoryOptions.map((c) => <option key={c}>{c}</option>)}</select></div><div className="form-group"><label className="form-label">Credit Terms (Days)</label><input type="number" min="0" className="form-input" value={form.terms} onChange={(event) => setForm({ ...form, terms: Number(event.target.value) })} /></div></div>
         <div className="form-grid-2"><div className="form-group"><label className="form-label">Phone</label><input className="form-input" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></div><div className="form-group"><label className="form-label">Email</label><input type="email" className="form-input" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></div></div>
         <div className="form-group"><label className="form-label">GSTIN</label><input className="form-input" value={form.gstin} onChange={(event) => setForm({ ...form, gstin: event.target.value })} /></div>
         {supplierError && <p className="form-error" role="alert">{supplierError}</p>}
-      </div><div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingSupplier} onClick={() => setShowModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={savingSupplier}>{savingSupplier ? 'Saving…' : 'Save Supplier'}</button></div>
+      </div><div className="modal-footer"><span className="text-muted text-sm" style={{ marginRight: 'auto' }}>{SAVE_SHORTCUT_HINT}</span><button type="button" className="btn btn-secondary" disabled={savingSupplier} onClick={() => setShowModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={savingSupplier}>{savingSupplier ? 'Saving…' : 'Save Supplier'}</button></div>
     </form></div></div>}
 
     {paymentSupplier && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="payment-modal-title"><form onSubmit={recordPayment}>
