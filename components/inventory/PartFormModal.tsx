@@ -140,8 +140,18 @@ export default function PartFormModal(props: PartFormModalProps) {
                       survives an edit here instead of being blanked. */}
                   <div className="form-grid-2">
                     <div className="form-group">
-                      <label className="form-label">Part Number *</label>
-                      <input className="form-input" required value={formData.part_number} onChange={e => setFormData({ ...formData, part_number: e.target.value })} />
+                      <label className="form-label">Part Number</label>
+                      {/* Not required. Left blank, the database gives this part the next free
+                          internal code for the company — which is the only place that can see
+                          every code already in use. Typing a real supplier code is always better
+                          than a generated one, so the field stays first and empty rather than
+                          pre-filled with a stand-in somebody might keep by accident. */}
+                      <input
+                        className="form-input"
+                        placeholder="The supplier's code, or leave blank for one of ours"
+                        value={formData.part_number}
+                        onChange={e => setFormData({ ...formData, part_number: e.target.value })}
+                      />
                     </div>
                     <div className="form-group">
                       <label className="form-label">HSN Code</label>

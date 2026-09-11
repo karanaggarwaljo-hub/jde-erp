@@ -2,6 +2,7 @@ import { dbErrorMessage, getActiveCompanyId, insertRows, isCompanyScoped, isKnow
 import { checkCompanyAccess, getCurrentUser } from '@/lib/auth/dal';
 import { refuseGenericWrite } from '@/lib/generic-write-guard';
 import { describeRow, recordAudit } from '@/lib/audit-log';
+import { describeCodeClashes, findCodeClashes } from '@/lib/import-part-codes';
 import { TABLES } from '@/lib/db/schema';
 import { createClient } from '@/lib/supabase/server';
 import { after } from 'next/server';
@@ -95,6 +96,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ tab
         return Response.json({ error: 'Import up to 1,000 parts at a time.' }, { status: 413 });
       }
       const scopedRows = (rows as Record<string, unknown>[]).map((row) => ({ ...row, company_id: verifiedCompanyId }));
+
+      // A part number names one part, and the database now refuses a second with the same one. A
+      // whole spreadsheet would otherwise fail on a constraint message nobody can act on, so the
+      // clashes are found first and named — which codes, and which rows of the file they are on.
+      const existing = (await listRows('products', verifiedCompanyId)) as unknown as Array<{ part_number?: string }>;
+      const clashes = findCodeClashes(scopedRows, existing.map((part) => part.part_number ?? ''));
+      if (clashes.length > 0) {
+        return Response.json({ error: describeCodeClashes(clashes) }, { status: 422 });
+      }
+
       const created = await insertRows('products', scopedRows);
       await recordAudit({
         companyId: verifiedCompanyId ?? '', action: 'products.import', entity: 'products',
