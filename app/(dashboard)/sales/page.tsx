@@ -158,6 +158,9 @@ export default function SalesPage() {
   const [returnableItems, setReturnableItems] = useState<ReturnableInvoiceItem[]>([]);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [returnReason, setReturnReason] = useState('');
+  // What condition each returned line came back in. Absent means resellable, which is what the
+  // great majority of returns are and what the database assumes when a caller says nothing.
+  const [returnConditions, setReturnConditions] = useState<Record<string, 'resellable' | 'damaged'>>({});
   const [returnError, setReturnError] = useState('');
   const [loadingReturn, setLoadingReturn] = useState(false);
   const [savingReturn, setSavingReturn] = useState(false);
@@ -351,7 +354,11 @@ export default function SalesPage() {
 
   // Only whole units that are still returnable count towards a credit note.
   const selectedReturnItems = returnableItems
-    .map((item) => ({ invoice_item_id: item.invoice_item_id, qty: Math.min(item.returnable_qty, Math.max(0, Number(returnQuantities[item.invoice_item_id] ?? 0))) }))
+    .map((item) => ({
+      invoice_item_id: item.invoice_item_id,
+      qty: Math.min(item.returnable_qty, Math.max(0, Number(returnQuantities[item.invoice_item_id] ?? 0))),
+      condition: returnConditions[item.invoice_item_id] ?? ('resellable' as const),
+    }))
     .filter((item) => Number.isInteger(item.qty) && item.qty > 0);
   /** What one unit of this line was actually charged at — its list price less whatever discount
    *  the line carried. The credit note is built from this, so the preview must be too. */
@@ -937,6 +944,7 @@ export default function SalesPage() {
     setReturnReason('');
     setReturnableItems([]);
     setReturnQuantities({});
+    setReturnConditions({});
     try {
       const items = await getReturnableInvoiceItems(activeCompany.id, invoice.id);
       if (items.length === 0 || items.every((item) => Number(item.returnable_qty) <= 0)) {
@@ -965,7 +973,19 @@ export default function SalesPage() {
       setReturnError('Add a brief reason for this return.');
       return;
     }
-    if (!window.confirm(`Create a credit note for ${selectedReturnItems.reduce((sum, item) => sum + item.qty, 0)} returned unit(s)? Stock and the customer balance will be updated together.`)) return;
+    // Says what will actually happen to each half, because they now differ: damaged goods are
+    // credited in full but never go back on the shelf, and that is not something to discover after
+    // the fact from a stock figure that did not move.
+    const totalUnits = selectedReturnItems.reduce((sum, item) => sum + item.qty, 0);
+    const damagedUnits = selectedReturnItems.filter((item) => item.condition === 'damaged').reduce((sum, item) => sum + item.qty, 0);
+    const stockLine = damagedUnits === 0
+      ? 'All of it goes back into stock, and the customer balance is updated with it.'
+      : damagedUnits === totalUnits
+        ? 'None of it goes back into stock, because it is all marked damaged. The customer is still credited in full.'
+        : `${totalUnits - damagedUnits} of them go back into stock; the ${damagedUnits} marked damaged do not. The customer is credited for all ${totalUnits}.`;
+    if (!window.confirm(`Create a credit note for ${totalUnits} returned unit${totalUnits === 1 ? '' : 's'}?
+
+${stockLine}`)) return;
 
     setSavingReturn(true);
     setReturnError('');
@@ -979,7 +999,10 @@ export default function SalesPage() {
         items: selectedReturnItems,
       });
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
-      setFeedback(`${result.id} created for ${returnCandidate.id} — ₹${Number(result.credit_total).toLocaleString()} credited.`);
+      setFeedback(
+        `${result.id} created for ${returnCandidate.id} — ₹${Number(result.credit_total).toLocaleString()} credited`
+        + (damagedUnits > 0 ? `, with ${damagedUnits} damaged unit${damagedUnits === 1 ? '' : 's'} kept out of stock.` : '.')
+      );
       setReturnCandidate(null);
     } catch (error) {
       setReturnError(error instanceof Error ? error.message : 'The return was not saved. No stock or customer balance was changed.');
@@ -1689,13 +1712,32 @@ export default function SalesPage() {
             <div><small className="text-muted">Original invoice total</small><div style={{ fontWeight: 600 }}>₹{Number(returnCandidate.total).toLocaleString()}</div></div>
           </div>
           <div className="table-wrap"><table className="erp-table">
-            <thead><tr><th>Item</th><th className="text-right">Sold</th><th className="text-right">Previously returned</th><th className="text-right">Available</th><th className="text-right">Return now</th></tr></thead>
+            <thead><tr><th>Item</th><th className="text-right">Sold</th><th className="text-right">Previously returned</th><th className="text-right">Available</th><th className="text-right">Return now</th><th>Condition</th></tr></thead>
             <tbody>{returnableItems.map((item) => <tr key={item.invoice_item_id}>
               <td><strong>{item.name}</strong><div className="text-muted text-sm">{item.part_number} · ₹{returnNetRate(item).toLocaleString(undefined, { maximumFractionDigits: 2 })} each{Math.abs(returnNetRate(item) - Number(item.unit_price)) > 0.005 ? ` (discounted from ₹${Number(item.unit_price).toLocaleString()})` : ''}</div></td>
               <td className="text-right">{Number(item.sold_qty)}</td>
               <td className="text-right">{Number(item.returned_qty)}</td>
               <td className="text-right" style={{ fontWeight: 700 }}>{Number(item.returnable_qty)}</td>
               <td className="text-right"><input aria-label={`Return quantity for ${item.name}`} type="number" min="0" max={item.returnable_qty} step="1" className="form-input" style={{ width: '88px', marginLeft: 'auto' }} value={returnQuantities[item.invoice_item_id] ?? 0} disabled={savingReturn} onChange={(event) => updateReturnQuantity(item, event.target.value)} /></td>
+              {/* Only offered once something is actually coming back on this line — an empty row
+                  has no condition to record. Damaged still credits the customer in full; it only
+                  stops the goods going back on the shelf to be sold to somebody else. */}
+              <td>
+                <select
+                  aria-label={`Condition of returned ${item.name}`}
+                  className="form-input form-select"
+                  style={{ width: '150px' }}
+                  value={returnConditions[item.invoice_item_id] ?? 'resellable'}
+                  disabled={savingReturn || !((returnQuantities[item.invoice_item_id] ?? 0) > 0)}
+                  onChange={(event) => setReturnConditions((current) => ({
+                    ...current,
+                    [item.invoice_item_id]: event.target.value === 'damaged' ? 'damaged' : 'resellable',
+                  }))}
+                >
+                  <option value="resellable">Can be sold again</option>
+                  <option value="damaged">Damaged — do not restock</option>
+                </select>
+              </td>
             </tr>)}</tbody>
           </table></div>
           <div className="form-group"><label className="form-label" htmlFor="sales-return-reason">Reason for return</label><input id="sales-return-reason" className="form-input" maxLength={500} placeholder="For example: damaged, wrong part, customer changed mind" value={returnReason} disabled={savingReturn} onChange={(event) => setReturnReason(event.target.value)} /></div>
