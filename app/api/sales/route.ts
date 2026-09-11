@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireOwner } from '@/lib/auth/dal';
 import { isBusinessRuleError } from '@/lib/db';
+import { money, recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -82,6 +83,13 @@ export async function POST(request: Request) {
       p_items: items,
     }).single();
     if (error) throw error;
+    const created = data as { id?: string; credit_total?: number };
+    const units = items.reduce((total, line) => total + line.qty, 0);
+    await recordAudit({
+      companyId, action: 'sales.return', entity: 'sales_returns', entityId: created.id ?? null,
+      summary: `Took back ${units} item${units === 1 ? '' : 's'} against ${invoiceId}, crediting ${money(Number(created.credit_total ?? 0))}`,
+      details: { invoice_id: invoiceId, reason, lines: items, credit_total: created.credit_total },
+    });
     return Response.json(data, { status: 201 });
   } catch (error) {
     console.error('POST /api/sales (return) failed:', error);

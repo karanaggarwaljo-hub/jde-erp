@@ -1,6 +1,8 @@
 import { dbErrorMessage, getActiveCompanyId, insertRows, isCompanyScoped, isKnownTable, listRows, insertRow } from '@/lib/db';
 import { checkCompanyAccess, getCurrentUser } from '@/lib/auth/dal';
 import { refuseGenericWrite } from '@/lib/generic-write-guard';
+import { describeRow, recordAudit } from '@/lib/audit-log';
+import { TABLES } from '@/lib/db/schema';
 import { createClient } from '@/lib/supabase/server';
 import { after } from 'next/server';
 import {
@@ -94,10 +96,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ tab
       }
       const scopedRows = (rows as Record<string, unknown>[]).map((row) => ({ ...row, company_id: verifiedCompanyId }));
       const created = await insertRows('products', scopedRows);
+      await recordAudit({
+        companyId: verifiedCompanyId ?? '', action: 'products.import', entity: 'products',
+        summary: `Imported ${created.length} part${created.length === 1 ? '' : 's'} from a file`,
+        details: { imported: created.length },
+      });
       return Response.json({ imported: created.length }, { status: 201 });
     }
 
     const row = await insertRow(table, verifiedCompanyId ? { ...body, company_id: verifiedCompanyId } : body);
+    await recordAudit({
+      companyId: verifiedCompanyId ?? String(row.id ?? ''), action: `${table}.create`, entity: table,
+      entityId: String(row[TABLES[table].primaryKey] ?? ''),
+      summary: `Added ${describeRow(table, row)}`,
+    });
     if (table === 'companies' && typeof row.id === 'string') {
       const aggregateId = row.id;
       const initiator = companyInitiator;

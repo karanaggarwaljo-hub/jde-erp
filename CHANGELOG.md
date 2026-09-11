@@ -2,6 +2,34 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-11 — Settings now records who changed what, instead of saying it doesn't
+
+Third block of work from the outside audit. The Settings screen has had an "Audit Logs" tab since
+the app was built, and all it ever said was that nothing was being recorded. Nothing was. If an
+amount, a stock count or a price changed, there was no way to find out who changed it, when, or
+what it had been before.
+
+**Every change to money, stock or records is now written down as it happens**, with the name and
+email of the person signed in when it happened. That covers: creating, editing and deleting an
+invoice; receiving and reversing a customer payment; settling an invoice short; recording a
+purchase, marking it received, and paying it; paying a supplier; taking goods back from a customer
+or sending them back to a supplier; logging an expense; adding, editing or deleting a part,
+customer, supplier, staff account or company; importing parts from a file; and any direct
+adjustment of a stock count or a balance.
+
+Where a figure changed, the entry says what it was as well as what it became — editing an invoice
+records the old total next to the new one. The Audit Logs tab shows all of it, newest first.
+
+Three things worth knowing:
+
+- **It starts from today.** Nothing that happened before 11 September 2026 was ever recorded, so
+  the log begins empty and fills up from your next sale onwards.
+- **Nothing can edit it.** Entries are written by the server as each change is saved. No screen in
+  the app can change or delete one, including the Audit Logs tab itself.
+- **Only the owner can read it.** It records what everybody did, so it is not something every
+  staff login should be able to open. It is also included in the nightly backup, so a restore
+  brings the evidence back with the data.
+
 ## 2026-09-10 — Reports was telling you the wrong profit, and a tax nobody had charged
 
 Second block of work from the outside audit. Both of these are on the Reports screen, and both

@@ -1,5 +1,6 @@
 import { dbErrorMessage, isBusinessRuleError, receiveCustomerPayment, deleteCustomerPayment, type PaymentAllocationInput } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
+import { money, recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +43,11 @@ export async function POST(request: Request) {
       note: typeof note === 'string' ? note.trim().slice(0, 500) : '',
       allocations,
     });
+    await recordAudit({
+      companyId, action: 'payment.receive', entity: 'payments_received', entityId: result.payment_id,
+      summary: `Received ${money(result.applied_total)} from a customer across ${allocations.length} invoice${allocations.length === 1 ? '' : 's'}`,
+      details: { customer_id: customerId, amount: result.applied_total, date, invoices: allocations.map((line) => line.invoiceId) },
+    });
     return Response.json(result, { status: 201 });
   } catch (error) {
     console.error('POST /api/sales/payments failed:', error);
@@ -68,6 +74,10 @@ export async function DELETE(request: Request) {
 
   try {
     await deleteCustomerPayment(companyId, paymentId);
+    await recordAudit({
+      companyId, action: 'payment.delete', entity: 'payments_received', entityId: paymentId,
+      summary: `Reversed customer payment ${paymentId}, putting its invoices back as they were`,
+    });
     return Response.json({ ok: true });
   } catch (error) {
     console.error('DELETE /api/sales/payments failed:', error);

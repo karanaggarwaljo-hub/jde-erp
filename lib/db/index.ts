@@ -250,6 +250,15 @@ export async function deleteRow(table: TableName, id: string): Promise<void> {
  *  to say about itself. Used to check a caller's own company against a row they're trying to
  *  read/write by id, for the many endpoints (generic table PATCH/DELETE, stock adjust, FIFO)
  *  that take only a row id and never carried a company_id of their own to check against. */
+/** One row by its primary key, or undefined. Used where a route has to know what a record looked
+ *  like before it changes it — an audit entry that cannot say what a total WAS is half an entry. */
+export async function getRow(table: TableName, id: string): Promise<Record<string, unknown> | undefined> {
+  const { data, error } = await getClient()
+    .from(supaTable(table)).select('*').eq(TABLES[table].primaryKey, id).maybeSingle();
+  if (error) throw error;
+  return (data as Record<string, unknown> | null) ?? undefined;
+}
+
 export async function getRowCompanyId(table: TableName, id: string): Promise<string | undefined> {
   const def = TABLES[table];
   if (!def.companyScoped) return undefined;
@@ -445,6 +454,26 @@ export async function receiveCustomerPayment(input: ReceiveCustomerPaymentInput)
     .single();
   if (error) throw error;
   return data as { payment_id: string; applied_total: number };
+}
+
+/** Writes one audit entry. Deliberately a plain insert with no business logic of its own: the
+ *  caller has already decided what happened and how to describe it. See lib/audit-log.ts for why
+ *  this runs after the action rather than inside its transaction. */
+export async function insertAuditRow(row: Record<string, unknown>): Promise<void> {
+  const { error } = await getClient().from('jde_audit_log').insert(row);
+  if (error) throw error;
+}
+
+/** The most recent audit entries for one company, newest first. */
+export async function listAuditRows(companyId: string, limit: number): Promise<Array<Record<string, unknown>>> {
+  const { data, error } = await getClient()
+    .from('jde_audit_log')
+    .select('*')
+    .eq('company_id', companyId)
+    .order('at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return (data as Array<Record<string, unknown>>) ?? [];
 }
 
 export type PaySupplierInput = {

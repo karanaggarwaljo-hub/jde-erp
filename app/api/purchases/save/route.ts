@@ -1,5 +1,6 @@
 import { dbErrorMessage, isBusinessRuleError, savePurchase } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
+import { money, recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,11 @@ export async function POST(request: Request) {
       paid: Number(paid) || 0,
       status: String(status ?? 'received'),
       sourceFileHash: sourceFileHash ?? null,
+    });
+    await recordAudit({
+      companyId, action: 'purchase.create', entity: 'purchase_orders', entityId: String(po.id ?? ''),
+      summary: `Recorded purchase ${String(po.id ?? '')} from ${String(supplierName ?? '')} at ${money(Number(po.total ?? 0))}`,
+      details: { total: po.total, paid: po.paid, status: po.status, lines: Array.isArray(items) ? items.length : 0 },
     });
     return Response.json(po, { status: 201 });
   } catch (error) {
