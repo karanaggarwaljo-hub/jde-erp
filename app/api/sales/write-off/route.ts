@@ -1,5 +1,6 @@
 import { dbErrorMessage, isBusinessRuleError, writeOffInvoiceBalance } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
+import { money, recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +41,11 @@ export async function POST(request: Request) {
       amount,
       reason: typeof reason === 'string' ? reason : '',
       date: typeof date === 'string' ? date : '',
+    });
+    await recordAudit({
+      companyId, action: 'invoice.writeOff', entity: 'invoices', entityId: invoiceId,
+      summary: `Wrote off ${money(result.written_off)} still owing on ${invoiceId}`,
+      details: { written_off: result.written_off, remaining_due: result.remaining_due, reason: typeof reason === 'string' ? reason : '' },
     });
     return Response.json(result, { status: 201 });
   } catch (error) {

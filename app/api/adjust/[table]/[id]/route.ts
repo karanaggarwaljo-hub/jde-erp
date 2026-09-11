@@ -1,5 +1,6 @@
 import { adjustRow, dbErrorMessage, type AdjustableTable } from '@/lib/db';
 import { requireOwnCompanyRow } from '@/lib/auth/dal';
+import { recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +26,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ tab
   if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
   try {
     const row = await adjustRow(table, decodedId, delta);
+    // The one route that moves a stock count or a balance with no document behind it, which is
+    // exactly why it needs recording: afterwards there is nothing else to say it happened.
+    const label = typeof row.name === 'string' && row.name ? row.name : decodedId;
+    const noun = table === 'products' ? 'stock of' : 'balance for';
+    await recordAudit({
+      companyId: typeof row.company_id === 'string' ? row.company_id : '', action: `${table}.adjust`, entity: table, entityId: decodedId,
+      summary: `Adjusted ${noun} ${label} by ${delta > 0 ? '+' : ''}${delta}`,
+      details: { delta, after: table === 'products' ? row.current_stock : row.balance },
+    });
     return Response.json(row);
   } catch (error) {
     console.error(`POST /api/adjust/${table}/${id} failed:`, error);

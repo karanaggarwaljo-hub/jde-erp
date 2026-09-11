@@ -1,5 +1,6 @@
 import { dbErrorMessage, isBusinessRuleError, deleteSalesInvoice } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
+import { recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,10 @@ export async function POST(request: Request) {
 
   try {
     await deleteSalesInvoice(companyId, invoiceId, customerId ?? null);
+    await recordAudit({
+      companyId, action: 'invoice.delete', entity: 'invoices', entityId: invoiceId,
+      summary: `Deleted invoice ${invoiceId}`,
+    });
     return Response.json({ ok: true });
   } catch (error) {
     console.error('POST /api/sales/delete-invoice failed:', error);

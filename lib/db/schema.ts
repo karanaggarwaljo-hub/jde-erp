@@ -72,6 +72,10 @@ export const BACKUP_ONLY_TABLES: Record<string, TableSchema> = {
   // happened and covered them — the same reason the customer side keeps payments_received.
   supplier_payments: { primaryKey: 'id', companyScoped: true },
   supplier_payment_allocations: { primaryKey: 'id', companyScoped: true },
+  // Who changed what, and when. Deliberately not in TABLES: the log records what everyone did, so
+  // it is read through its own owner-only route rather than published to every logged-in browser.
+  // A restore without it loses the evidence of everything that happened before the restore.
+  audit_log: { primaryKey: 'id', companyScoped: true },
 };
 
 /**

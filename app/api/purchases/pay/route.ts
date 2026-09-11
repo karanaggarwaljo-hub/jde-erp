@@ -1,5 +1,6 @@
 import { dbErrorMessage, isBusinessRuleError, recordPurchasePayment } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
+import { money, recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +32,11 @@ export async function POST(request: Request) {
 
   try {
     const po = await recordPurchasePayment({ companyId, poId, amount });
+    await recordAudit({
+      companyId, action: 'purchase.payment', entity: 'purchase_orders', entityId: poId,
+      summary: `Paid ${money(amount)} against purchase ${poId}`,
+      details: { amount, paid_after: po.paid, total: po.total },
+    });
     return Response.json(po);
   } catch (error) {
     console.error('POST /api/purchases/pay failed:', error);

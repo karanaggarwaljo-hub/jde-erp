@@ -8,10 +8,10 @@ import {
   Globe,
   Lock,
   Plus,
-  ScrollText,
   Trash2,
   UserPlus,
 } from 'lucide-react';
+import AuditLogPanel from '@/components/AuditLogPanel';
 import BackupsPanel from '@/components/BackupsPanel';
 import { useCompany, type Company } from '@/components/CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -435,7 +435,7 @@ export default function SettingsClient() {
       </div>
     )}
 
-    {activeTab === 'audit' && <div className="card empty-state"><ScrollText size={24} color="var(--ink-4)" /><p className="empty-state-title">Audit logging isn&apos;t wired up yet</p><p className="empty-state-desc">User actions aren&apos;t being recorded to a log at this time, so there&apos;s nothing real to show here.</p></div>}
+    {activeTab === 'audit' && <AuditLogPanel />}
 
     {activeTab === 'backups' && <BackupsPanel />}
 

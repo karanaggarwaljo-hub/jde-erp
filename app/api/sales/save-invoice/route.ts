@@ -1,5 +1,6 @@
-import { dbErrorMessage, saveSalesInvoice } from '@/lib/db';
+import { dbErrorMessage, getRow, saveSalesInvoice } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
+import { money, recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,11 @@ export async function POST(request: Request) {
   }
 
   try {
+    // Read before writing, on an edit only. An edit is where money changes silently — a total or
+    // an amount received quietly becoming a different number — so the audit entry has to be able
+    // to say what it was, not only what it became.
+    const before = isEdit ? await getRow('invoices', String(invoiceId)) : null;
+
     const invoice = await saveSalesInvoice({
       companyId,
       invoiceId: isEdit ? invoiceId : null,
@@ -47,6 +53,21 @@ export async function POST(request: Request) {
       gstPercent: Number(gstPercent) || 0,
       gstAmount: Number(gstAmount) || 0,
       gstMode: gstMode === 'inclusive' ? 'inclusive' : 'exclusive',
+    });
+    const savedId = String(invoice.id);
+    const newTotal = Number(invoice.total ?? 0);
+    await recordAudit({
+      companyId,
+      action: isEdit ? 'invoice.edit' : 'invoice.create',
+      entity: 'invoices',
+      entityId: savedId,
+      summary: isEdit
+        ? `Edited ${savedId}${before && Number(before.total ?? 0) !== newTotal ? `, changing its total from ${money(Number(before.total ?? 0))} to ${money(newTotal)}` : ''}`
+        : `Created ${savedId} for ${String(customerLabel ?? '')} at ${money(newTotal)}`,
+      details: {
+        ...(before ? { before: { total: before.total, paid: before.paid, status: before.status, items: before.items } } : {}),
+        after: { total: invoice.total, paid: invoice.paid, status: invoice.status, items: invoice.items },
+      },
     });
     return Response.json(invoice, { status: 201 });
   } catch (error) {

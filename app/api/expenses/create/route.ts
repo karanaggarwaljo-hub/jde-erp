@@ -1,5 +1,6 @@
 import { dbErrorMessage, createExpense } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
+import { money, recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,11 @@ export async function POST(request: Request) {
       date: String(date ?? ''),
       paidBy: String(paidBy ?? ''),
       mode: String(mode ?? ''),
+    });
+    await recordAudit({
+      companyId, action: 'expense.create', entity: 'expenses', entityId: typeof expense.id === 'string' ? expense.id : null,
+      summary: `Logged an expense of ${money(numericAmount)}${category ? ` for ${String(category)}` : ''}`,
+      details: { amount: numericAmount, category: String(category ?? ''), date: String(date ?? '') },
     });
     return Response.json(expense, { status: 201 });
   } catch (error) {

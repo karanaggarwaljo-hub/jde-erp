@@ -1,5 +1,6 @@
 import { dbErrorMessage, isBusinessRuleError, paySupplier } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
+import { money, recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +35,11 @@ export async function POST(request: Request) {
       amount,
       note: typeof note === 'string' ? note.trim().slice(0, 500) : '',
       reference: reference.slice(0, 100),
+    });
+    await recordAudit({
+      companyId, action: 'supplier.payment', entity: 'supplier_payments', entityId: result.payment_id,
+      summary: `Paid ${money(result.applied_total)} to a supplier across ${result.orders_paid} purchase order${result.orders_paid === 1 ? '' : 's'}`,
+      details: { supplier_id: supplierId, amount: result.applied_total, orders_paid: result.orders_paid, date },
     });
     return Response.json(result, { status: 201 });
   } catch (error) {

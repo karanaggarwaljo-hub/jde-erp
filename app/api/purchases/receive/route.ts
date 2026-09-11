@@ -1,6 +1,7 @@
 import { dbErrorMessage, isBusinessRuleError, receivePurchaseStock } from '@/lib/db';
 import { createClient as createServiceClient } from '@supabase/supabase-js';
 import { getCurrentUser, checkCompanyAccess } from '@/lib/auth/dal';
+import { recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,6 +55,13 @@ async function recordPurchaseReturn(body: Record<string, unknown>) {
       p_note: typeof note === 'string' ? note.trim() : '',
     }).single();
     if (error) throw error;
+    const units = lines.reduce((total, line) => total + line.qty, 0);
+    await recordAudit({
+      companyId, action: 'purchase.return', entity: 'purchase_returns',
+      entityId: (data as { id?: string } | null)?.id ?? null,
+      summary: `Sent ${units} item${units === 1 ? '' : 's'} back to a supplier against purchase ${poId}`,
+      details: { po_id: poId, supplier_id: supplierId, lines },
+    });
     return Response.json(data, { status: 201 });
   } catch (error) {
     console.error('POST /api/purchases/receive (return) failed:', error);
@@ -120,6 +128,11 @@ export async function POST(request: Request) {
       supplierName: String(supplierName ?? ''),
       receivedAt: String(receivedAt ?? ''),
       items,
+    });
+    await recordAudit({
+      companyId, action: 'purchase.receive', entity: 'purchase_orders', entityId: poId,
+      summary: `Marked purchase ${poId} received, putting ${Array.isArray(items) ? items.length : 0} line${Array.isArray(items) && items.length === 1 ? '' : 's'} into stock`,
+      details: { received_at: String(receivedAt ?? ''), lines: Array.isArray(items) ? items.length : 0 },
     });
     return Response.json(po);
   } catch (error) {
