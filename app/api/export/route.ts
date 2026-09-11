@@ -2,12 +2,13 @@ import { listRows } from '@/lib/db';
 import { resolveRequestCompanyId } from '@/lib/company-context';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
 import { AGE_BUCKETS, agingRows } from '@/lib/aging';
+import { filterToPeriod, formatPeriod, isAllTime, type Period } from '@/lib/report-period';
 import { stockValueLookup, totalStockValue, type StockLayerLike } from '@/lib/stock-value';
 import { costOfSales, grossProfit, gstPosition, type PeriodConsumption, type PeriodInvoiceItem } from '@/lib/period-accounts';
 
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; gst_amount: number | null; };
 type PurchaseOrder = { total: number; supplier: string; date: string; paid: number; status: string; gst_amount: number | null };
-type Expense = { amount: number };
+type Expense = { amount: number; date: string };
 type Product = { id: string; category: string; current_stock: number; cost_price: number; sale_price: number };
 type Customer = { balance: number };
 type Supplier = { balance: number };
@@ -16,11 +17,13 @@ function toCsv(rows: Array<Array<string | number>>): string {
   return rows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\n');
 }
 
-async function buildExport(type: string): Promise<{ filename: string; rows: Array<Array<string | number>> }> {
+async function buildExport(type: string, period: Period): Promise<{ filename: string; rows: Array<Array<string | number>> }> {
   const companyId = await resolveRequestCompanyId();
-  const invoices = (await listRows('invoices', companyId)) as unknown as Invoice[];
-  const purchaseOrders = (await listRows('purchase_orders', companyId)) as unknown as PurchaseOrder[];
-  const expenses = (await listRows('expenses', companyId)) as unknown as Expense[];
+  // Scoped to the same period the Reports screen is showing, so a downloaded file and the screen
+  // it was downloaded from can never report different totals for the same question.
+  const invoices = filterToPeriod((await listRows('invoices', companyId)) as unknown as Invoice[], (row) => row.date, period);
+  const purchaseOrders = filterToPeriod((await listRows('purchase_orders', companyId)) as unknown as PurchaseOrder[], (row) => row.date, period);
+  const expenses = filterToPeriod((await listRows('expenses', companyId)) as unknown as Expense[], (row) => row.date, period);
   const products = (await listRows('products', companyId)) as unknown as Product[];
   const customers = (await listRows('customers', companyId)) as unknown as Customer[];
   const suppliers = (await listRows('suppliers', companyId)) as unknown as Supplier[];
@@ -147,13 +150,29 @@ async function buildExport(type: string): Promise<{ filename: string; rows: Arra
 }
 
 export async function GET(request: Request) {
-  const type = new URL(request.url).searchParams.get('type') ?? 'pnl';
-  const report = await buildExport(type);
-  const csv = toCsv(report.rows);
+  const params = new URL(request.url).searchParams;
+  const type = params.get('type') ?? 'pnl';
+  // The Reports screen sends the period it is showing. A direct hit with neither covers everything,
+  // which is what this route did before the screen had a period at all.
+  const isDay = (value: string | null): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const from = params.get('from');
+  const to = params.get('to');
+  const period: Period = { start: isDay(from) ? from : null, end: isDay(to) ? to : null };
+  const report = await buildExport(type, period);
+  // The period goes in the filename and in the first row: a CSV that lands in somebody's Downloads
+  // folder has to carry what it covers, or two exports of the same report are indistinguishable.
+  const rows: Array<Array<string | number>> = [
+    [`Period: ${formatPeriod(period)}`],
+    [],
+    ...report.rows,
+  ];
+  const suffix = isAllTime(period) ? '' : `-${period.start ?? 'start'}-to-${period.end ?? 'today'}`;
+  const filename = report.filename.replace(/\.csv$/, `${suffix}.csv`);
+  const csv = toCsv(rows);
   return new Response(`﻿${csv}`, {
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${report.filename}"`,
+      'Content-Disposition': `attachment; filename="${filename}"`,
       'Cache-Control': 'no-store',
     },
   });

@@ -2,6 +2,35 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-12 — Reports can now be asked about a month, not just about everything
+
+Reports added up every record ever entered. There was no way to ask what August made, or whether
+September was better. The screen was honest about it — it said "Records on file: 1 Aug – 3 Sep" —
+but honest is not the same as useful when the question is how last month went.
+
+**There is now a period along the top: This month, Last month, This quarter, This financial year,
+All time, or your own dates.** Profit & Loss, Sales Summary and GST all follow it.
+
+**Quarters and financial years are the Indian ones**, April to March. "This quarter" in September
+means July to September, which is what a GST return means by it.
+
+**Each headline figure now says how it compares with the period before.** Revenue, cost of goods
+sold, gross profit and net result each carry a line like "+18% on the 30 days before". The
+comparison is always the same length of time immediately before, so a 31-day month is never
+compared against a 28-day one and the difference called a trend. Where there is nothing honest to
+compare against, it says nothing rather than inventing a percentage.
+
+**Two tabs deliberately ignore the period, and now say so.** Stock Valuation is what is on the
+shelf today, and Aging is what is owed today however far back it was billed. Filtering either by
+report period would quietly drop older debt from the very figure meant to surface it.
+
+**A period with nothing in it says so plainly**, and tells you what dates you do have records for,
+so an empty month is never mistaken for a broken screen.
+
+**The exported CSV covers the same period as the screen**, says the period in its first row, and
+carries the dates in its filename. Before this, the file always covered everything, so a download
+taken from a month's report quietly disagreed with the report it came from.
+
 ## 2026-09-12 — Switching company no longer switches it for everybody else
 
 Which company you are working in was a single setting shared by the whole installation. There was

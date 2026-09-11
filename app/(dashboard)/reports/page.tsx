@@ -2,20 +2,24 @@
 
 import { useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { Download, Printer, TrendingUp, TrendingDown, ShoppingBag, Wallet, Receipt, IndianRupee, AlertCircle, PackageCheck, Percent } from 'lucide-react';
+import { CalendarRange, Download, Printer, TrendingUp, TrendingDown, ShoppingBag, Wallet, Receipt, IndianRupee, AlertCircle, PackageCheck, Percent } from 'lucide-react';
 import { printCurrentPage } from '@/lib/client-export';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import AIReportSummary from '@/components/AIReportSummary';
 import { AGE_BUCKETS, agingFrom, type AgeBucket } from '@/lib/aging';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
 import { stockValueLookup, type StockLayerLike } from '@/lib/stock-value';
+import {
+  PRESET_LABELS, daysInPeriod, filterToPeriod, financialYearLabel, formatPeriod, isAllTime,
+  periodFor, previousPeriod, todayIso, type Period, type PeriodPreset,
+} from '@/lib/report-period';
 import { costOfSales, grossProfit, gstPosition, type GstPosition, type PeriodConsumption, type PeriodInvoiceItem } from '@/lib/period-accounts';
 
 type ReportType = 'pnl' | 'sales' | 'stock' | 'gst' | 'aging';
 
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; gst_amount: number | null; };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string; gst_amount: number | null };
-type Expense = { amount: number };
+type Expense = { amount: number; date: string };
 type Product = { id: string; category: string; current_stock: number; cost_price: number; sale_price: number };
 
 const BUCKET_COLORS: Record<AgeBucket, string> = { '0-30': 'var(--color-success)', '31-60': 'var(--chart-amber)', '61-90': 'var(--chart-orange)', '90+': 'var(--color-danger)' };
@@ -33,23 +37,7 @@ function formatDay(iso: string) {
   return `${day} ${MONTHS[month - 1]} ${year}`;
 }
 
-/** Indian financial year (April–March) containing an ISO date: "2026-08-19" -> "2026-27". */
-function financialYear(iso: string) {
-  const [year, month] = iso.split('-').map(Number);
-  if (!year || !month) return null;
-  const start = month >= 4 ? year : year - 1;
-  return `${start}-${String(start + 1).slice(2)}`;
-}
-
-/** Inclusive day count between two ISO dates, fixed to UTC so it can't drift by a day. */
-function daysBetween(startIso: string, endIso: string) {
-  const start = Date.parse(`${startIso}T00:00:00Z`);
-  const end = Date.parse(`${endIso}T00:00:00Z`);
-  if (Number.isNaN(start) || Number.isNaN(end)) return null;
-  return Math.floor((end - start) / 86400000) + 1;
-}
-
-function Kpi({ title, value, icon: Icon, color, bg }: { title: string; value: string; icon: LucideIcon; color: string; bg: string }) {
+function Kpi({ title, value, icon: Icon, color, bg, note }: { title: string; value: string; icon: LucideIcon; color: string; bg: string; note?: string | null }) {
   return (
     <div className="kpi-card" style={{ '--kpi-color': color, '--kpi-color-bg': bg } as React.CSSProperties}>
       <div className="flex justify-between items-center">
@@ -57,6 +45,8 @@ function Kpi({ title, value, icon: Icon, color, bg }: { title: string; value: st
         <div className="kpi-icon-wrap"><Icon size={18} /></div>
       </div>
       <div className="kpi-value">{value}</div>
+      {/* Only ever rendered when there is a real like-for-like period to compare against. */}
+      {note && <div className="kpi-change text-muted" style={{ fontSize: '12px' }}>{note}</div>}
     </div>
   );
 }
@@ -136,6 +126,11 @@ function GstLiabilityPanel({ title, subtitle, position }: { title: string; subti
 export default function ReportsPage() {
   const [reportType, setReportType] = useState<ReportType>('pnl');
   const [feedback, setFeedback] = useState('');
+  // Which stretch of time the figures below cover. Read once from the browser's own clock, so
+  // "this month" means the month the person is standing in, not the month it is in UTC.
+  const [preset, setPreset] = useState<PeriodPreset>('all');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
 
   const { rows: invoices, activeCompany, error: invoicesError } = useCompanyTable<Invoice>('invoices');
   const { rows: purchaseOrders, error: purchaseOrdersError } = useCompanyTable<PurchaseOrder>('purchase_orders');
@@ -153,21 +148,31 @@ export default function ReportsPage() {
   const dataError = invoicesError ?? purchaseOrdersError ?? expensesError ?? productsError ?? stockLayersError
     ?? invoiceItemsError ?? consumptionsError;
 
-  const totalRevenue = invoices.reduce((t, i) => t + Number(i.total || 0), 0);
-  const totalPurchaseSpend = purchaseOrders.reduce((t, p) => t + Number(p.total || 0), 0);
-  const totalExpenses = expenses.reduce((t, e) => t + Number(e.amount || 0), 0);
+  // The period, and everything dated that falls inside it. Every trading figure below is summed
+  // from these filtered lists, never from the full tables — the screen used to total every record
+  // ever recorded, so there was no way to ask what a month made.
+  const period: Period = preset === 'custom'
+    ? { start: customStart || null, end: customEnd || null }
+    : periodFor(preset, todayIso(new Date()));
+  const periodInvoices = filterToPeriod(invoices, (row) => row.date, period);
+  const periodPurchaseOrders = filterToPeriod(purchaseOrders, (row) => row.date, period);
+  const periodExpenses = filterToPeriod(expenses, (row) => row.date, period);
+
+  const totalRevenue = periodInvoices.reduce((t, i) => t + Number(i.total || 0), 0);
+  const totalPurchaseSpend = periodPurchaseOrders.reduce((t, p) => t + Number(p.total || 0), 0);
+  const totalExpenses = periodExpenses.reduce((t, e) => t + Number(e.amount || 0), 0);
   // Sales less what those sales cost, from the batches the goods actually came out of. This used
   // to be sales less everything bought in the same window, which made buying stock look like a
   // loss and selling old stock look like pure profit. See lib/period-accounts.ts.
-  const cost = costOfSales(invoices, invoiceItems, consumptions);
+  const cost = costOfSales(periodInvoices, invoiceItems, consumptions);
   const profit = grossProfit(invoices, cost);
   // Null when any line has no recorded cost: no figure at all beats a flattering one.
   const grossMargin = profit?.grossProfit ?? null;
   const netResult = grossMargin === null ? null : grossMargin - totalExpenses;
 
-  const salesRows = [...invoices].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 15);
-  const avgOrderValue = invoices.length > 0 ? totalRevenue / invoices.length : 0;
-  const salesOutstandingDue = invoices.reduce((t, i) => t + invoiceBalanceDue(i), 0);
+  const salesRows = [...periodInvoices].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 15);
+  const avgOrderValue = periodInvoices.length > 0 ? totalRevenue / periodInvoices.length : 0;
+  const salesOutstandingDue = periodInvoices.reduce((t, i) => t + invoiceBalanceDue(i), 0);
 
   // Valued by the one shared rule, each batch at what that batch cost (lib/stock-value.ts). This
   // screen used to multiply by the cost_price field while Inventory and the Dashboard used the
@@ -193,8 +198,11 @@ export default function ReportsPage() {
   // Only what the invoices and purchase orders themselves record. This used to divide every total
   // by 1.18 and call the difference tax collected, whichever rate the documents actually carried —
   // and on this company's records, not one of them carries any GST at all.
-  const gst = gstPosition(invoices, purchaseOrders);
+  const gst = gstPosition(periodInvoices, periodPurchaseOrders);
 
+  // Deliberately NOT scoped to the period, and labelled as such on screen. What a customer owes is
+  // owed today whatever window the rest of the page is showing; filtering it by report period would
+  // quietly drop older debt from a figure whose whole purpose is to surface exactly that.
   const today = new Date();
   const receivablesAging = agingFrom(
     invoices.map((inv) => ({ key: inv.customer, date: inv.date, due: invoiceBalanceDue(inv) })),
@@ -207,43 +215,84 @@ export default function ReportsPage() {
   const totalReceivablesDue = AGE_BUCKETS.reduce((t, b) => t + receivablesAging.totals[b], 0);
   const totalPayablesDue = AGE_BUCKETS.reduce((t, b) => t + payablesAging.totals[b], 0);
 
-  // The period this page covers is not a setting — it is simply the span of the dated records
-  // that are loaded. Anything that can't be read off those records is left off the screen.
+  // How the chosen period reads at the top of the page.
+  const periodRange = formatPeriod(period);
+  const fyLabel = financialYearLabel(period);
+  const periodDays = daysInPeriod(period);
+  const periodLine = [
+    periodRange,
+    fyLabel ? `FY ${fyLabel}` : null,
+    periodDays ? `${periodDays} day${periodDays === 1 ? '' : 's'}` : null,
+    `${periodInvoices.length} sale${periodInvoices.length === 1 ? '' : 's'}`,
+  ].filter(Boolean).join(' · ');
+  const statementScope = [activeCompany?.name, periodRange].filter(Boolean).join(' · ');
+  // The span of everything on file, so an empty period can say whether there is anything at all.
   const datedRecords = [...invoices, ...purchaseOrders].map((row) => row.date).filter((date) => typeof date === 'string' && ISO_DATE.test(date)).sort();
-  const periodStart = datedRecords[0] ?? null;
-  const periodEnd = datedRecords[datedRecords.length - 1] ?? null;
-  const periodRange = periodStart && periodEnd ? `${formatDay(periodStart)} – ${formatDay(periodEnd)}` : null;
-  const fyStart = periodStart ? financialYear(periodStart) : null;
-  const fyEnd = periodEnd ? financialYear(periodEnd) : null;
-  const fyLabel = fyStart && fyEnd ? (fyStart === fyEnd ? fyStart : `${fyStart} to ${fyEnd}`) : null;
-  const periodDays = periodStart && periodEnd ? daysBetween(periodStart, periodEnd) : null;
-  const periodLine = periodRange
-    ? [`Records on file: ${periodRange}`, fyLabel ? `FY ${fyLabel}` : null, periodDays ? `${periodDays} day${periodDays === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ')
-    : 'No dated sales or purchase records on file yet';
-  const statementScope = [activeCompany?.name, periodRange ?? 'all records on file'].filter(Boolean).join(' · ');
+  const earliestRecord = datedRecords[0] ?? null;
+  const latestRecord = datedRecords[datedRecords.length - 1] ?? null;
+
+  // The same length of time immediately before, so a month can be read against the month before it
+  // rather than against nothing. Equal-length on purpose: comparing 31 days with 28 and calling the
+  // difference a trend is how a report misleads. Null for All time, which has no "before".
+  const comparison = previousPeriod(period);
+  const priorInvoices = comparison ? filterToPeriod(invoices, (row) => row.date, comparison) : [];
+  const priorRevenue = comparison ? priorInvoices.reduce((t, i) => t + Number(i.total || 0), 0) : null;
+  const priorExpenses = comparison
+    ? filterToPeriod(expenses, (row) => row.date, comparison).reduce((t, e) => t + Number(e.amount || 0), 0)
+    : null;
+  const priorCost = comparison ? costOfSales(priorInvoices, invoiceItems, consumptions) : null;
+  const priorProfit = comparison && priorCost ? grossProfit(priorInvoices, priorCost) : null;
+  const priorNetResult = priorProfit?.grossProfit !== undefined && priorProfit?.grossProfit !== null && priorExpenses !== null
+    ? priorProfit.grossProfit - priorExpenses
+    : null;
+
+  /** "+18% on the 30 days before" — or null when there is nothing honest to compare against. A
+   *  change from zero is left unsaid rather than reported as an infinite rise. */
+  const changeOn = (now: number | null, before: number | null): string | null => {
+    if (comparison === null || now === null || before === null || before === 0) return null;
+    const pct = Math.round(((now - before) / Math.abs(before)) * 100);
+    return `${pct >= 0 ? '+' : ''}${pct}% on the ${periodDays} days before`;
+  };
 
   /** Share of total sales revenue. Left as an em dash when there is no revenue to divide by. */
   const pctOfRevenue = (value: number) => (totalRevenue > 0 ? `${((value / totalRevenue) * 100).toFixed(1)}%` : '—');
+
+  // What the AI is told about scope. Without it, a summary of the Stock tab can describe stock as
+  // though it were a figure for the chosen month, and a summary of a month can be written as though
+  // it covered the whole year.
+  const periodFacts = {
+    period_covers: periodRange,
+    period_is_all_records: isAllTime(period),
+    compared_against: comparison ? formatPeriod(comparison) : null,
+  };
+  const asOfTodayFacts = {
+    ...periodFacts,
+    // Deliberately loud: these two tabs do not follow the period at all.
+    figures_are_as_of_today_not_for_the_period: true,
+  };
 
   const summaryData: Record<ReportType, unknown> = {
     // The AI is handed exactly what is on screen, including what is NOT known. It used to be told a
     // gross margin derived from purchases and described it back as healthy trading.
     pnl: {
+      ...periodFacts,
+      previous_period_revenue: priorRevenue,
       total_revenue: totalRevenue, total_purchase_spend: totalPurchaseSpend, total_expenses: totalExpenses,
       cost_of_goods_sold: cost.complete ? cost.cost : null,
       gross_profit: grossMargin, net_result: netResult,
       cost_is_incomplete: !cost.complete,
       lines_without_recorded_cost: cost.linesWithoutCost,
     },
-    sales: { invoice_count: invoices.length, recent_invoices: salesRows.slice(0, 10).map((r) => ({ id: r.id, customer: r.customer, date: r.date, total: r.total, status: r.status })) },
-    stock: { total_stock_units: totalStockUnits, by_category: stockRows.map(([category, row]) => ({ category, ...row })) },
+    sales: { ...periodFacts, invoice_count: periodInvoices.length, recent_invoices: salesRows.slice(0, 10).map((r) => ({ id: r.id, customer: r.customer, date: r.date, total: r.total, status: r.status })) },
+    stock: { ...asOfTodayFacts, total_stock_units: totalStockUnits, by_category: stockRows.map(([category, row]) => ({ category, ...row })) },
     gst: {
+      ...periodFacts,
       output_gst: gst.outputTax, input_tax_credit: gst.inputTax, net_gst_payable: gst.netPayable,
       invoices_recording_tax: gst.invoicesWithTax, invoice_count: gst.invoiceCount,
       purchases_recording_tax: gst.purchasesWithTax, purchase_count: gst.purchaseCount,
       no_tax_recorded_anywhere: !gst.anyTaxRecorded,
     },
-    aging: { total_receivables_due: totalReceivablesDue, total_payables_due: totalPayablesDue, receivables_by_bucket: receivablesAging.totals, payables_by_bucket: payablesAging.totals },
+    aging: { ...asOfTodayFacts, total_receivables_due: totalReceivablesDue, total_payables_due: totalPayablesDue, receivables_by_bucket: receivablesAging.totals, payables_by_bucket: payablesAging.totals },
   };
 
   return <div>
@@ -253,13 +302,66 @@ export default function ReportsPage() {
         <h1 className="page-title">Reports</h1>
         <p className="page-subtitle">{periodLine}</p>
       </div>
-      <div className="flex gap-2"><button className="btn btn-secondary" onClick={printCurrentPage}><Printer size={16} /> Print Report</button><a className="btn btn-primary" href={`/api/export?type=${reportType}`} download onClick={() => setFeedback('Report export started.')}><Download size={16} /> Export CSV</a></div>
+      <div className="flex gap-2"><button className="btn btn-secondary" onClick={printCurrentPage}><Printer size={16} /> Print Report</button><a className="btn btn-primary" href={`/api/export?type=${reportType}${period.start ? `&from=${period.start}` : ''}${period.end ? `&to=${period.end}` : ''}`} download onClick={() => setFeedback('Report export started.')}><Download size={16} /> Export CSV</a></div>
     </div>
     {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
     {dataError && (
       <div className="alert alert-danger mb-4" role="alert">
         Some of this company&apos;s records could not be loaded, so every figure below is of only
         part of the data. Reload before relying on, printing or exporting any of it — {dataError}
+      </div>
+    )}
+
+    {/* Which period every trading figure below covers. Stock Valuation and Aging deliberately
+        ignore it — both answer "right now", and each says so on its own panel. */}
+    <div className="flex items-center gap-2 mb-4" style={{ flexWrap: 'wrap' }}>
+      <CalendarRange size={16} color="var(--text-muted)" />
+      <div className="tabs report-tabs">
+        {(['this-month', 'last-month', 'this-quarter', 'this-fy', 'all'] as PeriodPreset[]).map((option) => (
+          <button
+            key={option}
+            type="button"
+            aria-pressed={preset === option}
+            className={`tab ${preset === option ? 'active' : ''}`}
+            onClick={() => setPreset(option)}
+          >
+            {PRESET_LABELS[option]}
+          </button>
+        ))}
+        <button
+          type="button"
+          aria-pressed={preset === 'custom'}
+          className={`tab ${preset === 'custom' ? 'active' : ''}`}
+          onClick={() => {
+            // Seed the boxes from whatever period is on screen, so switching to Custom starts
+            // from what is already being shown rather than emptying the page.
+            const showing = periodFor(preset === 'custom' ? 'all' : preset, todayIso(new Date()));
+            if (!customStart && showing.start) setCustomStart(showing.start);
+            if (!customEnd && showing.end) setCustomEnd(showing.end);
+            setPreset('custom');
+          }}
+        >
+          {PRESET_LABELS.custom}
+        </button>
+      </div>
+      {preset === 'custom' && (
+        <div className="flex items-center gap-2">
+          <label className="text-muted text-sm" htmlFor="period-from">From</label>
+          <input id="period-from" type="date" className="form-input" style={{ width: 'auto' }} value={customStart} onChange={(event) => setCustomStart(event.target.value)} />
+          <label className="text-muted text-sm" htmlFor="period-to">To</label>
+          <input id="period-to" type="date" className="form-input" style={{ width: 'auto' }} value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} />
+        </div>
+      )}
+    </div>
+
+    {/* An empty period is a real answer, not a broken screen — but it should never be mistaken for
+        a quiet month when the truth is that nothing has been recorded yet at all. */}
+    {periodInvoices.length === 0 && periodPurchaseOrders.length === 0 && !isAllTime(period) && (
+      <div className="alert alert-info mb-4" role="status">
+        No sales or purchases were recorded between {periodRange}.
+        {earliestRecord && latestRecord
+          ? ` Records on file run from ${formatDay(earliestRecord)} to ${formatDay(latestRecord)}.`
+          : ' Nothing has been recorded for this company yet.'}
       </div>
     )}
 
@@ -277,10 +379,10 @@ export default function ReportsPage() {
         <button type="button" className="alert-action" onClick={() => setReportType('aging')}>Open aging report</button>
       </div>}
       <div className="kpi-grid">
-        <Kpi title="Total Revenue" value={`₹${totalRevenue.toLocaleString()}`} icon={TrendingUp} color="var(--color-success)" bg="var(--color-success-bg)" />
-        <Kpi title="Cost of goods sold" value={cost.complete ? `₹${cost.cost.toLocaleString()}` : 'Not known'} icon={ShoppingBag} color="var(--chart-blue)" bg="var(--color-info-bg)" />
-        <Kpi title="Gross Profit" value={grossMargin === null ? 'Not known' : `₹${grossMargin.toLocaleString()}`} icon={Wallet} color="var(--chart-amber)" bg="var(--amber-tint)" />
-        <Kpi title="Net Result" value={netResult === null ? 'Not known' : `₹${netResult.toLocaleString()}`} icon={(netResult ?? 0) >= 0 ? TrendingUp : TrendingDown} color={(netResult ?? 0) >= 0 ? 'var(--color-success)' : 'var(--color-danger)'} bg={(netResult ?? 0) >= 0 ? 'var(--color-success-bg)' : 'var(--color-danger-bg)'} />
+        <Kpi title="Total Revenue" value={`₹${totalRevenue.toLocaleString()}`} note={changeOn(totalRevenue, priorRevenue)} icon={TrendingUp} color="var(--color-success)" bg="var(--color-success-bg)" />
+        <Kpi title="Cost of goods sold" value={cost.complete ? `₹${cost.cost.toLocaleString()}` : 'Not known'} note={cost.complete && priorCost?.complete ? changeOn(cost.cost, priorCost.cost) : null} icon={ShoppingBag} color="var(--chart-blue)" bg="var(--color-info-bg)" />
+        <Kpi title="Gross Profit" value={grossMargin === null ? 'Not known' : `₹${grossMargin.toLocaleString()}`} note={changeOn(grossMargin, priorProfit?.grossProfit ?? null)} icon={Wallet} color="var(--chart-amber)" bg="var(--amber-tint)" />
+        <Kpi title="Net Result" value={netResult === null ? 'Not known' : `₹${netResult.toLocaleString()}`} note={changeOn(netResult, priorNetResult)} icon={(netResult ?? 0) >= 0 ? TrendingUp : TrendingDown} color={(netResult ?? 0) >= 0 ? 'var(--color-success)' : 'var(--color-danger)'} bg={(netResult ?? 0) >= 0 ? 'var(--color-success-bg)' : 'var(--color-danger-bg)'} />
       </div>
 
       <div className="dashboard-split">
@@ -300,7 +402,7 @@ export default function ReportsPage() {
             <tbody>
               <tr><th colSpan={3} scope="colgroup">Revenue</th></tr>
               <tr>
-                <td><span className="flex flex-col"><span>Total sales revenue</span><small className="text-muted">{invoices.length} invoice{invoices.length === 1 ? '' : 's'} on file</small></span></td>
+                <td><span className="flex flex-col"><span>Total sales revenue</span><small className="text-muted">{periodInvoices.length} invoice{periodInvoices.length === 1 ? '' : 's'} in this period</small></span></td>
                 <td className="text-right font-semibold text-success">₹{totalRevenue.toLocaleString()}</td>
                 <td className="text-right text-muted">{pctOfRevenue(totalRevenue)}</td>
               </tr>
@@ -319,7 +421,7 @@ export default function ReportsPage() {
 
               <tr><th colSpan={3} scope="colgroup">Less: operating expenses</th></tr>
               <tr>
-                <td><span className="flex flex-col"><span>Operating expenses</span><small className="text-muted">{expenses.length} expense entr{expenses.length === 1 ? 'y' : 'ies'} on file</small></span></td>
+                <td><span className="flex flex-col"><span>Operating expenses</span><small className="text-muted">{periodExpenses.length} expense entr{periodExpenses.length === 1 ? 'y' : 'ies'} in this period</small></span></td>
                 <td className="text-right">- ₹{totalExpenses.toLocaleString()}</td>
                 <td className="text-right text-muted">{pctOfRevenue(totalExpenses)}</td>
               </tr>
@@ -359,24 +461,25 @@ export default function ReportsPage() {
 
     {reportType === 'sales' && <>
       <div className="kpi-grid">
-        <Kpi title="Total Invoices" value={`${invoices.length}`} icon={Receipt} color="var(--chart-blue)" bg="var(--color-info-bg)" />
+        <Kpi title="Total Invoices" value={`${periodInvoices.length}`} icon={Receipt} color="var(--chart-blue)" bg="var(--color-info-bg)" />
         <Kpi title="Total Revenue" value={`₹${totalRevenue.toLocaleString()}`} icon={TrendingUp} color="var(--color-success)" bg="var(--color-success-bg)" />
         <Kpi title="Avg Order Value" value={`₹${avgOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={IndianRupee} color="var(--chart-amber)" bg="var(--amber-tint)" />
         <Kpi title="Outstanding Due" value={`₹${salesOutstandingDue.toLocaleString()}`} icon={AlertCircle} color="var(--color-danger)" bg="var(--color-danger-bg)" />
       </div>
       <div className="table-wrap">
         <div className="tbl-toolbar">
-          <div className="tbl-toolbar-title"><strong>Recent invoices</strong><small>Newest first{periodRange ? ` · records on file cover ${periodRange}` : ''}</small></div>
+          <div className="tbl-toolbar-title"><strong>Recent invoices</strong><small>Newest first · {periodRange}</small></div>
           <div className="tbl-tools"><span className="badge badge-info">{salesRows.length} shown</span></div>
         </div>
         <table className="erp-table"><thead><tr><th>Invoice</th><th>Customer</th><th>Date</th><th className="text-right">Amount</th><th>Status</th></tr></thead><tbody>{salesRows.map((row) => <tr key={row.id}><td><span className="pn-chip">{row.id}</span></td><td>{row.customer}</td><td className="text-muted">{row.date}</td><td className="text-right font-semibold">₹{Number(row.total).toLocaleString()}</td><td><span className={`badge ${row.status === 'paid' ? 'badge-success' : row.status === 'partial' ? 'badge-warning' : 'badge-danger'}`}>{row.status.toUpperCase()}</span></td></tr>)}
           {salesRows.length === 0 && <tr><td colSpan={5}><div className="empty-state"><p className="empty-state-title">No invoices yet</p><p className="empty-state-desc">This company has no sales on file.</p></div></td></tr>}
         </tbody></table>
-        {invoices.length > 0 && <div className="pager"><span className="pager-info">Showing <strong>{salesRows.length}</strong> of <strong>{invoices.length}</strong> invoices</span></div>}
+        {periodInvoices.length > 0 && <div className="pager"><span className="pager-info">Showing <strong>{salesRows.length}</strong> of <strong>{periodInvoices.length}</strong> invoices</span></div>}
       </div>
     </>}
 
     {reportType === 'stock' && <>
+      {!isAllTime(period) && <div className="alert alert-info mb-4" role="status">This one is as of right now, not {periodRange} — stock is counted as it stands today.</div>}
       <div className="kpi-grid">
         <Kpi title="Total Stock Units" value={`${totalStockUnits}`} icon={PackageCheck} color="var(--chart-blue)" bg="var(--color-info-bg)" />
         <Kpi title="Total Cost Value" value={`₹${totalCostValue.toLocaleString()}`} icon={Wallet} color="var(--chart-amber)" bg="var(--amber-tint)" />
@@ -444,6 +547,7 @@ export default function ReportsPage() {
     </>}
 
     {reportType === 'aging' && <>
+      {!isAllTime(period) && <div className="alert alert-info mb-4" role="status">This one is as of right now, not {periodRange} — what is owed is owed today, however far back it was billed.</div>}
       <div className="grid-2">
         <div className="card">
           <div className="card-header"><h3 className="card-title">Receivables Aging</h3><span className="badge badge-danger">₹{totalReceivablesDue.toLocaleString()} outstanding</span></div>
