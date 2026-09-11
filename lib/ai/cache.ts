@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { businessDayIst, getActiveCompanyId, readAiCache, writeAiCache, type AiCacheRow } from '@/lib/db';
+import { businessDayIst, readAiCache, writeAiCache, type AiCacheRow } from '@/lib/db';
+import { resolveRequestCompanyId } from '@/lib/company-context';
 
 /** How many times a day one AI feature may actually call a provider, per company.
  *
@@ -69,7 +70,7 @@ export async function planAiRun(
   const { force = false, fingerprint: currentFingerprint } = opts;
   // Never fall back to a shared key: a blank company id would pool every company's answers into
   // one row, which is both wrong and a data-isolation problem.
-  const companyId = (await getActiveCompanyId()) ?? '__no_active_company__';
+  const companyId = (await resolveRequestCompanyId()) ?? '__no_active_company__';
   const cached = await readAiCache(companyId, feature, variant);
 
   const runsToday = cached && cached.day_ist === businessDayIst() ? cached.runs_on_day : 0;

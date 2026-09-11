@@ -1,4 +1,5 @@
-import { inviteStaffUser, insertRow, getActiveCompanyId, dbErrorMessage } from '@/lib/db';
+import { inviteStaffUser, insertRow, dbErrorMessage } from '@/lib/db';
+import { resolveRequestCompanyId } from '@/lib/company-context';
 import { isRole } from '@/lib/authTypes';
 import { resolveSiteOrigin } from '@/lib/supabase/server';
 
@@ -20,7 +21,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const company_id = await getActiveCompanyId();
+    const company_id = await resolveRequestCompanyId();
     await insertRow('users', { email, name, role, status: 'invited', company_id });
     return Response.json({ ok: true }, { status: 201 });
   } catch (error) {

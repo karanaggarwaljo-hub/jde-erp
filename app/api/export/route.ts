@@ -1,4 +1,5 @@
-import { getActiveCompanyId, listRows } from '@/lib/db';
+import { listRows } from '@/lib/db';
+import { resolveRequestCompanyId } from '@/lib/company-context';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
 import { AGE_BUCKETS, agingRows } from '@/lib/aging';
 import { stockValueLookup, totalStockValue, type StockLayerLike } from '@/lib/stock-value';
@@ -16,7 +17,7 @@ function toCsv(rows: Array<Array<string | number>>): string {
 }
 
 async function buildExport(type: string): Promise<{ filename: string; rows: Array<Array<string | number>> }> {
-  const companyId = await getActiveCompanyId();
+  const companyId = await resolveRequestCompanyId();
   const invoices = (await listRows('invoices', companyId)) as unknown as Invoice[];
   const purchaseOrders = (await listRows('purchase_orders', companyId)) as unknown as PurchaseOrder[];
   const expenses = (await listRows('expenses', companyId)) as unknown as Expense[];
