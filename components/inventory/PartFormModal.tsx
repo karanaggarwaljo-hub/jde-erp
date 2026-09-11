@@ -83,10 +83,13 @@ export default function PartFormModal(props: PartFormModalProps) {
                     A part named &quot;{possibleDuplicate.name}&quot; already exists ({possibleDuplicate.part_number}, {possibleDuplicate.current_stock} in stock) — this will add a separate, second entry rather than update it. If you meant to edit the existing one, cancel and use its Edit button instead.
                   </div>
                 )}
+                {/* The database refuses a second part with the same number, so this is no longer a
+                    warning about what saving would create — it is a warning that saving will be
+                    refused. Said here, before the button, rather than as an error afterwards. */}
                 {duplicatePartNumbers.length > 0 && (
                   <div className="alert alert-warning" role="alert">
                     <strong>{formData.part_number.trim()}</strong> is already on {duplicatePartNumbers.length === 1 ? 'another part' : `${duplicatePartNumbers.length} other parts`}:{' '}
-                    {duplicatePartNumbers.map((p) => p.name).join(', ')}. Saving this makes {duplicatePartNumbers.length === 1 ? 'two' : `${duplicatePartNumbers.length + 1}`} parts share one number, so scanning it can no longer tell them apart — every sale and purchase will stop and ask which one was meant. Give this one its own number if you can.
+                    {duplicatePartNumbers.map((p) => p.name).join(', ')}. A part number has to name one part, so this will not save as it stands. Give this one its own number, or clear the box and one will be made for it.
                   </div>
                 )}
                 {/* ── What the part is ───────────────────────────────────────── */}
