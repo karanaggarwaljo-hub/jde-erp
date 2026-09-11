@@ -1,4 +1,4 @@
-import { AiProviderError, AiUnavailableError, classifyError, cooldownMs, shouldTryNextProvider, type AiFailureKind } from './errors';
+import { AiProviderError, AiUnavailableError, classifyError, cooldownMs, describeAttempts, shouldTryNextProvider, type AiFailureKind } from './errors';
 import { isAvailable, markHealthy, markUnavailable } from './health';
 import { geminiProvider } from './providers/gemini';
 import { groqProvider } from './providers/groq';
@@ -104,16 +104,6 @@ export function rotateForFairShare<T>(
   const raw = options.pick(providers.length);
   const index = Number.isInteger(raw) && raw >= 0 && raw < providers.length ? raw : 0;
   return [...providers.slice(index), ...providers.slice(0, index)];
-}
-
-function friendlyMessage(kinds: AiFailureKind[]): string {
-  if (kinds.length && kinds.every((kind) => kind === 'blocked')) {
-    return 'The AI declined to work with this content. Try rephrasing it or entering the details manually.';
-  }
-  if (kinds.includes('quota')) {
-    return 'Every AI service is at its usage limit right now — please try again in a few minutes.';
-  }
-  return 'The AI service could not be reached right now — please try again in a few minutes.';
 }
 
 type Winner<T> = { data: T; provider: string; model: string };
@@ -223,7 +213,7 @@ function raceProviders<T>(
           failures += 1;
           launch(index + 1);
           if (failures === providers.length) {
-            finish(() => reject(new AiUnavailableError(friendlyMessage(attempts.map((a) => a.kind)), attempts)));
+            finish(() => reject(new AiUnavailableError(describeAttempts(attempts), attempts)));
           }
         }
       );
@@ -273,7 +263,7 @@ export async function generateJson<T>(request: AiJsonRequest): Promise<{ data: T
   } catch (error) {
     if (error instanceof AiUnavailableError) throw error;
     if (error instanceof AiProviderError && !shouldTryNextProvider(error.kind)) throw error;
-    throw new AiUnavailableError(friendlyMessage(attempts.map((a) => a.kind)), attempts);
+    throw new AiUnavailableError(describeAttempts(attempts), attempts);
   }
 }
 

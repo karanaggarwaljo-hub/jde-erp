@@ -2,6 +2,34 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-12 — The AI now tells you which service failed, and why, and stops giving up early
+
+Two real faults in how the app falls back between the three AI services.
+
+**One service's retired model no longer takes the feature down.** When a service replies "I don't
+have that model any more", the app was treating it as its own mistake — and since its own mistakes
+fail the same way everywhere, it stopped asking anybody else. So a model name going out of date at
+one service could break scanning, or suggestions, or the daily briefing, while two perfectly healthy
+services sat there untried. It now moves straight on to the next one, and sets that service aside
+for an hour rather than asking it again every time.
+
+**Error messages now name the service and say what actually happened.** If any one service was out
+of free usage, the message said "Every AI service is at its usage limit right now — please try again
+in a few minutes." So a failure where Google was out of allowance and Groq's key was wrong told you
+to wait, when waiting would never have helped. Now you get, for example:
+
+> No AI service could answer: Google has used up its free usage for now, Groq rejected the key it
+> was given.
+
+When they genuinely are all out of usage, it still says so. When every key is being rejected, it
+names the three settings to check. Nothing is invented and nothing is generalised from one service
+to all three.
+
+**The PDF warning now lives in one place.** Only Google can read PDFs — the other two services read
+photos only. That warning was written out separately on the two screens that scan documents, which
+is two chances for the next one to be built without it. It is one shared message now, and it says
+plainly that photographing the document is the way round it.
+
 ## 2026-09-12 — Reports can now be asked about a month, not just about everything
 
 Reports added up every record ever entered. There was no way to ask what August made, or whether

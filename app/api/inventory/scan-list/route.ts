@@ -1,5 +1,5 @@
-import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
-import { AiUnavailableError } from '@/lib/ai/errors';
+import { generateJson } from '@/lib/ai/generate';
+import { aiScanErrorResponse } from '@/lib/ai/scan-error';
 
 export const dynamic = 'force-dynamic';
 // Reading a document is the slowest AI call in the app — the layer allows a provider 45s for an
@@ -77,18 +77,6 @@ export async function POST(request: Request) {
     return Response.json(data);
   } catch (error) {
     console.error('inventory/scan-list failed:', error);
-    // Only Gemini reads PDFs, so a PDF has no second provider to fall back on — say what to do
-    // instead of leaving it looking like a general outage.
-    if (mimeType === 'application/pdf' && error instanceof AiUnavailableError) {
-      return Response.json(
-        {
-          error:
-            'Reading a PDF needs Google’s AI, which is unavailable right now. Take a photo of the ' +
-            'page and drop that instead — photos use the backup service — or try the PDF again in a few minutes.',
-        },
-        { status: 503 }
-      );
-    }
-    return aiErrorResponse(error, 'Unknown error reading this document.');
+    return aiScanErrorResponse(error, mimeType, 'Unknown error reading this document.');
   }
 }
