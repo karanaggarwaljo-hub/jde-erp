@@ -17,6 +17,9 @@ const SCAN_JSON_SCHEMA = {
     supplier_name: { ...NULLABLE_STRING, description: 'The supplier/vendor company name as printed on the document. Null if not legible.' },
     supplier_gstin: { ...NULLABLE_STRING, description: 'The supplier/vendor’s own GSTIN (15-character GST registration number, e.g. 04AAUPG7442A1ZT) as printed on the document — not the buyer’s GSTIN. Null if not present or not legible.' },
     po_date: { ...NULLABLE_STRING, description: 'Invoice or order date in YYYY-MM-DD format. Null if not present.' },
+    // The supplier's own number for this bill. Without it, the same bill re-typed or photographed
+    // again is unrecognisable as a duplicate — the file hash only catches the identical file.
+    supplier_invoice_no: { ...NULLABLE_STRING, description: 'The supplier’s own number for this document, exactly as printed — usually labelled Invoice No, Bill No, Challan No or Doc No. Not our own purchase order number, and not the GSTIN. Null if the document carries no such number.' },
     expected_delivery: { ...NULLABLE_STRING, description: 'Expected delivery date in YYYY-MM-DD format, if stated. Null otherwise.' },
     items: {
       type: 'array',
@@ -39,7 +42,7 @@ const SCAN_JSON_SCHEMA = {
       },
     },
   },
-  required: ['supplier_name', 'supplier_gstin', 'po_date', 'expected_delivery', 'items'],
+  required: ['supplier_name', 'supplier_gstin', 'supplier_invoice_no', 'po_date', 'expected_delivery', 'items'],
 };
 
 const SYSTEM_PROMPT =

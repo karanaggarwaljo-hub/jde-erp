@@ -22,9 +22,9 @@ export type POLine = { description: string; quantity: number; unit_price: number
 
 export type Supplier = { id: string; company_id: string; name: string; balance: number };
 
-export type PurchaseOrder = { id: string; company_id: string; supplier: string; date: string; expected: string; items: number; total: number; paid: number; status: string };
+export type PurchaseOrder = { id: string; company_id: string; supplier: string; date: string; expected: string; items: number; total: number; paid: number; status: string; supplier_invoice_no?: string | null; supplier_invoice_date?: string | null };
 
-export type PoItem = { id: string; po_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_cost: number };
+export type PoItem = { id: string; po_id: string; product_id: string | null; part_number: string; name: string; qty: number; unit_cost: number; line_total: number };
 
 /** A part as offered by the picker on this screen: what makes it findable, plus what the row
  *  shows once it is on the purchase. `price` is the cost, the rate that fills into a new line,
@@ -49,6 +49,9 @@ export type ImportPreview = {
   lines: ImportedLine[];
   supplier: string;
   supplierGstin: string;
+  /** The supplier's own number for this bill, read off the document and editable before saving.
+   *  It is what lets the same bill be recognised if it is ever re-typed or re-photographed. */
+  supplierInvoiceNo: string;
   fileHash: string | null;
 };
 

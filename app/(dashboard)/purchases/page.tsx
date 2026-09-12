@@ -3,7 +3,6 @@
 import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
 import {
   Plus,
-  FileCheck,
   Upload,
   Undo2,
   Receipt,
@@ -41,6 +40,7 @@ import {
   type Supplier,
 } from '@/lib/purchase-types';
 import ImportReviewModal from '@/components/purchases/ImportReviewModal';
+import SupplierBillsPanel from '@/components/purchases/SupplierBillsPanel';
 import PurchaseFormModal from '@/components/purchases/PurchaseFormModal';
 import RecordPaymentModal from '@/components/purchases/RecordPaymentModal';
 import SupplierReturnModal from '@/components/purchases/SupplierReturnModal';
@@ -152,6 +152,8 @@ export default function PurchasesPage() {
   const { rows: purchaseOrders, loading: poLoading, reload: reloadPurchaseOrders } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const { reload: reloadGrns } = useCompanyTable<Grn>('grns');
   const { rows: poItems, reload: reloadPoItems } = useCompanyTable<PoItem>('po_items');
+  // Read-only here: what has been credited back against each purchase, for the bill worksheet.
+  const { rows: supplierReturns } = useCompanyTable<{ purchase_order_id: string; total: number }>('purchase_returns');
 
   // `value` is what a line stores and what the save path matches on, so it stays exactly the
   // label it has always been. The rest is what the picker searches on and what the row shows.
@@ -181,6 +183,7 @@ export default function PurchasesPage() {
   const [receivingPoId, setReceivingPoId] = useState<string | null>(null);
   const [supplierName, setSupplierName] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(todayIso());
+  const [supplierInvoiceNo, setSupplierInvoiceNo] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('unpaid');
   const [amountPaid, setAmountPaid] = useState(0);
   const [lines, setLines] = useState<POLine[]>([]);
@@ -238,6 +241,9 @@ export default function PurchasesPage() {
   const openPurchaseModal = () => {
     setSupplierName('');
     setPurchaseDate(todayIso());
+    // Cleared on purpose: carrying the last bill number into the next purchase would be refused as
+    // a duplicate, and a stale number left in the box is worse than an empty one.
+    setSupplierInvoiceNo('');
     setPaymentStatus('unpaid');
     setAmountPaid(0);
     setLines([]);
@@ -449,6 +455,7 @@ export default function PurchasesPage() {
         total,
         paid,
         status: 'received',
+        supplierInvoiceNo,
       });
 
       await Promise.all([reloadPurchaseOrders(), reloadPoItems(), reloadGrns(), reloadSuppliers(), reloadProducts()]);
@@ -545,7 +552,7 @@ export default function PurchasesPage() {
         if (imported.length === 0) {
           throw new Error('No rows with a recognizable description, quantity, or price column were found in this file.');
         }
-        setImportPreview({ fileName: file.name, lines: imported, supplier: guessSupplierFromText(file.name) ?? '', supplierGstin: '', fileHash: null });
+        setImportPreview({ fileName: file.name, lines: imported, supplier: guessSupplierFromText(file.name) ?? '', supplierGstin: '', supplierInvoiceNo: '', fileHash: null });
       } else if (isScannableFile(file)) {
         // Content-based, not filename-based, so the exact same invoice can't be scanned or
         // recorded twice even under a renamed/re-saved copy — checked server-side before this
@@ -581,7 +588,7 @@ export default function PurchasesPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ base64, mimeType, fileHash, companyId: activeCompany?.id }),
         });
-        const data = (await parseJsonOrThrow(res, 'Failed to scan document.')) as { items?: unknown; supplier_name?: string; supplier_gstin?: string };
+        const data = (await parseJsonOrThrow(res, 'Failed to scan document.')) as { items?: unknown; supplier_name?: string; supplier_gstin?: string; supplier_invoice_no?: string };
 
         const items: ImportedLine[] = Array.isArray(data.items) ? data.items : [];
         if (items.length === 0) {
@@ -592,6 +599,7 @@ export default function PurchasesPage() {
           lines: items,
           supplier: guessSupplierFromText(data.supplier_name) ?? '',
           supplierGstin: typeof data.supplier_gstin === 'string' ? data.supplier_gstin : '',
+          supplierInvoiceNo: typeof data.supplier_invoice_no === 'string' ? data.supplier_invoice_no.trim() : '',
           fileHash,
         });
       } else {
@@ -660,6 +668,7 @@ export default function PurchasesPage() {
         paid: importPaidAmount,
         status: 'received',
         sourceFileHash: importPreview.fileHash,
+        supplierInvoiceNo: importPreview.supplierInvoiceNo,
       });
 
       // The purchase is now safely recorded, so fill in what this document taught us about parts
@@ -1029,7 +1038,12 @@ export default function PurchasesPage() {
         )}
       </div>}
 
-      {activeTab === 'invoices' && <div className="card empty-state"><div className="empty-state-icon"><FileCheck size={22} /></div><p className="empty-state-title">Supplier invoice matching isn&apos;t available yet</p><p className="empty-state-desc">This will let you upload supplier invoices and match them against purchases — not built yet.</p></div>}
+      {activeTab === 'invoices' && <SupplierBillsPanel
+        purchases={purchaseOrders}
+        lines={poItems.map((item) => ({ po_id: item.po_id, qty: Number(item.qty) || 0, line_total: Number(item.line_total) || 0 }))}
+        returns={supplierReturns.map((row) => ({ po_id: row.purchase_order_id, credit_total: Number(row.total) || 0 }))}
+        loading={poLoading}
+      />}
 
       {returningOrder && (
         <SupplierReturnModal
@@ -1077,6 +1091,7 @@ export default function PurchasesPage() {
           supplierName={supplierName} setSupplierName={setSupplierName}
           supplierOptions={supplierOptions}
           purchaseDate={purchaseDate} setPurchaseDate={setPurchaseDate}
+          supplierInvoiceNo={supplierInvoiceNo} setSupplierInvoiceNo={setSupplierInvoiceNo}
           partOptions={partOptions} lines={lines} setLines={setLines} updateLine={updateLine} lastPaid={lastPaid}
           paymentStatus={paymentStatus} setPaymentStatus={setPaymentStatus}
           amountPaid={amountPaid} setAmountPaid={setAmountPaid}

@@ -8,7 +8,7 @@ import { TABLES, isWritableTable, type TableName } from '../lib/db/schema';
  *  and done by the route that owns the whole transaction. */
 const TRANSACTION_TABLES: TableName[] = [
   'invoices', 'invoice_items', 'quotations', 'purchase_orders', 'po_items', 'grns',
-  'stock_layers', 'stock_consumptions', 'sales_returns', 'expenses',
+  'stock_layers', 'stock_consumptions', 'sales_returns', 'purchase_returns', 'expenses',
   'payments_received', 'payment_allocations',
 ];
 

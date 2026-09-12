@@ -8,6 +8,7 @@ const WRITTEN_ELSEWHERE: Partial<Record<TableName, string>> = {
   invoices: 'Sales',
   invoice_items: 'Sales',
   sales_returns: 'the return dialog in Sales',
+  purchase_returns: 'the return dialog in Purchases',
   quotations: 'Sales',
   purchase_orders: 'Purchases',
   po_items: 'Purchases',
