@@ -2,6 +2,51 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-12 — Credit notes can be seen and undone, which is what the duplicates needed
+
+The day book showed three identical ₹3,500 credit notes against INV-1013. Fixing them turned out
+to need something that did not exist: **there was no way to undo a credit note, and no screen that
+even listed them.** They were counted, never shown. That is why one mis-click on 3 September sat
+in your data for nine days.
+
+**New Credit Notes tab on Sales.** Every credit note you have written, newest first, with the
+invoice it came from, when it was written, the reason, and what was credited. Where two or more
+sit against the same invoice for the same amount, the row says so:
+
+> 3 credit notes on INV-1013 for the same ₹3,500 — the goods may have been put back more than once
+
+**And an Undo button.** It takes the returned goods back off the shelf and removes the credit note.
+It refuses if the goods are no longer there to take, because putting that right is a stock decision
+and not something an undo should force.
+
+**Whether the invoice goes back to its original total depends on one thing**, and this is the part
+that had to be got right. Editing an invoice rebuilds every line from scratch. A credit note
+written before an edit no longer has any bearing on that invoice's total, because the edit already
+rewrote it. So undoing such a credit note corrects the stock and leaves the invoice alone, and
+tells you it did. Undoing a normal one puts the invoice total, the paid amount and the customer's
+balance back exactly as they were.
+
+Getting that backwards would have turned INV-1013 — ₹13,000, which kareem has paid in full — into
+a ₹16,500 invoice with ₹3,500 apparently outstanding. All four of your credit notes are in that
+edited state, so it is not a rare case.
+
+**Proved on your own data before shipping.** A credit note was created and then undone on INV-1010
+inside a transaction that was rolled back. The invoice went ₹5,500 → ₹0 → ₹5,500, stock went 14 →
+15 → 14, and the paid amount and status came back unchanged. Undoing SRN-1005 was rehearsed the
+same way: stock dropped from 28 to 27 and 67 to 65 as it should, and INV-1013 and kareem's balance
+were correctly left untouched.
+
+**What is still on your data, waiting for you.** SRN-1004 and SRN-1005 are the duplicates. Undo
+them from the new tab and the stock lands where it should be:
+
+| Part | Shows now | After |
+|---|---|---|
+| big pinion beraing 803149/10 | 28 | 26 |
+| plantary grari | 67 | 63 |
+
+Keep SRN-1003 — that is the one genuine return. Nothing about the money changes: INV-1013 is
+billed ₹13,000, kareem has paid ₹13,000, and his balance is zero, which is already correct.
+
 ## 2026-09-12 — New: a Day Book, showing every transaction of the day in one place
 
 You keep recording a sale on Sales, a purchase on Purchases and an expense on Expenses, exactly

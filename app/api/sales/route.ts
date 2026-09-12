@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { requireOwner } from '@/lib/auth/dal';
-import { isBusinessRuleError } from '@/lib/db';
+import { deleteSalesReturn, isBusinessRuleError } from '@/lib/db';
 import { money, recordAudit } from '@/lib/audit-log';
 import { damagedUnits, parseReturnLines } from '@/lib/sales-return-lines';
 
@@ -91,5 +91,38 @@ export async function POST(request: Request) {
       return Response.json({ error: errorMessage(error, 'This return could not be recorded.') }, { status: 422 });
     }
     return Response.json({ error: errorMessage(error, 'The sales return was not saved.') }, { status: 500 });
+  }
+}
+
+/**
+ * Undoes a credit note.
+ *
+ * Deleting a recorded document is deliberate and irreversible, so it goes through the same shape
+ * as the rest: the database function decides what may happen and does the whole thing atomically,
+ * and this handler only validates the request. A rule it refuses — the goods are no longer on the
+ * shelf to take back, or the invoice carries a settlement that overlaps this credit — comes back
+ * as a sentence the owner can act on rather than a 500.
+ */
+export async function DELETE(request: Request) {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: 'A valid JSON request is required.' }, { status: 400 });
+  }
+  const value = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+  const companyId = typeof value.companyId === 'string' ? value.companyId : '';
+  const returnId = typeof value.returnId === 'string' ? value.returnId : '';
+  if (!companyId || !returnId) return Response.json({ error: 'companyId and returnId are required.' }, { status: 400 });
+  await requireOwner();
+
+  try {
+    return Response.json(await deleteSalesReturn(companyId, returnId));
+  } catch (error) {
+    console.error('DELETE /api/sales (credit note) failed:', error);
+    if (isBusinessRuleError(error)) {
+      return Response.json({ error: errorMessage(error, 'This credit note could not be undone.') }, { status: 422 });
+    }
+    return Response.json({ error: errorMessage(error, 'The credit note was not undone.') }, { status: 500 });
   }
 }
