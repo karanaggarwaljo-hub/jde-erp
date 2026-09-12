@@ -31,7 +31,8 @@ import { realisedProfit, type InvoiceCost } from '@/lib/invoice-profit';
 import { invoiceBalanceDue, invoiceWrittenOff, wasSettledShort } from '@/lib/invoice-balance';
 import { addCustomLine, addPartToLines, buildLastSoldIndex, partLabel } from '@/lib/sale-entry';
 import { keepEnterInsideForm } from '@/lib/form-keys';
-import { createSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem } from '@/lib/client-sales-returns';
+import { createSalesReturn, deleteSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem, type SalesReturnRow } from '@/lib/client-sales-returns';
+import { duplicateCreditNotes } from '@/lib/sales-returns';
 import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } from '@/lib/client-quotations';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { buildCustomerLedger } from '@/lib/customer-ledger';
@@ -58,7 +59,7 @@ import {
   type Quotation,
 } from '@/lib/sales-types';
 
-type SalesTab = 'invoices' | 'quotations' | 'ledger';
+type SalesTab = 'invoices' | 'quotations' | 'credits' | 'ledger';
 type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid' | 'drafts';
 
 // Everything the printable document needs, captured at the moment it is opened. A snapshot rather
@@ -104,6 +105,15 @@ function pageWindow(current: number, total: number): Array<number | 'gap'> {
 // state (which stays '' for a walk-in) so the customer-lookup logic below never has to special-case
 // it — an empty string simply never matches a real customer.
 
+// A credit note stores only a UTC timestamp. The shop trades in IST, so it is shown in IST —
+// one written at 8pm here is stored as the next day in UTC, and printing the raw date would put
+// it on a day nobody was in the shop. Same shift the day book applies.
+function formatDateTime(timestamp: string): string {
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return timestamp;
+  return parsed.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 export default function SalesPage() {
   const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
   const { rows: customers, create: createCustomer, reload: reloadCustomers } = useCompanyTable<Customer>('customers');
@@ -113,7 +123,7 @@ export default function SalesPage() {
   const { rows: payments, reload: reloadPayments } = useCompanyTable<Payment>('payments_received');
   const { rows: paymentAllocations } = useCompanyTable<PaymentAllocation>('payment_allocations');
   // Only to grey out Edit and Delete on an invoice goods have already come back against.
-  const { rows: salesReturns } = useCompanyTable<{ id: string; invoice_id: string }>('sales_returns');
+  const { rows: salesReturns, reload: reloadSalesReturns } = useCompanyTable<SalesReturnRow>('sales_returns');
 
   // `value` is what a line stores and what the save path matches on, so it stays exactly the
   // label it has always been. The rest are fields off the same already-loaded product row, used to
@@ -179,6 +189,13 @@ export default function SalesPage() {
     setPaymentModalCustomerId(customerId);
     setShowPaymentModal(true);
   };
+
+  // Undoing a credit note. Kept beside the other delete confirmations rather than done inline:
+  // it moves stock and can move a customer's balance, so it gets the same "are you sure" as
+  // deleting an invoice does.
+  const [creditToUndo, setCreditToUndo] = useState<SalesReturnRow | null>(null);
+  const [undoingCredit, setUndoingCredit] = useState(false);
+  const [creditError, setCreditError] = useState('');
 
   const [deleteError, setDeleteError] = useState('');
   const [deletingInvoice, setDeletingInvoice] = useState(false);
@@ -580,6 +597,24 @@ export default function SalesPage() {
       setQuotationError(error instanceof Error ? error.message : 'Quotation conversion failed. No stock was changed.');
     } finally {
       setConvertingQuotationId(null);
+    }
+  };
+
+  const confirmUndoCredit = async () => {
+    if (!creditToUndo || !activeCompany || undoingCredit) return;
+    setCreditError('');
+    setUndoingCredit(true);
+    try {
+      const result = await deleteSalesReturn(activeCompany.id, creditToUndo.id);
+      await Promise.all([reloadSalesReturns(), reloadInvoices(), reloadCustomers(), reloadProducts()]);
+      setFeedback(result.invoice_restored
+        ? `${result.id} undone — the goods are off the shelf again and ${creditToUndo.invoice_id} is back to what it was billed for.`
+        : `${result.id} undone and the stock corrected. ${creditToUndo.invoice_id} was rebuilt by an edit after this credit note, so its total already excluded it and was left alone.`);
+      setCreditToUndo(null);
+    } catch (error) {
+      setCreditError(error instanceof Error ? error.message : 'This credit note was not undone.');
+    } finally {
+      setUndoingCredit(false);
     }
   };
 
@@ -1055,6 +1090,15 @@ ${stockLine}`)) return;
           <button
             type="button"
             role="tab"
+            aria-selected={activeTab === 'credits'}
+            className={`tab ${activeTab === 'credits' ? 'active' : ''}`}
+            onClick={() => setActiveTab('credits')}
+          >
+            Credit Notes <span className="tab-count">{salesReturns.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={activeTab === 'ledger'}
             className={`tab ${activeTab === 'ledger' ? 'active' : ''}`}
             onClick={() => setActiveTab('ledger')}
@@ -1393,6 +1437,72 @@ ${stockLine}`)) return;
         </div>
       )}
 
+      {activeTab === 'credits' && (
+        <div className="card">
+          <div className="tbl-toolbar">
+            <div className="tbl-toolbar-title">
+              <strong>Credit notes</strong>
+              <small>Goods that came back. Each one put stock on the shelf and took the amount off the invoice it came from.</small>
+            </div>
+          </div>
+          {salesReturns.length === 0 ? (
+            <div className="empty-state" style={{ padding: '32px 20px' }}>
+              <p className="empty-state-title">No goods have come back yet</p>
+              <p className="empty-state-desc">A credit note is written from an invoice, using Return on its row.</p>
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="erp-table" style={{ minWidth: '720px' }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: '120px' }}>Credit note</th>
+                    <th style={{ width: '120px' }}>Against</th>
+                    <th style={{ width: '150px' }}>When</th>
+                    <th>Reason</th>
+                    <th className="text-right" style={{ width: '130px' }}>Credited</th>
+                    <th style={{ width: '110px' }} aria-label="Undo"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...salesReturns]
+                    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+                    .map((credit) => {
+                      // Two credit notes written minutes apart against one invoice, for the same
+                      // money, are what a mis-click looks like. Said here rather than left for
+                      // somebody to notice across rows.
+                      const siblings = duplicateCreditNotes(credit, salesReturns);
+                      return (
+                        <tr key={credit.id}>
+                          <td><span className="pn-chip">{credit.id}</span></td>
+                          <td><span className="pn-chip">{credit.invoice_id}</span></td>
+                          <td className="text-muted text-sm">{formatDateTime(credit.created_at)}</td>
+                          <td>
+                            {credit.reason || <span className="text-muted">—</span>}
+                            {siblings.length > 0 && (
+                              <div className="line-warning is-stock">
+                                <AlertTriangle size={12} aria-hidden="true" /> {siblings.length + 1} credit notes on {credit.invoice_id} for the same ₹{money(Number(credit.credit_total))} — the goods may have been put back more than once
+                              </div>
+                            )}
+                          </td>
+                          <td className="text-right font-semibold">₹{paise(Number(credit.credit_total))}</td>
+                          <td className="text-center">
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ color: 'var(--color-danger)' }}
+                              onClick={() => { setCreditError(''); setCreditToUndo(credit); }}
+                            ><Undo2 size={13} /> Undo</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {activeTab === 'ledger' && (() => {
         const ledgerCustomer = customers.find((customer) => customer.id === ledgerCustomerId) ?? null;
         const entries = ledgerCustomer ? buildCustomerLedger(ledgerCustomer.name, invoices, payments, paymentAllocations) : [];
@@ -1691,6 +1801,31 @@ ${stockLine}`)) return;
         <div className="modal-footer">
           <button type="button" className="btn btn-secondary" disabled={savingSettlement} onClick={() => setSettlingInvoice(null)}>Cancel</button>
           <button type="button" className="btn btn-primary" disabled={savingSettlement || settleDue <= 0} onClick={confirmSettleShort}>{savingSettlement ? 'Recording…' : 'Record Settlement'}</button>
+        </div>
+      </div></div>}
+
+      {creditToUndo && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '480px' }} role="dialog" aria-modal="true" aria-labelledby="undo-credit-title">
+        <div className="modal-header"><h3 id="undo-credit-title" className="modal-title">Undo {creditToUndo.id}?</h3></div>
+        <div className="modal-body flex flex-col gap-3">
+          {creditError && <div className="alert alert-danger" role="alert">{creditError}</div>}
+          <p>
+            This takes the returned goods back off the shelf and removes the credit note. Use it when the
+            same return was recorded more than once, or recorded by mistake — not when goods genuinely came back.
+          </p>
+          <div className="report-summary">
+            <div className="report-line"><span>Against</span><strong>{creditToUndo.invoice_id}</strong></div>
+            <div className="report-line"><span>Credited</span><strong>₹{paise(Number(creditToUndo.credit_total))}</strong></div>
+            {creditToUndo.reason && <div className="report-line"><span>Reason given</span><span className="text-muted">{creditToUndo.reason}</span></div>}
+          </div>
+          <p className="text-muted" style={{ fontSize: '12px' }}>
+            Whether {creditToUndo.invoice_id} goes back to its original total depends on whether it has been
+            edited since this credit note was written. An edit rebuilds every line, which already removed this
+            credit from the invoice — in that case only the stock is corrected, and you will be told so.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-secondary" disabled={undoingCredit} onClick={() => setCreditToUndo(null)}>Cancel</button>
+          <button type="button" className="btn btn-danger" disabled={undoingCredit} onClick={confirmUndoCredit}>{undoingCredit ? 'Undoing…' : 'Undo Credit Note'}</button>
         </div>
       </div></div>}
 

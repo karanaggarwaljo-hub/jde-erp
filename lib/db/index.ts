@@ -1194,3 +1194,18 @@ export async function getDayBookRows(companyId: string, from: string, to: string
     settlements: rows(settlements),
   };
 }
+
+export type DeleteSalesReturnResult = { id: string; credit_total: number; invoice_restored: boolean };
+
+/** Undoes a credit note through jde_delete_sales_return, which does the whole thing in one
+ *  transaction: takes the goods back off the shelf newest-layer-first, and restores the invoice
+ *  total, its paid amount and the customer's balance — but only when the credit note's lines
+ *  still point at invoice lines that exist. An invoice rebuilt by an edit since has already had
+ *  those figures overwritten, so adding the credit back there would invent money nobody owed. */
+export async function deleteSalesReturn(companyId: string, returnId: string): Promise<DeleteSalesReturnResult> {
+  const { data, error } = await getClient()
+    .rpc('jde_delete_sales_return', { p_company_id: companyId, p_return_id: returnId })
+    .single();
+  if (error) throw error;
+  return data as DeleteSalesReturnResult;
+}

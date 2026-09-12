@@ -43,3 +43,25 @@ export function createSalesReturn(input: SalesReturnInput) {
     body: JSON.stringify(input),
   });
 }
+
+export type SalesReturnRow = {
+  id: string;
+  invoice_id: string;
+  customer_id: string | null;
+  reason: string;
+  credit_total: number;
+  refund_or_credit_amount: number;
+  created_at: string;
+};
+
+/** Undoes a credit note: the goods come back off the shelf, and the invoice and the customer's
+ *  balance are put back — but only when that credit note's lines still point at the invoice they
+ *  came from. Where the invoice has been rebuilt by an edit since, its total no longer has this
+ *  credit taken off it, so only the stock is reversed. `invoice_restored` says which happened. */
+export function deleteSalesReturn(companyId: string, returnId: string) {
+  return request<{ id: string; credit_total: number; invoice_restored: boolean }>('/api/sales', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ companyId, returnId }),
+  });
+}
