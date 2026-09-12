@@ -2,6 +2,44 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-12 — New: a Day Book, showing every transaction of the day in one place
+
+You keep recording a sale on Sales, a purchase on Purchases and an expense on Expenses, exactly
+as before, and each of those screens still shows only its own. What was missing was the other
+half — somewhere to stand at the end of a day and see everything that happened together. That is
+now **Day Book**, second in the menu under Dashboard.
+
+**What it shows.** Every sale, payment received, purchase, payment to a supplier, expense, credit
+note and settlement, newest first, grouped under the day it happened on. Today by default, with
+one-click Yesterday, Last 7 days and This month, or any two dates you pick. Tap a type to see only
+those. Sale numbers open the invoice.
+
+**The important part: two columns, kept apart.**
+
+- **Value** is what the document is for. A ₹13,000 sale on credit is a ₹13,000 sale.
+- **Money in** and **money out** are what actually moved that day. That same credit sale moves
+  nothing until the customer pays.
+
+This matters more than it sounds. Your invoices record the amount paid against them, and that
+figure grows as payments come in later — so a sale of ₹13,000 collected a week afterwards reads
+as "₹13,000 paid" on the sale *and* ₹13,000 on the receipt. Counted naively, the same money would
+appear on two different days and the week's takings would be double what you took. The day book
+subtracts what was allocated later, so the sale shows what you actually took at the counter and
+the rest appears on the day it truly arrived, counted once.
+
+A balance you settle off shows its value with no money either way, because none arrived. A credit
+note taken off a customer's account costs nothing; one refunded in cash shows as money out.
+Drafts are left out entirely — nothing has been billed yet.
+
+**Checked against your real data.** Running it over Jai Durga Enterprises gives 14 transactions
+across two days, ₹76,562.75 billed, ₹66,350 actually received, ₹4,440.70 paid out. kareem's
+₹13,000 correctly appears twice — as a sale on 1 September with nothing in the money column, and
+as a receipt on 3 September for the full amount.
+
+**It also makes the duplicate credit notes visible.** Three identical ₹3,500 returns against
+INV-1013 sit next to each other on 3 September, which is the problem reported on 4 September. They
+are now impossible to miss in a way a list of returns buried on the Sales screen never was.
+
 ## 2026-09-12 — Supplier Invoices is a real screen now, and a bill can't be paid twice
 
 The Supplier Invoices tab in Purchases has said "matching isn't available yet" since the app was
