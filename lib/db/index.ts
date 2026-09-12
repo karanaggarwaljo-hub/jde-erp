@@ -1097,3 +1097,100 @@ export async function writeAiCache(
   if (error) throw new Error(error.message);
   return data as AiCacheRow;
 }
+
+/**
+ * Every transaction row the day book needs, for one company over one date range.
+ *
+ * Read here rather than through listRows because half of these tables are deliberately not in
+ * TABLES — supplier payments, their allocations and the settlement audit trail are not published
+ * to the browser at all (see lib/db/schema.ts), and listRows would not know their primary key.
+ * The day book still has to show them, so it asks the server, which is also what keeps ten table
+ * reads down to one round trip from the screen.
+ *
+ * Ranges are inclusive at both ends. Returns carry only a created_at, so those are widened by a
+ * day on each side and the exact Indian calendar date is settled in lib/daybook.ts — a credit note
+ * written at 8pm IST is stored as the next day in UTC, and filtering the raw timestamp would drop
+ * it from the day it belongs to.
+ */
+export type DayBookRowSets = {
+  invoices: Array<Record<string, unknown>>;
+  paymentAllocations: Array<Record<string, unknown>>;
+  receipts: Array<Record<string, unknown>>;
+  purchases: Array<Record<string, unknown>>;
+  supplierPaymentAllocations: Array<Record<string, unknown>>;
+  supplierPayments: Array<Record<string, unknown>>;
+  expenses: Array<Record<string, unknown>>;
+  salesReturns: Array<Record<string, unknown>>;
+  purchaseReturns: Array<Record<string, unknown>>;
+  settlements: Array<Record<string, unknown>>;
+};
+
+function shiftDays(isoDate: string, days: number): string {
+  const parsed = new Date(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return isoDate;
+  return new Date(parsed.getTime() + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+export async function getDayBookRows(companyId: string, from: string, to: string): Promise<DayBookRowSets> {
+  const client = getClient();
+  const byDate = (table: string, column = 'date') => {
+    let query = client.from(table).select('*').eq('company_id', companyId);
+    if (from) query = query.gte(column, from);
+    if (to) query = query.lte(column, to);
+    return query;
+  };
+  // A day either side, then narrowed exactly once the timestamp is read in Indian time.
+  const byCreatedAt = (table: string) => {
+    let query = client.from(table).select('*').eq('company_id', companyId);
+    if (from) query = query.gte('created_at', `${shiftDays(from, -1)}T00:00:00Z`);
+    if (to) query = query.lte('created_at', `${shiftDays(to, 1)}T23:59:59Z`);
+    return query;
+  };
+
+  const [
+    invoices, receipts, purchases, supplierPayments, expenses, salesReturns, purchaseReturns, settlements,
+  ] = await Promise.all([
+    byDate('jde_invoices'),
+    byDate('jde_payments_received'),
+    byDate('jde_purchase_orders'),
+    byDate('jde_supplier_payments'),
+    byDate('jde_expenses'),
+    byCreatedAt('jde_sales_returns'),
+    byCreatedAt('jde_purchase_returns'),
+    byDate('jde_invoice_writeoffs'),
+  ]);
+
+  for (const result of [invoices, receipts, purchases, supplierPayments, expenses, salesReturns, purchaseReturns, settlements]) {
+    if (result.error) throw result.error;
+  }
+
+  // Allocations are not filtered by date on purpose: working out what a sale took at the counter
+  // means subtracting everything ever allocated to it, including payments made after the range.
+  const invoiceIds = (invoices.data ?? []).map((row) => (row as { id: string }).id);
+  const purchaseIds = (purchases.data ?? []).map((row) => (row as { id: string }).id);
+
+  const [paymentAllocations, supplierPaymentAllocations] = await Promise.all([
+    invoiceIds.length
+      ? client.from('jde_payment_allocations').select('invoice_id, amount').eq('company_id', companyId).in('invoice_id', invoiceIds)
+      : Promise.resolve({ data: [], error: null }),
+    purchaseIds.length
+      ? client.from('jde_supplier_payment_allocations').select('po_id, amount').eq('company_id', companyId).in('po_id', purchaseIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (paymentAllocations.error) throw paymentAllocations.error;
+  if (supplierPaymentAllocations.error) throw supplierPaymentAllocations.error;
+
+  const rows = (result: { data: unknown }) => (result.data as Array<Record<string, unknown>>) ?? [];
+  return {
+    invoices: rows(invoices),
+    paymentAllocations: rows(paymentAllocations),
+    receipts: rows(receipts),
+    purchases: rows(purchases),
+    supplierPaymentAllocations: rows(supplierPaymentAllocations),
+    supplierPayments: rows(supplierPayments),
+    expenses: rows(expenses),
+    salesReturns: rows(salesReturns),
+    purchaseReturns: rows(purchaseReturns),
+    settlements: rows(settlements),
+  };
+}

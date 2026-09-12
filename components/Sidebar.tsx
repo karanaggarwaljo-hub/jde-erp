@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
+  BookOpen,
   Package,
   ShoppingCart,
   ShoppingBag,
@@ -26,6 +27,7 @@ const navGroups = [
     label: 'Operations',
     items: [
       { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
+      { name: 'Day Book', href: '/daybook', icon: BookOpen },
       { name: 'Inventory', href: '/inventory', icon: Package },
       { name: 'Sales', href: '/sales', icon: ShoppingCart },
       { name: 'Purchases', href: '/purchases', icon: ShoppingBag },
