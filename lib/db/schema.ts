@@ -40,6 +40,9 @@ export const TABLES: Record<string, TableSchema> = {
   catalog_events: { primaryKey: 'id', companyScoped: true },
   payments_received: { primaryKey: 'id', companyScoped: true },
   payment_allocations: { primaryKey: 'id', companyScoped: true },
+  // Read-only for the Purchases screen's bill-matching worksheet, which has to show what was
+  // credited back against each purchase. Writing one goes through jde_record_purchase_return.
+  purchase_returns: { primaryKey: 'id', companyScoped: true },
   // Read-only for the Sales screen, so it can grey out Edit on an invoice that already has
   // goods back against it and say why, rather than letting the owner hit a database refusal.
   sales_returns: { primaryKey: 'id', companyScoped: true },
@@ -62,7 +65,6 @@ export const TABLES: Record<string, TableSchema> = {
 export const BACKUP_ONLY_TABLES: Record<string, TableSchema> = {
   quotation_items: { primaryKey: 'id', companyScoped: true },
   sales_return_items: { primaryKey: 'id', companyScoped: true },
-  purchase_returns: { primaryKey: 'id', companyScoped: true },
   purchase_return_items: { primaryKey: 'id', companyScoped: true },
   // The settlement audit trail: WOFF-#### rows saying how much a customer was let off, when, and
   // why. The invoices themselves carry the amount, but only this says who decided it.

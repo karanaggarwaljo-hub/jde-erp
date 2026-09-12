@@ -117,6 +117,25 @@ export default function ImportReviewModal(props: ImportReviewModalProps) {
         )}
       </div>
 
+      {/* The supplier's own number for this bill. Worth a field of its own rather than being
+          buried: it is the only thing that can recognise this same bill arriving again, re-typed
+          or re-photographed, since the file check only catches the identical file. */}
+      <div className="form-group">
+        <label className="form-label" htmlFor="import-bill-no">Supplier&apos;s bill number</label>
+        <input
+          id="import-bill-no"
+          className="form-input"
+          placeholder="As printed on the bill — leave blank if it has none"
+          value={importPreview.supplierInvoiceNo}
+          onChange={(event) => setImportPreview({ ...importPreview, supplierInvoiceNo: event.target.value })}
+        />
+        <small style={{ color: 'var(--text-muted)' }}>
+          {importPreview.supplierInvoiceNo.trim()
+            ? 'This bill cannot then be recorded twice for this supplier.'
+            : 'Without it, the same bill typed in again would be recorded as a second purchase.'}
+        </small>
+      </div>
+
       {/* Exactly what was read out of the file — nothing added, nothing rounded away — so it
           can be checked, and corrected, before it becomes stock and a supplier balance. */}
       <datalist id="import-part-options">{partOptions.map((option) => <option key={option.value} value={option.value} />)}</datalist>

@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const { companyId, supplierId, supplierName, date, receivedAt, items, total, paid, status, sourceFileHash } = body ?? {};
+  const { companyId, supplierId, supplierName, date, receivedAt, items, total, paid, status, sourceFileHash, supplierInvoiceNo, supplierInvoiceDate } = body ?? {};
 
   if (typeof companyId !== 'string' || !companyId) {
     return Response.json({ error: 'companyId is required' }, { status: 400 });
@@ -29,6 +29,8 @@ export async function POST(request: Request) {
       paid: Number(paid) || 0,
       status: String(status ?? 'received'),
       sourceFileHash: sourceFileHash ?? null,
+      supplierInvoiceNo: typeof supplierInvoiceNo === 'string' ? supplierInvoiceNo.trim().slice(0, 60) : null,
+      supplierInvoiceDate: typeof supplierInvoiceDate === 'string' ? supplierInvoiceDate.trim().slice(0, 20) : null,
     });
     await recordAudit({
       companyId, action: 'purchase.create', entity: 'purchase_orders', entityId: String(po.id ?? ''),

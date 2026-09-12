@@ -44,6 +44,7 @@ function render(lines: POLine[], overrides: Record<string, unknown> = {}) {
     supplierName: 'Sharma Auto', setSupplierName: () => {},
     supplierOptions: ['Sharma Auto', 'Gupta Traders'],
     purchaseDate: '2026-09-10', setPurchaseDate: () => {},
+    supplierInvoiceNo: '', setSupplierInvoiceNo: () => {},
     partOptions: PARTS, lines, setLines: () => {}, updateLine: () => {},
     paymentStatus: 'unpaid' as const, setPaymentStatus: () => {},
     amountPaid: 0, setAmountPaid: () => {},

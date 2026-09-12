@@ -2,6 +2,37 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-12 — Supplier Invoices is a real screen now, and a bill can't be paid twice
+
+The Supplier Invoices tab in Purchases has said "matching isn't available yet" since the app was
+built. Everything it needed was already being recorded. It had just never been put side by side.
+
+**Purchases now record the supplier's own bill number.** There is a box for it on the purchase form,
+and the AI reads it off a scanned bill along with everything else. This is the thing that was
+missing: the app knew a purchase as PO-1010, but not as the supplier's bill number 4471 — so it had
+no way to tell that the bill in your hand was one already recorded.
+
+**The same bill cannot be recorded twice for the same supplier.** Try it and it says which purchase
+it already is. Until now the only protection was recognising the identical scanned file, so the same
+bill photographed again, or typed in by hand, went straight through as a second purchase and a
+second amount owed. The same number from two *different* suppliers is still fine, because that is
+normal.
+
+**The tab now checks every bill against what arrived and what was paid**, showing side by side: what
+the supplier billed, what the item lines add up to, anything credited back for goods returned, what
+has been paid, and what is still owed. It flags a bill where something does not add up — no bill
+number recorded, billed but never marked received, paid more than the bill, no item lines, or lines
+that do not add up to the total. Every figure comes off a recorded document; nothing is estimated,
+and where two documents disagree it says so rather than quietly picking one.
+
+On your own records it shows ₹37,670 billed across two purchases, ₹4,441 paid, ₹33,230 still owed —
+the same ₹33,230 that JAIN AUTO SALES shows as a balance — and flags both purchases for having no
+bill number, since neither was recorded with one.
+
+**One thing it says plainly rather than pretending:** a purchase is either received or not. Taking
+one bill in two separate deliveries is not something the app records yet, so the screen checks each
+bill as a whole and says so at the bottom.
+
 ## 2026-09-12 — The AI now tells you which service failed, and why, and stops giving up early
 
 Two real faults in how the app falls back between the three AI services.

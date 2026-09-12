@@ -655,6 +655,11 @@ export type SavePurchaseInput = {
    *  file — null for manual entry. jde_save_purchase rejects a second purchase with the same
    *  (company, hash) pair, so the exact same invoice file can never be recorded twice. */
   sourceFileHash?: string | null;
+  /** The supplier's own number for this bill, as printed on it. Recording it is what lets the same
+   *  bill be recognised if it is re-typed or re-photographed — the file hash only catches the
+   *  identical file. Blank is allowed: plenty of small bills carry no number at all. */
+  supplierInvoiceNo?: string | null;
+  supplierInvoiceDate?: string | null;
 };
 
 /** Atomically records a new purchase — PO header, line items, GRN, FIFO stock layers, and
@@ -676,6 +681,8 @@ export async function savePurchase(input: SavePurchaseInput): Promise<Record<str
       p_paid: input.paid,
       p_status: input.status,
       p_source_file_hash: input.sourceFileHash ?? null,
+      p_supplier_invoice_no: input.supplierInvoiceNo ?? null,
+      p_supplier_invoice_date: input.supplierInvoiceDate ?? null,
     })
     .single();
   if (error) throw error;

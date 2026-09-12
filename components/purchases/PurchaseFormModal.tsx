@@ -39,6 +39,10 @@ export type PurchaseFormModalProps = {
   supplierOptions: string[];
   purchaseDate: string;
   setPurchaseDate: (value: string) => void;
+  /** The supplier's own number for this bill. Blank is allowed — plenty of small bills carry none —
+   *  but when it is given, the same bill cannot be recorded against this supplier twice. */
+  supplierInvoiceNo: string;
+  setSupplierInvoiceNo: (value: string) => void;
   partOptions: PartOption[];
   lines: POLine[];
   setLines: Dispatch<SetStateAction<POLine[]>>;
@@ -60,6 +64,7 @@ export type PurchaseFormModalProps = {
 export default function PurchaseFormModal(props: PurchaseFormModalProps) {
   const {
     supplierName, setSupplierName, supplierOptions, purchaseDate, setPurchaseDate,
+    supplierInvoiceNo, setSupplierInvoiceNo,
     partOptions, lines, setLines, updateLine,
     paymentStatus, setPaymentStatus, amountPaid, setAmountPaid, total, paidAmount, lastPaid,
     purchaseError, savingPurchase, setShowPurchaseModal, recordPurchase,
@@ -111,6 +116,21 @@ export default function PurchaseFormModal(props: PurchaseFormModalProps) {
             <div className="form-group">
               <label className="form-label" htmlFor="purchase-date">Date</label>
               <input id="purchase-date" type="date" className="form-input" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label" htmlFor="purchase-bill-no">Supplier&apos;s bill number</label>
+              <input
+                id="purchase-bill-no"
+                className="form-input"
+                placeholder="As printed on the bill"
+                value={supplierInvoiceNo}
+                onChange={(event) => setSupplierInvoiceNo(event.target.value)}
+              />
+              <span className="form-hint">
+                {supplierInvoiceNo.trim()
+                  ? 'This bill cannot then be recorded twice for this supplier'
+                  : 'Optional, but it is what stops the same bill being paid twice'}
+              </span>
             </div>
           </div>
 

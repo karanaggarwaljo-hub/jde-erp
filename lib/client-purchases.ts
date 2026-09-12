@@ -20,6 +20,11 @@ export type SavePurchaseInput = {
   /** SHA-256 hash of the source invoice file — set when this purchase came from a scanned/
    *  imported file, so the server can reject the exact same file being recorded twice. */
   sourceFileHash?: string | null;
+  /** The supplier's own number for this bill, as printed on it. Recording it is what lets the same
+   *  bill be recognised if it is re-typed or re-photographed — the file hash only catches the
+   *  identical file. Blank is allowed: plenty of small bills carry no number at all. */
+  supplierInvoiceNo?: string | null;
+  supplierInvoiceDate?: string | null;
 };
 
 export type ReceivePurchaseStockInput = {
