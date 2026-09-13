@@ -2,6 +2,18 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-14 — The whole inventory on one page, and Website Catalog back in the menu list
+
+**Inventory is one scrolling list.** It used to show 25 parts at a time with page buttons. Now every
+part is on one page. The table scrolls inside a box the height of your window, so the column headings
+stay at the top while you scroll, and the sideways scrollbar is always on screen instead of hundreds
+of rows further down. Search, the category filter and the In Stock / Low / Out of Stock tabs work
+as before, and the bottom of the table says how many parts are showing.
+
+**Website Catalog scrolls with the rest of the side menu again.** It had been pinned at the bottom
+beside Settings, which took room away from the list on a smaller screen. It is back in the list
+under its own Website heading. Only Settings and Sign Out stay pinned at the bottom.
+
 ## 2026-09-14 — The top bar lines up with the menu, and shows which company you are in
 
 **The two bars now meet in one straight line.** The top bar was 60 pixels tall and the header of the
