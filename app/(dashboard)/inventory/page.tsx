@@ -942,13 +942,15 @@ export default function InventoryPage() {
                 <tr key={p.id}>
                   <td>
                     {p.part_number
-                      ? <span className="pn-chip" title={looksLikeAnInventedCode(p.part_number) ? 'This is a code this app generated, not the manufacturer’s part number — don’t quote it to a customer or supplier' : undefined}>
-                          {p.part_number}
-                          {looksLikeAnInventedCode(p.part_number) && <span style={{ marginLeft: '4px', opacity: 0.65, fontWeight: 400 }}>(internal)</span>}
+                      ? <span className="pn-cell">
+                          <span className="pn-chip">{p.part_number}</span>
+                          {looksLikeAnInventedCode(p.part_number) && (
+                            <span className="pn-tag" title={'This is a code this app generated, not the manufacturer’s part number — don’t quote it to a customer or supplier'}>Internal</span>
+                          )}
                         </span>
                       : <span className="text-muted" style={{ fontSize: '12px' }}>no part number</span>}
                   </td>
-                  <td style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{p.hsn_code || '-'}</td>
+                  <td className="hsn-code">{p.hsn_code || '-'}</td>
                   <td style={{ fontWeight: 600, maxWidth: '150px' }} className="truncate">{p.name}</td>
                   <td>
                     {p.brand
