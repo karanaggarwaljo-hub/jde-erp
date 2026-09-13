@@ -2,6 +2,33 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-14 — The side menu is tidier
+
+The side menu had grown untidy: four headings, one of them ("Online") sitting over a single item,
+two marks for the page you are on, a Sign Out that was permanently red, and two icons for Sales and
+Purchases that looked almost the same.
+
+**Three groups instead of four.** Daily work (Dashboard, Day Book, Inventory, Sales, Purchases),
+Customers & suppliers, and Money & reports. Nothing moved inside Daily work, so the screens you use
+at the counter are exactly where they were.
+
+**Website Catalog moved down beside Settings.** Choosing what the public website shows is something
+done now and then, not part of the day, and it no longer needs a heading of its own.
+
+**One highlight for the page you are on.** The row is tinted. It used to also carry a separate amber
+bar that sat slightly apart from the tint, so the two marks competed.
+
+**Sign Out is a plain row until you point at it**, then it turns red. Always red, it was the loudest
+thing in the menu while being the option used least.
+
+**Purchases now shows a truck and Expenses a wallet.** The old shopping bag for Purchases was close
+to the same shape as the shopping cart for Sales, and on a tablet-width screen, where the menu shows
+icons only, the icon is the only way to tell them apart. Hovering over an icon there now shows the
+screen's name.
+
+The menu is also shorter overall, so it has less need to scroll on a small or zoomed-in screen, and
+when it does, the scrollbar is thin instead of a hard grey line down its edge.
+
 ## 2026-09-12 — Credit notes can be seen and undone, which is what the duplicates needed
 
 The day book showed three identical ₹3,500 credit notes against INV-1013. Fixing them turned out
