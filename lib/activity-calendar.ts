@@ -27,6 +27,9 @@ export type DayCell = {
   level: 0 | 1 | 2 | 3 | 4;
   /** True for grid squares that fall after today — drawn empty, never as a quiet day. */
   future: boolean;
+  /** True for squares before the first record this company ever entered. The books didn't go back
+   *  that far, which is not the same as a quiet day, so these are drawn as outlines. */
+  beforeRecords: boolean;
 };
 
 export type ActivityStats = {
@@ -88,23 +91,6 @@ function levelFor(total: number, busiest: number): DayCell['level'] {
   return 1;
 }
 
-/** How many weeks of squares are worth drawing.
- *
- *  Fixed at 26 weeks, a business that started keeping records five weeks ago gets four months of
- *  blank grid — squares that read as "quiet days" when the truth is the books simply don't go
- *  back that far. So the window reaches back to the oldest record and no further, within sensible
- *  bounds: never so short that a run of good days fills the card, never longer than half a year. */
-export function suggestWeeks(events: ActivityEvent[], today: string, min = 8, max = 26): number {
-  let oldest: string | null = null;
-  for (const event of events) {
-    if (!ISO_DAY.test(event.day)) continue;
-    if (!oldest || event.day < oldest) oldest = event.day;
-  }
-  if (!oldest) return min + 4;
-  const days = Math.max(0, Math.round((toUtc(today) - toUtc(oldest)) / DAY_MS));
-  return Math.min(max, Math.max(min, Math.ceil(days / 7) + 1));
-}
-
 /**
  * Lays the given events out over the `weeks` calendar weeks ending with the week containing
  * `today`, and counts the streaks and totals that go with them.
@@ -112,6 +98,12 @@ export function suggestWeeks(events: ActivityEvent[], today: string, min = 8, ma
  * Events dated outside the window are ignored for the grid but still shape `firstDay`/`lastDay`,
  * so the card can say how far back the records actually go rather than implying the window is
  * all there is.
+ *
+ * The window is a fixed half year, so the card can fill the Dashboard's width with squares big
+ * enough to read. A business that started keeping records five weeks ago would otherwise get four
+ * months of squares reading as "quiet days", when the truth is the books simply don't go back that
+ * far. So days before the first record are marked `beforeRecords`, and quiet days and streaks are
+ * counted from the first record, not from the start of the window.
  */
 export function buildActivityCalendar(
   events: ActivityEvent[],
@@ -157,21 +149,25 @@ export function buildActivityCalendar(
       const counts = byDay.get(day) ?? emptyCounts();
       const total = ACTIVITY_KINDS.reduce((sum, kind) => sum + counts[kind], 0);
       const future = day > today;
+      const beforeRecords = !future && firstDay !== null && day < firstDay;
       column.push({
         day,
         counts,
         total: future ? 0 : total,
-        level: future ? 0 : levelFor(total, busiestInWindow),
+        level: future || beforeRecords ? 0 : levelFor(total, busiestInWindow),
         future,
+        beforeRecords,
       });
     }
     grid.push(column);
   }
 
   // Streaks and active-day counts are measured over the window that is on screen, so the number
-  // in the tile always matches the squares beside it.
+  // in the tile always matches the squares beside it. They start at the first record when that
+  // falls inside the window: a day before the books began was not a quiet day.
+  const countFrom = firstDay !== null && firstDay > windowStart ? firstDay : windowStart;
   const daysInWindow: string[] = [];
-  for (let day = windowStart; day <= today; day = shiftDay(day, 1)) daysInWindow.push(day);
+  for (let day = countFrom; day <= today; day = shiftDay(day, 1)) daysInWindow.push(day);
 
   const isActive = (day: string) => (byDay.get(day)?.sale ?? 0) + (byDay.get(day)?.purchase ?? 0)
     + (byDay.get(day)?.expense ?? 0) + (byDay.get(day)?.quotation ?? 0) > 0;

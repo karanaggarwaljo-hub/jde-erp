@@ -1,24 +1,37 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, type CSSProperties } from 'react';
 import { CalendarDays } from 'lucide-react';
-import { buildActivityCalendar, suggestWeeks, type ActivityEvent } from '@/lib/activity-calendar';
+import { buildActivityCalendar, type ActivityEvent, type DayCell } from '@/lib/activity-calendar';
 
 type Props = {
   events: ActivityEvent[];
   /** Today as YYYY-MM-DD, passed in so the card and the rest of the page agree on the date. */
   today: string;
-  /** How many calendar weeks of squares to draw. Left out, it reaches back to the oldest record
-   *  and no further, so a young set of books isn't padded with blank squares. */
+  /** How many calendar weeks of squares to draw. Half a year fills the Dashboard's full width with
+   *  squares big enough to read at a glance. */
   weeks?: number;
 };
 
-const WEEKDAY_LABELS = ['Mon', '', 'Wed', '', 'Fri', '', 'Sun'];
+const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 function prettyDay(day: string): string {
   const parsed = new Date(`${day}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return day;
   return parsed.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function describeDay(cell: DayCell): string {
+  if (cell.future) return `${prettyDay(cell.day)} — not yet`;
+  if (cell.beforeRecords) return `${prettyDay(cell.day)} — before your first record`;
+  if (cell.total === 0) return `${prettyDay(cell.day)} — nothing recorded`;
+  const parts = [
+    cell.counts.sale ? `${cell.counts.sale} sale${cell.counts.sale === 1 ? '' : 's'}` : '',
+    cell.counts.purchase ? `${cell.counts.purchase} purchase${cell.counts.purchase === 1 ? '' : 's'}` : '',
+    cell.counts.expense ? `${cell.counts.expense} expense${cell.counts.expense === 1 ? '' : 's'}` : '',
+    cell.counts.quotation ? `${cell.counts.quotation} quotation${cell.counts.quotation === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  return `${prettyDay(cell.day)} — ${cell.total} record${cell.total === 1 ? '' : 's'}: ${parts.join(', ')}`;
 }
 
 /**
@@ -30,15 +43,22 @@ function prettyDay(day: string): string {
  * a row was typed in (and are dominated by bulk imports), so an hour figure would look convincing
  * and mean nothing. See lib/activity-calendar.ts.
  */
-export default function ActivityCalendar({ events, today, weeks }: Props) {
-  const shownWeeks = useMemo(() => weeks ?? suggestWeeks(events, today), [events, today, weeks]);
+export default function ActivityCalendar({ events, today, weeks = 26 }: Props) {
   const { weeks: grid, stats, windowStart } = useMemo(
-    () => buildActivityCalendar(events, today, shownWeeks),
-    [events, today, shownWeeks]
+    () => buildActivityCalendar(events, today, weeks),
+    [events, today, weeks]
   );
 
+  // On a phone the squares stop shrinking and the grid scrolls sideways, so start it at the most
+  // recent weeks rather than at the oldest.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (scroller) scroller.scrollLeft = scroller.scrollWidth;
+  }, [grid.length]);
+
   // A month name above the column where that month starts, so a run of squares can be placed in
-  // the year without labelling all 26 columns.
+  // the year without labelling every column.
   const monthLabels = grid.map((column, index) => {
     const first = column[0].day;
     const month = first.slice(0, 7);
@@ -54,21 +74,21 @@ export default function ActivityCalendar({ events, today, weeks }: Props) {
       : `${stats.currentStreak === 1 ? 'Today' : 'Including today'}`;
 
   return (
-    <div className="card">
+    <div className="card mb-6">
       <div className="card-header">
         <div>
           <h3 className="card-title flex items-center gap-2"><CalendarDays size={16} /> Everyday Activity</h3>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Every invoice, purchase, expense and quotation you recorded, by the date on it — last {shownWeeks} weeks
+            Every invoice, purchase, expense and quotation you recorded, by the date on it — last {grid.length} weeks
           </p>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gap: '10px', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', marginBottom: '18px' }}>
+      <div style={{ display: 'grid', gap: '12px', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', marginBottom: '22px' }}>
         <div className="activity-stat">
           <div className="activity-stat-label">Days with activity</div>
           <div className="activity-stat-value">{stats.activeDays}</div>
-          <div className="activity-stat-context">{stats.quietDays} quiet {stats.quietDays === 1 ? 'day' : 'days'} in this window</div>
+          <div className="activity-stat-context">{stats.quietDays} quiet {stats.quietDays === 1 ? 'day' : 'days'} since your first record</div>
         </div>
         <div className="activity-stat">
           <div className="activity-stat-label">Current run</div>
@@ -82,7 +102,7 @@ export default function ActivityCalendar({ events, today, weeks }: Props) {
         </div>
         <div className="activity-stat">
           <div className="activity-stat-label">Busiest day</div>
-          <div className="activity-stat-value" style={{ fontSize: stats.busiestDay ? '16px' : '20px' }}>
+          <div className="activity-stat-value" style={{ fontSize: stats.busiestDay ? '19px' : '24px' }}>
             {stats.busiestDay ? prettyDay(stats.busiestDay.day) : '—'}
           </div>
           <div className="activity-stat-context">
@@ -99,49 +119,38 @@ export default function ActivityCalendar({ events, today, weeks }: Props) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', paddingTop: '17px', flex: 'none' }} aria-hidden="true">
-          {WEEKDAY_LABELS.map((label, index) => (
-            <div key={index} style={{ height: '13px', fontSize: '10.5px', lineHeight: '13px', color: 'var(--ink-3)', width: '26px' }}>{label}</div>
+      <div ref={scrollRef} className="activity-scroll">
+        <div
+          className="activity-grid"
+          style={{ '--activity-weeks': grid.length } as CSSProperties}
+          role="img"
+          aria-label={`Daily activity from ${windowStart} to ${today}: ${stats.activeDays} days with records`}
+        >
+          {monthLabels.map((label, index) => label && (
+            <div key={`month-${index}`} className="activity-month" style={{ gridColumn: index + 2 }} aria-hidden="true">{label}</div>
           ))}
-        </div>
-
-        <div style={{ overflowX: 'auto', flex: 1 }}>
-          <div className="activity-months" aria-hidden="true">
-            {monthLabels.map((label, index) => <div key={index} className="activity-month">{label}</div>)}
-          </div>
-          <div className="activity-grid" role="img" aria-label={`Daily activity from ${windowStart} to ${today}: ${stats.activeDays} days with records`}>
-            {grid.map((column, weekIndex) => (
-              <div key={weekIndex} className="activity-week">
-                {column.map((cell) => (
-                  <div
-                    key={cell.day}
-                    className="activity-day"
-                    data-level={cell.level}
-                    data-future={cell.future ? 'true' : 'false'}
-                    title={cell.future
-                      ? `${prettyDay(cell.day)} — not yet`
-                      : cell.total === 0
-                        ? `${prettyDay(cell.day)} — nothing recorded`
-                        : `${prettyDay(cell.day)} — ${cell.total} record${cell.total === 1 ? '' : 's'}: ${[
-                            cell.counts.sale ? `${cell.counts.sale} sale${cell.counts.sale === 1 ? '' : 's'}` : '',
-                            cell.counts.purchase ? `${cell.counts.purchase} purchase${cell.counts.purchase === 1 ? '' : 's'}` : '',
-                            cell.counts.expense ? `${cell.counts.expense} expense${cell.counts.expense === 1 ? '' : 's'}` : '',
-                            cell.counts.quotation ? `${cell.counts.quotation} quotation${cell.counts.quotation === 1 ? '' : 's'}` : '',
-                          ].filter(Boolean).join(', ')}`}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
+          {WEEKDAY_LABELS.map((label, index) => (
+            <div key={label} className="activity-weekday" style={{ gridRow: index + 2 }} aria-hidden="true">{label}</div>
+          ))}
+          {grid.map((column, weekIndex) => column.map((cell, weekday) => (
+            <div
+              key={cell.day}
+              className="activity-day"
+              data-level={cell.level}
+              data-future={cell.future ? 'true' : 'false'}
+              data-before={cell.beforeRecords ? 'true' : 'false'}
+              style={{ gridColumn: weekIndex + 2, gridRow: weekday + 2 }}
+              title={describeDay(cell)}
+            />
+          )))}
         </div>
       </div>
 
-      <div className="flex justify-between items-center" style={{ marginTop: '12px', flexWrap: 'wrap', gap: '10px' }}>
-        <p className="text-muted" style={{ fontSize: '11.5px', margin: 0 }}>
+      <div className="flex justify-between items-center" style={{ marginTop: '14px', flexWrap: 'wrap', gap: '10px' }}>
+        <p className="text-muted" style={{ fontSize: '12px', margin: 0 }}>
           {stats.totalRecords === 0
             ? 'Nothing recorded yet — squares will fill in as you enter sales, purchases and expenses.'
-            : `Records on file from ${prettyDay(stats.firstDay!)} onwards. Hover a square to see that day.`}
+            : `Records on file from ${prettyDay(stats.firstDay!)} onwards; the plain outlined squares before that are days before your first record. Hover a square to see that day.`}
           {' '}Time of day isn&apos;t shown because this system records the date on a sale, not the hour.
         </p>
         <div className="activity-legend">

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   TrendingUp,
   ShoppingCart,
@@ -33,8 +33,6 @@ type PurchaseOrder = { id: string; supplier: string; date: string; total: number
 type Grn = { id: string; po_number: string; supplier: string; received_at: string };
 type Quotation = { id: string; customer: string; date: string; total: number };
 type Expense = { id: string; date: string };
-
-type TrendPeriod = '7 Days' | '30 Days' | '1 Year';
 
 function isoDate(d: Date) {
   return d.toISOString().split('T')[0];
@@ -78,8 +76,6 @@ export default function DashboardPage() {
   // rather than like missing data. Say so instead of drawing them.
   const dataError = productsError ?? customersError ?? suppliersError ?? invoicesError
     ?? purchaseOrdersError ?? grnsError ?? quotationsError ?? expensesError ?? stockLayersError;
-
-  const [activePeriod, setActivePeriod] = useState<TrendPeriod>('7 Days');
 
   const today = isoDate(new Date());
   const yesterday = isoDate(daysAgoDate(1));
@@ -222,34 +218,6 @@ export default function DashboardPage() {
     return events.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
   }, [invoices, grns, purchaseOrders, quotations, lowStockProducts, today]);
 
-  const chartData = useMemo(() => {
-    if (activePeriod === '7 Days') {
-      return Array.from({ length: 7 }, (_, i) => {
-        const d = daysAgoDate(6 - i);
-        const iso = isoDate(d);
-        return { day: d.toLocaleDateString('en-IN', { weekday: 'short' }), sale: sumInRange(invoices, iso, iso), pur: sumInRange(purchaseOrders, iso, iso) };
-      });
-    }
-    if (activePeriod === '30 Days') {
-      return Array.from({ length: 6 }, (_, i) => {
-        const bucketStart = daysAgoDate(29 - i * 5);
-        const bucketEnd = daysAgoDate(Math.max(0, 25 - i * 5));
-        const from = isoDate(bucketStart);
-        const to = isoDate(bucketEnd);
-        return { day: bucketStart.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' }), sale: sumInRange(invoices, from, to), pur: sumInRange(purchaseOrders, from, to) };
-      });
-    }
-    return Array.from({ length: 12 }, (_, i) => {
-      const monthDate = new Date();
-      monthDate.setMonth(monthDate.getMonth() - (11 - i));
-      const from = isoDate(new Date(monthDate.getFullYear(), monthDate.getMonth(), 1));
-      const to = isoDate(new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0));
-      return { day: monthDate.toLocaleDateString('en-IN', { month: 'short' }), sale: sumInRange(invoices, from, to), pur: sumInRange(purchaseOrders, from, to) };
-    });
-  }, [activePeriod, invoices, purchaseOrders]);
-
-  const chartMax = Math.max(1, Math.ceil(Math.max(...chartData.flatMap((item) => [item.sale, item.pur])) / 1000) * 1000);
-
   return (
     <div>
       <div className="page-header">
@@ -339,72 +307,40 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="dashboard-split mb-6">
-        <div className="card">
-          <div className="card-header dashboard-chart-header">
-            <div>
-              <h3 className="card-title">Sales vs Purchases</h3>
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{activePeriod} comparison · amounts in ₹</p>
-            </div>
-            <div className="tabs period-tabs" aria-label="Sales chart period">
-              {(['7 Days', '30 Days', '1 Year'] as TrendPeriod[]).map((period) => (
-                <button key={period} className={`tab ${activePeriod === period ? 'active' : ''}`} onClick={() => setActivePeriod(period)} aria-pressed={activePeriod === period}>
-                  {period}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="dashboard-chart" role="img" aria-label={`${activePeriod} sales and purchases bar chart, values in rupees`}>
-            {chartData.map((item, index) => (
-              <div key={`${item.day}-${index}`} className="chart-column">
-                <div className="chart-bars">
-                  <div className="chart-bar sales-bar" style={{ height: `${(item.sale / chartMax) * 100}%` }} title={`Sales: ₹${money(item.sale)}`} />
-                  <div className="chart-bar purchases-bar" style={{ height: `${(item.pur / chartMax) * 100}%` }} title={`Purchases: ₹${money(item.pur)}`} />
-                </div>
-                <span>{item.day}</span>
-              </div>
-            ))}
-          </div>
-          <div className="chart-legend">
-            <div><i className="legend-dot sales-dot" />Sales Revenue</div>
-            <div><i className="legend-dot purchases-dot" />Purchases Expense</div>
-          </div>
-        </div>
-
-        <div className="card">
-          <div className="card-header">
-            <div>
-              <h3 className="card-title">Critical Low Stock</h3>
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Below their minimum stock threshold</p>
-            </div>
-            <span className="badge badge-danger">{lowStockProducts.length} items</span>
-          </div>
-          <div className="low-stock-list">
-            {lowStockProducts.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No parts are below their minimum stock.</p>}
-            {lowStockProducts.map((product) => (
-              <div key={product.id} className="low-stock-item">
-                <div className="flex justify-between items-center mb-1">
-                  <span style={{ fontWeight: 600, fontSize: '13px' }}>{product.name}</span>
-                  <span className="badge badge-info">{product.category}</span>
-                </div>
-                <div className="flex justify-between items-center" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  <span>Code: {product.part_number} ({product.brand}) · Loc: {product.location}</span>
-                  <span className="text-danger font-semibold">{product.current_stock} / min {product.min_stock}</span>
-                </div>
-                <span className="reorder-quantity">Recommended reorder: {Math.max(0, product.min_stock * 2 - product.current_stock)} units</span>
-              </div>
-            ))}
-          </div>
-          {lowStockProducts.length > 0 && (
-            <Link href="/purchases" className="btn btn-secondary btn-sm w-full mt-4" style={{ justifyContent: 'center' }}>
-              Review reorder PO for {lowStockProducts.length} critical part(s) <ArrowRight size={14} />
-            </Link>
-          )}
-        </div>
-      </div>
-
+      {/* Full width, where the Sales vs Purchases chart used to sit beside Critical Low Stock. The
+          owner asked for the chart to go and for this card to be the big one. */}
       <ActivityCalendar events={activityEvents} today={today} />
+
+      <div className="card mb-6">
+        <div className="card-header">
+          <div>
+            <h3 className="card-title">Critical Low Stock</h3>
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Below their minimum stock threshold</p>
+          </div>
+          <span className="badge badge-danger">{lowStockProducts.length} items</span>
+        </div>
+        <div className="low-stock-list">
+          {lowStockProducts.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No parts are below their minimum stock.</p>}
+          {lowStockProducts.map((product) => (
+            <div key={product.id} className="low-stock-item">
+              <div className="flex justify-between items-center mb-1">
+                <span style={{ fontWeight: 600, fontSize: '13px' }}>{product.name}</span>
+                <span className="badge badge-info">{product.category}</span>
+              </div>
+              <div className="flex justify-between items-center" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                <span>Code: {product.part_number} ({product.brand}) · Loc: {product.location}</span>
+                <span className="text-danger font-semibold">{product.current_stock} / min {product.min_stock}</span>
+              </div>
+              <span className="reorder-quantity">Recommended reorder: {Math.max(0, product.min_stock * 2 - product.current_stock)} units</span>
+            </div>
+          ))}
+        </div>
+        {lowStockProducts.length > 0 && (
+          <Link href="/purchases" className="btn btn-secondary btn-sm w-full mt-4" style={{ justifyContent: 'center' }}>
+            Review reorder PO for {lowStockProducts.length} critical part(s) <ArrowRight size={14} />
+          </Link>
+        )}
+      </div>
 
       <div className="card">
         <div className="card-header">

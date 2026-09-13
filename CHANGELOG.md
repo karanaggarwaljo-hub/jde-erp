@@ -2,6 +2,21 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-14 — Everyday Activity is the big card on the Dashboard
+
+**The Sales vs Purchases chart is gone** from the Dashboard, as asked.
+
+**Everyday Activity now runs the full width of the page** where the chart used to be, with much
+bigger squares that stretch to fill the card, every weekday named down the side, and larger figures
+in the tiles above. It always shows the last six months. On a phone it starts at the latest weeks
+and you can swipe back to older ones.
+
+**Days before your first record are drawn as plain outlines**, not as quiet days, because the books
+didn't go back that far yet. "Quiet days" now counts only from your first record, so it no longer
+counts days before you started using the ERP.
+
+Critical Low Stock now sits below it at full width, unchanged otherwise.
+
 ## 2026-09-14 — Sales, Purchases and Expenses share one menu row
 
 The Day Book's buttons now start a sale, a purchase or an expense directly, so three separate rows
