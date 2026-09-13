@@ -2,61 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import {
-  LayoutDashboard,
-  BookOpen,
-  Package,
-  ShoppingCart,
-  ShoppingBag,
-  Users,
-  Building2,
-  Receipt,
-  FileText,
-  BarChart3,
-  Globe,
-  Settings,
-  LogOut
-} from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { logout } from '@/lib/client-auth';
-
-// Grouped by what the person is actually doing, not by how the app is built: the day-to-day
-// counter work first, then the two address books, then the money side, then the public site.
-// Settings sits apart in the footer — it is administration, not part of anyone's daily loop.
-const navGroups = [
-  {
-    label: 'Operations',
-    items: [
-      { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
-      { name: 'Day Book', href: '/daybook', icon: BookOpen },
-      { name: 'Inventory', href: '/inventory', icon: Package },
-      { name: 'Sales', href: '/sales', icon: ShoppingCart },
-      { name: 'Purchases', href: '/purchases', icon: ShoppingBag },
-    ],
-  },
-  {
-    label: 'Contacts',
-    items: [
-      { name: 'Customers', href: '/customers', icon: Users },
-      { name: 'Suppliers', href: '/suppliers', icon: Building2 },
-    ],
-  },
-  {
-    label: 'Finance',
-    items: [
-      { name: 'Expenses', href: '/expenses', icon: Receipt },
-      { name: 'Reports', href: '/reports', icon: FileText },
-      { name: 'Analytics', href: '/analytics', icon: BarChart3 },
-    ],
-  },
-  {
-    label: 'Online',
-    items: [
-      { name: 'Website Catalog', href: '/catalog-admin', icon: Globe },
-    ],
-  },
-];
-
-const settingsItem = { name: 'Settings', href: '/settings', icon: Settings };
+import { footerItems, navGroups, type NavItem } from '@/components/sidebar-nav';
 
 type SidebarProps = {
   /** Whether the mobile slide-out drawer is open — irrelevant/inert above the 768px breakpoint,
@@ -77,23 +25,29 @@ export default function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps
     router.push('/login');
   };
 
-  const isActive = (href: string) => pathname === href || pathname?.startsWith(href + '/');
+  const isActive = (href: string) => pathname === href || Boolean(pathname?.startsWith(href + '/'));
 
-  const navLink = ({ name, href, icon: Icon }: { name: string; href: string; icon: typeof Settings }) => (
-    <Link
-      key={name}
-      href={href}
-      // Every dashboard destination is dynamic and authenticated. Next's default
-      // viewport prefetch turns this persistent sidebar into a burst of server renders
-      // (and proxy/auth checks) before the user has asked to visit any of them.
-      prefetch={false}
-      className={`sidebar-item ${isActive(href) ? 'active' : ''}`}
-      onClick={onNavigate}
-    >
-      <Icon className="sidebar-item-icon" />
-      <span>{name}</span>
-    </Link>
-  );
+  const navLink = ({ name, href, icon: Icon }: NavItem) => {
+    const active = isActive(href);
+    return (
+      <Link
+        key={href}
+        href={href}
+        // Every dashboard destination is dynamic and authenticated. Next's default
+        // viewport prefetch turns this persistent sidebar into a burst of server renders
+        // (and proxy/auth checks) before the user has asked to visit any of them.
+        prefetch={false}
+        className={`sidebar-item ${active ? 'active' : ''}`}
+        aria-current={active ? 'page' : undefined}
+        // The tablet-width menu shows icons only, so the name has to be reachable on hover there.
+        title={name}
+        onClick={onNavigate}
+      >
+        <Icon className="sidebar-item-icon" aria-hidden="true" />
+        <span>{name}</span>
+      </Link>
+    );
+  };
 
   return (
     <aside className={`erp-sidebar ${mobileOpen ? 'open' : ''}`}>
@@ -105,9 +59,9 @@ export default function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps
         </div>
       </div>
 
-      <nav className="sidebar-nav">
+      <nav className="sidebar-nav" aria-label="Main">
         {navGroups.map((group) => (
-          <div key={group.label}>
+          <div key={group.label} className="sidebar-group">
             <div className="sidebar-section-label">{group.label}</div>
             {group.items.map(navLink)}
           </div>
@@ -115,9 +69,9 @@ export default function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps
       </nav>
 
       <div className="sidebar-footer">
-        {navLink(settingsItem)}
-        <button type="button" onClick={handleSignOut} className="sidebar-item" style={{ color: 'var(--color-danger)', width: '100%', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer' }}>
-          <LogOut className="sidebar-item-icon" />
+        {footerItems.map(navLink)}
+        <button type="button" onClick={handleSignOut} className="sidebar-item sidebar-signout" title="Sign Out">
+          <LogOut className="sidebar-item-icon" aria-hidden="true" />
           <span>Sign Out</span>
         </button>
       </div>
