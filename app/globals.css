@@ -614,55 +614,6 @@ Dashboard Priorities & Insights
   gap: 16px;
 }
 
-.dashboard-chart-header { gap: 12px; }
-
-.dashboard-chart {
-  align-items: flex-end;
-  display: flex;
-  gap: 12px;
-  height: 240px;
-  padding: 20px 10px 10px;
-}
-
-.chart-column {
-  align-items: center;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 8px;
-  height: 100%;
-  justify-content: flex-end;
-  min-width: 0;
-}
-
-.chart-column > span { color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-
-.chart-bars {
-  align-items: flex-end;
-  display: flex;
-  gap: 4px;
-  height: 180px;
-  width: 100%;
-}
-
-.chart-bar { border-radius: var(--radius-sm) var(--radius-sm) 0 0; flex: 1; min-height: 3px; transition: height var(--transition-slow); }
-.sales-bar { background: var(--amber); }
-.purchases-bar { background: var(--ind); }
-
-.chart-legend {
-  border-top: 1px solid var(--line);
-  color: var(--ink-3);
-  display: flex;
-  font-size: 12px;
-  justify-content: space-between;
-  padding: 12px;
-}
-
-.chart-legend > div { align-items: center; display: flex; gap: 8px; }
-.legend-dot { border-radius: 2px; display: inline-block; height: 10px; width: 10px; }
-.sales-dot { background: var(--amber); }
-.purchases-dot { background: var(--ind); }
-
 .low-stock-list { display: flex; flex-direction: column; gap: 10px; }
 
 /* Low stock is a warning, not a failure — amber tint, not rose. */
@@ -1493,10 +1444,6 @@ Modal
   .form-grid-2, .form-grid-3, .form-grid-4, .form-grid-5 { grid-template-columns: 1fr; }
   .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
   .attention-grid, .dashboard-split { grid-template-columns: 1fr; }
-  .dashboard-chart-header { align-items: flex-start; flex-direction: column; }
-  .period-tabs { width: 100%; }
-  .period-tabs .tab { flex: 1; padding-left: 8px; padding-right: 8px; }
-  .chart-legend { gap: 12px; justify-content: flex-start; }
   .topbar-company-trigger { padding: 6px 8px; }
   .topbar-company-icon { display: none; }
   .keyboard-hint, .profile-copy, .profile-trigger > svg, .topbar-actions > .btn { display: none; }
@@ -1976,25 +1923,44 @@ Modal
 .dropzone-hint { font-size: 12.5px; color: var(--ink-3); line-height: 1.5; }
 
 /* ── Activity heatmap ───────────────────────────────────────────────────────────────────────
-   One square per day, columns running left to right as weeks. The five fills are the app's own
-   amber ramp rather than a second palette, and level 0 uses the panel tint so a quiet day still
-   reads as a day rather than as a hole in the grid. */
-.activity-grid {
-  display: flex;
-  gap: 3px;
+   One square per day, columns running left to right as weeks, stretched to fill the Dashboard's
+   full width. The five fills are the app's own amber ramp rather than a second palette, and level 0
+   uses the panel tint so a quiet day still reads as a day rather than as a hole in the grid. */
+.activity-scroll {
   overflow-x: auto;
   padding-bottom: 4px;
 }
 
-.activity-week { display: flex; flex-direction: column; gap: 3px; }
+/* Weekday names in the first column, month names along the first row, and one column per week.
+   Squares grow with the card up to 44px; on a phone they stop at 12px and the grid scrolls. */
+.activity-grid {
+  display: grid;
+  grid-template-columns: 32px repeat(var(--activity-weeks, 26), minmax(12px, 44px));
+  gap: 5px;
+  align-items: center;
+  min-width: calc(32px + var(--activity-weeks, 26) * 17px);
+}
+
+.activity-month {
+  grid-row: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+.activity-weekday {
+  grid-column: 1;
+  font-size: 11px;
+  color: var(--ink-3);
+}
 
 .activity-day {
-  width: 13px;
-  height: 13px;
-  border-radius: 3px;
+  aspect-ratio: 1;
+  /* A share of the square rather than fixed pixels, so a 12px phone square isn't rounded into a dot. */
+  border-radius: 18%;
   background: var(--panel-2);
   border: 1px solid var(--line);
-  flex: none;
 }
 
 .activity-day[data-level="1"] { background: #FBE7C2; border-color: var(--amber-line); }
@@ -2006,6 +1972,10 @@ Modal
    with nothing on it. */
 .activity-day[data-future="true"] { background: transparent; border-style: dashed; }
 
+/* Days before the first record: a plain outline with no fill. The books didn't go back that far,
+   which is different from a day that was quiet. */
+.activity-day[data-before="true"] { background: transparent; }
+
 .activity-legend {
   display: flex;
   align-items: center;
@@ -2014,23 +1984,13 @@ Modal
   color: var(--ink-3);
 }
 
-.activity-legend .activity-day { width: 11px; height: 11px; }
-
-.activity-months {
-  display: flex;
-  gap: 3px;
-  font-size: 10.5px;
-  color: var(--ink-3);
-  margin-bottom: 4px;
-}
-
-.activity-month { width: 13px; flex: none; white-space: nowrap; }
+.activity-legend .activity-day { width: 14px; height: 14px; border-radius: 3px; flex: none; }
 
 .activity-stat {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  padding: 10px 12px;
+  padding: 12px 14px;
 }
 
 .activity-stat-label {
@@ -2042,7 +2002,7 @@ Modal
 }
 
 .activity-stat-value {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--ink);
   font-variant-numeric: tabular-nums;

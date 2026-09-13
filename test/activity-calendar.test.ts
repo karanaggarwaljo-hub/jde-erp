@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildActivityCalendar, shiftDay, suggestWeeks, type ActivityEvent } from '../lib/activity-calendar';
+import { buildActivityCalendar, shiftDay, type ActivityEvent } from '../lib/activity-calendar';
 
 const TODAY = '2026-09-02'; // a Wednesday
 
@@ -57,10 +57,33 @@ test('a single day of trading still shades, rather than dividing by itself into 
 });
 
 test('counts active and quiet days over the window on screen', () => {
-  const { stats } = buildActivityCalendar([sale('2026-09-01'), sale(TODAY)], TODAY, 1);
+  const { stats } = buildActivityCalendar([sale('2026-08-31'), sale(TODAY)], TODAY, 1);
   // Monday 31 Aug to Wednesday 2 Sep is 3 days elapsed this week.
   assert.equal(stats.activeDays, 2);
   assert.equal(stats.quietDays, 1);
+});
+
+/** The card always draws half a year, so a young set of books must not read as months of quiet. */
+test('days before the first record are marked as such, not drawn as quiet days', () => {
+  const { weeks } = buildActivityCalendar([sale('2026-09-01'), sale(TODAY)], TODAY, 26);
+  const cells = weeks.flat();
+  const before = cells.find((cell) => cell.day === '2026-08-31')!;
+  assert.equal(before.beforeRecords, true);
+  assert.equal(before.level, 0);
+  assert.equal(cells.find((cell) => cell.day === '2026-09-01')!.beforeRecords, false);
+  assert.equal(cells.find((cell) => cell.day === '2026-09-03')!.beforeRecords, false, 'a day to come is future, not before');
+});
+
+test('quiet days are counted from the first record, not from the start of the window', () => {
+  const { stats } = buildActivityCalendar([sale('2026-08-30'), sale(TODAY)], TODAY, 26);
+  // Sunday 30 Aug to Wednesday 2 Sep is 4 days, with records on 2 of them.
+  assert.equal(stats.activeDays, 2);
+  assert.equal(stats.quietDays, 2);
+});
+
+test('with nothing recorded, no square claims to be before the records', () => {
+  const { weeks } = buildActivityCalendar([], TODAY, 4);
+  assert.ok(weeks.flat().every((cell) => !cell.beforeRecords));
 });
 
 test('a run of consecutive trading days is the current streak', () => {
@@ -133,24 +156,4 @@ test('day arithmetic crosses month and year boundaries', () => {
   assert.equal(shiftDay('2026-08-31', 1), '2026-09-01');
   assert.equal(shiftDay('2026-01-01', -1), '2025-12-31');
   assert.equal(shiftDay('2028-02-28', 1), '2028-02-29');
-});
-
-test('the window reaches back to the oldest record, not a fixed six months', () => {
-  // Books that start five weeks ago should not be padded with four blank months.
-  const events = [sale('2026-07-30'), sale(TODAY)];
-  assert.equal(suggestWeeks(events, TODAY), 8, 'clamped up to the eight-week floor');
-
-  const older = [sale('2026-01-05'), sale(TODAY)];
-  assert.equal(suggestWeeks(older, TODAY), 26, 'clamped down to the six-month ceiling');
-
-  const middling = [sale('2026-05-01'), sale(TODAY)];
-  assert.equal(suggestWeeks(middling, TODAY), 19);
-});
-
-test('with no records at all it still draws a sensible empty grid', () => {
-  assert.equal(suggestWeeks([], TODAY), 12);
-});
-
-test('a malformed date cannot stretch the window back to 1970', () => {
-  assert.equal(suggestWeeks([{ day: 'not-a-date', kind: 'sale' }, sale(TODAY)], TODAY), 8);
 });
