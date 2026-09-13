@@ -2,6 +2,19 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-14 — Sales, Purchases and Expenses share one menu row
+
+The Day Book's buttons now start a sale, a purchase or an expense directly, so three separate rows
+for them in the side menu had become clutter.
+
+**They are now one row, Transactions**, under Daily work. Click it and Sales, Purchases and Expenses
+open beneath it; click it again to close them.
+
+**It opens by itself when you are on one of the three**, including an invoice inside Sales, so the
+highlighted screen is never hidden. If you close it there, the Transactions row takes the highlight.
+
+Nothing else moved. Money & reports now holds Reports and Analytics.
+
 ## 2026-09-14 — Recording from the Day Book takes one click
 
 Recording from the Day Book was harder than it should have been. Its three buttons were small, grey

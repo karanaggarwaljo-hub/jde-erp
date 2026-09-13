@@ -364,6 +364,46 @@ input, textarea, select { font-family: inherit; }
   flex-shrink: 0;
 }
 
+/* Transactions: one row that opens to show Sales, Purchases and Expenses beneath it. */
+.sidebar-menu-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  font-family: inherit;
+  text-align: left;
+}
+
+.sidebar-menu-chevron {
+  width: 15px;
+  height: 15px;
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--ink-4);
+  transition: transform var(--transition-fast);
+}
+
+.sidebar-menu-toggle.open .sidebar-menu-chevron {
+  transform: rotate(90deg);
+}
+
+/* The screens inside the row hang off a thin line under its icon, so they read as belonging to it. */
+.sidebar-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 4px 20px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line-2);
+}
+
+.sidebar-submenu[hidden] {
+  display: none;
+}
+
+.sidebar-subitem {
+  font-size: 13px;
+}
+
 /* Settings and Sign Out, pinned below the list. Every other screen scrolls with the menu. */
 .sidebar-footer {
   padding: 8px 12px 12px;
@@ -1422,6 +1462,9 @@ Modal
   .sidebar-logo { justify-content: center; padding: 0; }
   /* With the group names hidden, a hairline between groups keeps the icons in their clusters. */
   .sidebar-group + .sidebar-group { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; }
+  /* No room to indent on the icon-only menu, so an opened row's screens sit on a shaded panel. */
+  .sidebar-menu-chevron { display: none; }
+  .sidebar-submenu { margin: 2px 0 4px; padding-left: 0; border-left: 0; background: var(--panel-2); border-radius: var(--radius-md); }
 }
 
 @media (max-width: 768px) {
@@ -1443,6 +1486,8 @@ Modal
   .erp-sidebar.open .sidebar-item { justify-content: flex-start; padding: 8px 12px; }
   .erp-sidebar.open .sidebar-group + .sidebar-group { border-top: 0; margin-top: 0; padding-top: 0; }
   .erp-sidebar.open .sidebar-item span { display: inline; }
+  .erp-sidebar.open .sidebar-menu-chevron { display: block; }
+  .erp-sidebar.open .sidebar-submenu { margin: 2px 0 4px 20px; padding-left: 8px; border-left: 1px solid var(--line-2); background: none; border-radius: 0; }
 
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .form-grid-2, .form-grid-3, .form-grid-4, .form-grid-5 { grid-template-columns: 1fr; }
