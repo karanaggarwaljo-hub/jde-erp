@@ -2,6 +2,21 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-14 — Part numbers and codes look like the rest of the app
+
+Part numbers, invoice and order numbers, GSTINs and other codes were shown in a typewriter-style font
+inside a bordered grey box. It looked out of place next to everything else on the screen.
+
+**They now use the app's normal font**, a little bolder and darker so they are easy to pick out, in a
+softer box without the border. Digits still line up in a column, so a list of part numbers is as easy
+to scan as before. This applies everywhere these codes appear, not only in Inventory.
+
+**"(internal)" is now a small "Internal" label beside the part number** instead of grey text squeezed
+inside it. It still marks a code this app made up rather than the manufacturer's number, and pointing
+at it still explains that.
+
+The HSN code column in Inventory uses the normal font too.
+
 ## 2026-09-14 — The whole inventory on one page, and Website Catalog back in the menu list
 
 **Inventory is one scrolling list.** It used to show 25 parts at a time with page buttons. Now every
