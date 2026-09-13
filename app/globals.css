@@ -364,7 +364,7 @@ input, textarea, select { font-family: inherit; }
   flex-shrink: 0;
 }
 
-/* Setup rather than daily work: the website listing, Settings and Sign Out. */
+/* Settings and Sign Out, pinned below the list. Every other screen scrolls with the menu. */
 .sidebar-footer {
   padding: 8px 12px 12px;
   border-top: 1px solid var(--line);
@@ -841,6 +841,25 @@ Dashboard Priorities & Insights
 }
 
 .erp-table tbody tr:hover { background: var(--panel); }
+
+/* The whole inventory in one scrolling list. The table scrolls inside a box no taller than the
+   window, so its column headings stay in view and its sideways scrollbar is always on screen. On a
+   single long page that scrollbar would sit hundreds of rows below where anyone is looking. */
+.inventory-table-scroll {
+  max-height: calc(100vh - var(--chrome-height) - 190px);
+  min-height: 360px;
+  overflow: auto;
+}
+
+.inventory-table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--panel);
+  /* A collapsed table border scrolls away under a sticky heading; an inset shadow stays with it. */
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--line-2);
+}
 
 /* ===================================================
    Badges / Status Pills

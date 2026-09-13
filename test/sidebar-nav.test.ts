@@ -19,12 +19,12 @@ test('every screen appears in the menu exactly once', () => {
   assert.equal(new Set(hrefs).size, hrefs.length);
 });
 
-/** A heading, a gap and a divider for one row is most of what made the old menu read as
- *  cluttered — "Online" sat over Website Catalog alone. */
-test('no heading sits over a single screen', () => {
-  for (const group of navGroups) {
-    assert.ok(group.items.length >= 2, `"${group.label}" has only ${group.items.length} screen`);
-  }
+/** The owner asked why Website Catalog was pinned at the foot of the menu. A pinned row takes room
+ *  from the list on a short screen, so it scrolls with the rest now, and only Settings is pinned. */
+test('Website Catalog scrolls with the rest of the menu, and only Settings is pinned', () => {
+  const inList = navGroups.flatMap((group) => group.items).map((item) => item.name);
+  assert.ok(inList.includes('Website Catalog'));
+  assert.deepEqual(footerItems.map((item) => item.name), ['Settings']);
 });
 
 test('every group has a heading', () => {

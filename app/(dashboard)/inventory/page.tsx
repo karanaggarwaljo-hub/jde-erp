@@ -16,8 +16,6 @@ import {
   Percent,
   CheckCircle2,
   XCircle,
-  ChevronLeft,
-  ChevronRight,
   ArrowRight,
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -50,10 +48,6 @@ type StockLayer = { id: string; product_id: string; unit_cost: number; qty_remai
 const DEFAULT_CATEGORIES = ['Engine', 'Brakes', 'Filters', 'Clutch', 'Suspension', 'Electrical'];
 
 type StockFilter = 'all' | 'in' | 'low' | 'out';
-
-// How many rows are painted at once. Every part is already in memory — this changes nothing
-// about what is loaded, only how much of it is rendered, so paging costs no extra request.
-const PAGE_SIZE = 25;
 
 // Categorical brand hues. Green / amber / rose are deliberately absent: on this screen those
 // three mean in stock / low / out, and a brand dot must never borrow that meaning.
@@ -98,23 +92,6 @@ function nextPartNumber(current: string): string {
   return `${prefix}${String(Number(digits) + 1).padStart(digits.length, '0')}${suffix}`;
 }
 
-// Which page buttons to show: short lists show every page, long ones collapse to 1 … n-1 n n+1 … last.
-function pageWindow(current: number, total: number): Array<number | 'gap'> {
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
-  const wanted = [1, total, current - 1, current, current + 1]
-    .filter((n) => n >= 1 && n <= total)
-    .sort((a, b) => a - b);
-  const shown: Array<number | 'gap'> = [];
-  let previous = 0;
-  for (const n of wanted) {
-    if (n === previous) continue;
-    if (previous && n - previous > 1) shown.push('gap');
-    shown.push(n);
-    previous = n;
-  }
-  return shown;
-}
-
 export default function InventoryPage() {
   const { configError } = useCompany();
   const { rows: products, loading, update, remove, reload, activeCompany } = useCompanyTable<Product>('products');
@@ -128,7 +105,6 @@ export default function InventoryPage() {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [stockFilter, setStockFilter] = useState<StockFilter>('all');
-  const [page, setPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Product | null>(null);
@@ -267,14 +243,10 @@ export default function InventoryPage() {
     { key: 'out', label: 'Out of Stock', title: 'Parts out of stock', rows: filteredProducts.filter(isOutOfStock) },
   ];
   const activeStockTab = stockTabs.find((tab) => tab.key === stockFilter) ?? stockTabs[0];
+  // Every matching part, in one scrolling list. It used to be cut into pages of 25, and the owner
+  // asked to scroll the whole inventory instead. Everything is already in memory, so this adds no
+  // request; the table scrolls inside a box the height of the window (.inventory-table-scroll).
   const visibleProducts = activeStockTab.rows;
-
-  // Paging is clamped rather than reset by an effect: deleting the last part on page 4 simply
-  // lands the view on the new last page instead of showing an empty table.
-  const totalPages = Math.max(1, Math.ceil(visibleProducts.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pageStart = (currentPage - 1) * PAGE_SIZE;
-  const pagedProducts = visibleProducts.slice(pageStart, pageStart + PAGE_SIZE);
 
   // Headline figures, every one of them summed from the parts this page has already loaded.
   const lowStockCount = products.filter(isLowStock).length;
@@ -907,7 +879,7 @@ export default function InventoryPage() {
                 type="button"
                 aria-pressed={stockFilter === tab.key}
                 className={`tab${stockFilter === tab.key ? ' active' : ''}`}
-                onClick={() => { setStockFilter(tab.key); setPage(1); }}
+                onClick={() => setStockFilter(tab.key)}
               >
                 {tab.label}<span className="tab-count">{tab.rows.length}</span>
               </button>
@@ -921,7 +893,7 @@ export default function InventoryPage() {
                 type="text"
                 placeholder="Search by part no, OEM, name, brand, or what it fits (e.g. 3DX, BS4)"
                 value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                onChange={(e) => setSearch(e.target.value)}
               />
             </div>
 
@@ -931,7 +903,7 @@ export default function InventoryPage() {
                 className="form-input form-select"
                 style={{ width: '160px' }}
                 value={categoryFilter}
-                onChange={(e) => { setCategoryFilter(e.target.value); setPage(1); }}
+                onChange={(e) => setCategoryFilter(e.target.value)}
               >
                 <option value="all">All Categories</option>
                 {categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}
@@ -940,7 +912,7 @@ export default function InventoryPage() {
           </div>
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
+        <div className="inventory-table-scroll">
         <table className="erp-table">
           <thead>
             <tr>
@@ -958,7 +930,7 @@ export default function InventoryPage() {
             </tr>
           </thead>
           <tbody>
-            {pagedProducts.map((p) => {
+            {visibleProducts.map((p) => {
               const isLow = isLowStock(p);
               const isOut = isOutOfStock(p);
               const fifoCost = fifoCostFor(p);
@@ -1023,7 +995,7 @@ export default function InventoryPage() {
                 </tr>
               );
             })}
-            {pagedProducts.length === 0 && (
+            {visibleProducts.length === 0 && (
               <tr><td colSpan={11}><div className="empty-state"><AlertTriangle size={24} /><p className="empty-state-title">{loading ? 'Loading inventory…' : 'No parts found'}</p><p className="empty-state-desc">{loading ? 'Fetching parts for the active company.' : 'Try another search term, category or stock filter, or this company simply has no parts yet.'}</p></div></td></tr>
             )}
           </tbody>
@@ -1033,34 +1005,10 @@ export default function InventoryPage() {
         {visibleProducts.length > 0 && (
           <div className="pager">
             <div className="pager-info">
-              Showing <strong>{pageStart + 1}–{pageStart + pagedProducts.length}</strong> of <strong>{visibleProducts.length}</strong> parts
+              {visibleProducts.length === products.length
+                ? <>All <strong>{products.length}</strong> parts</>
+                : <><strong>{visibleProducts.length}</strong> of <strong>{products.length}</strong> parts</>}
             </div>
-            {totalPages > 1 && (
-              <div className="pager-controls">
-                <button type="button" className="pager-btn" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>
-                  <ChevronLeft size={14} />
-                </button>
-                {pageWindow(currentPage, totalPages).map((entry, index) => (
-                  entry === 'gap'
-                    ? <span key={`gap-${index}`} className="pager-info">…</span>
-                    : (
-                      <button
-                        key={entry}
-                        type="button"
-                        className={`pager-btn${entry === currentPage ? ' active' : ''}`}
-                        aria-current={entry === currentPage ? 'page' : undefined}
-                        aria-label={`Page ${entry}`}
-                        onClick={() => setPage(entry)}
-                      >
-                        {entry}
-                      </button>
-                    )
-                ))}
-                <button type="button" className="pager-btn" aria-label="Next page" disabled={currentPage === totalPages} onClick={() => setPage(currentPage + 1)}>
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-            )}
           </div>
         )}
       </div>

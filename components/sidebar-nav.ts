@@ -20,13 +20,11 @@ export type NavGroup = { label: string; items: NavItem[] };
 /**
  * Every screen the menu reaches, and how it is grouped.
  *
- * Three groups, no heading over a single screen. The menu used to carry four headings, one of them
- * ("Online") sitting over Website Catalog alone, which is most of why it read as cluttered: a
- * heading, a gap and a divider for one row.
- *
  * Daily counter work comes first, in the order it already had, so nobody has to relearn where Sales
- * is. Website Catalog moves down beside Settings: it is setting up what the public website shows,
- * something done now and then, not part of the day.
+ * is. Website Catalog is the last group in the list and scrolls with everything else. For a while it
+ * was pinned at the foot of the menu beside Settings, and the owner asked why: a pinned row takes
+ * room away from the list on a short screen, and it read as stuck there. Only Settings stays pinned,
+ * above Sign Out.
  *
  * Purchases uses a truck rather than a shopping bag. The bag and Sales' shopping cart were close to
  * the same shape at this size, and the icon is the only label left on the narrow tablet menu.
@@ -57,10 +55,15 @@ export const navGroups: NavGroup[] = [
       { name: 'Analytics', href: '/analytics', icon: BarChart3 },
     ],
   },
+  {
+    label: 'Website',
+    items: [
+      { name: 'Website Catalog', href: '/catalog-admin', icon: Globe },
+    ],
+  },
 ];
 
-/** Setup rather than daily work, kept below the divider at the foot of the menu. */
+/** Pinned below the divider at the foot of the menu, with Sign Out. */
 export const footerItems: NavItem[] = [
-  { name: 'Website Catalog', href: '/catalog-admin', icon: Globe },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
