@@ -122,6 +122,8 @@
 
   /* Sidebar */
   --sidebar-width: 260px;
+  /* Shared by the topbar and the side menu's header, so their bottom edges meet in one line. */
+  --chrome-height: 64px;
   --sidebar-collapsed: 72px;
 
   /* Border radius */
@@ -202,7 +204,7 @@ input, textarea, select { font-family: inherit; }
 }
 
 .erp-topbar {
-  height: 60px;
+  height: var(--chrome-height);
   background: rgba(255, 255, 255, 0.82);
   border-bottom: 1px solid var(--line-2);
   display: flex;
@@ -245,7 +247,7 @@ input, textarea, select { font-family: inherit; }
    Sidebar Components
    =================================================== */
 .sidebar-logo {
-  height: 64px;
+  height: var(--chrome-height);
   display: flex;
   align-items: center;
   padding: 0 20px;
@@ -920,7 +922,6 @@ Dashboard Priorities & Insights
 .search-bar input::placeholder { color: var(--ink-4); }
 .search-bar-icon { color: var(--ink-4); flex-shrink: 0; }
 
-.topbar-search { position: relative; width: min(360px, 40vw); }
 
 .search-overlay {
   position: fixed;
@@ -978,21 +979,44 @@ Dashboard Priorities & Insights
   color: var(--ink-3);
 }
 .keyboard-hint { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--ink-3); font-size: 11px; padding: 2px 6px; white-space: nowrap; }
-.topbar-actions { align-items: center; display: flex; gap: 16px; margin-left: auto; }
+.topbar-actions { align-items: center; display: flex; flex-shrink: 0; gap: 4px; margin-left: auto; }
 .topbar-menu-wrap { position: relative; }
 .topbar-popover { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--sh-3); position: absolute; top: calc(100% + 10px); z-index: 90; }
-.search-results { left: 0; min-width: 100%; overflow: hidden; width: 360px; }
 .search-result { background: transparent; border: 0; color: var(--ink); display: flex; flex-direction: column; padding: 10px 12px; text-align: left; width: 100%; }
 .search-result:hover, .search-result:focus { background: var(--panel-2); outline: none; }
 .search-result span { font-size: 13px; font-weight: 600; }
 .search-result small, .notification-popover small { color: var(--ink-3); font-size: 11px; }
 .popover-empty { color: var(--ink-3); font-size: 12px; padding: 14px; }
-.notification-count { font-size: 9px; font-variant-numeric: tabular-nums; padding: 0 4px; position: absolute; right: 2px; top: 2px; }
 .notification-popover { display: flex; flex-direction: column; padding: 12px; right: 0; width: 290px; }
 .notification-popover strong { color: var(--ink); font-size: 13px; margin-bottom: 6px; }
 .notification-popover a { border-radius: var(--radius-sm); color: var(--ink-2); display: flex; flex-direction: column; font-size: 12.5px; padding: 9px; }
 .notification-popover a:hover { background: var(--panel-2); }
-.profile-trigger { align-items: center; background: transparent; border: 0; color: var(--ink); display: flex; gap: 10px; }
+/* Padded and given a hover, so the name block reads as the button it is. */
+.profile-trigger { align-items: center; background: transparent; border: 0; border-radius: var(--radius-md); color: var(--ink); display: flex; gap: 10px; padding: 4px 8px 4px 4px; transition: background var(--transition-fast); }
+.profile-trigger:hover { background: var(--panel-2); }
+.profile-trigger > svg { color: var(--ink-3); }
+.profile-trigger:focus-visible, .topbar-company-trigger:focus-visible { box-shadow: var(--ring); outline: none; }
+
+/* A real vertical rule between the icons and the name. The old divider was the horizontal
+   .divider with no width, so it drew nothing and only added dead space. */
+.topbar-rule { background: var(--line-2); flex-shrink: 0; height: 24px; margin: 0 8px; width: 1px; }
+
+/* Which company this screen is showing, on the left where the bar used to be empty. */
+.topbar-company { display: flex; min-width: 0; }
+.topbar-company-trigger { align-items: center; background: transparent; border: 0; border-radius: var(--radius-md); color: var(--ink); display: flex; font-size: 13.5px; font-weight: 600; gap: 8px; max-width: 320px; min-width: 0; padding: 6px 10px; transition: background var(--transition-fast); }
+button.topbar-company-trigger:hover { background: var(--panel-2); }
+.topbar-company-icon { color: var(--amber-2); flex-shrink: 0; }
+.topbar-company-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-company-chevron { color: var(--ink-3); flex-shrink: 0; }
+.company-popover { display: flex; flex-direction: column; left: 0; padding: 6px; width: 260px; }
+.company-popover strong { color: var(--ink-3); font-size: 11px; font-weight: 600; padding: 6px 9px 4px; }
+.company-popover button { align-items: center; background: none; border: none; border-radius: var(--radius-sm); color: var(--ink-2); display: flex; font-family: inherit; font-size: 13px; gap: 8px; justify-content: space-between; padding: 9px; text-align: left; width: 100%; }
+.company-popover button:hover:not(:disabled) { background: var(--panel-2); color: var(--ink); }
+.company-popover button[aria-checked="true"] { color: var(--amber-2); font-weight: 600; }
+.company-popover button:disabled { cursor: progress; opacity: 0.7; }
+.company-popover small { color: var(--ink-3); font-size: 11px; }
+.popover-note { border-top: 1px solid var(--line); color: var(--ink-3); font-size: 11px; margin-top: 4px; padding: 8px 9px 4px; }
+.popover-error { color: var(--rose); font-size: 12px; padding: 4px 9px; }
 .profile-avatar { align-items: center; background: var(--amber-2); border-radius: 50%; color: #FFFFFF; display: flex; font-size: 13px; font-weight: 700; height: 34px; justify-content: center; width: 34px; }
 .profile-copy { display: flex; flex-direction: column; text-align: left; }
 .profile-copy strong { font-size: 13px; line-height: 1.2; }
@@ -1373,7 +1397,8 @@ Modal
   .period-tabs { width: 100%; }
   .period-tabs .tab { flex: 1; padding-left: 8px; padding-right: 8px; }
   .chart-legend { gap: 12px; justify-content: flex-start; }
-  .topbar-search { width: min(250px, 48vw); }
+  .topbar-company-trigger { padding: 6px 8px; }
+  .topbar-company-icon { display: none; }
   .keyboard-hint, .profile-copy, .profile-trigger > svg, .topbar-actions > .btn { display: none; }
   .topbar-actions { gap: 6px; }
   .report-tabs { overflow-x: auto; }

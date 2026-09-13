@@ -2,6 +2,24 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-14 — The top bar lines up with the menu, and shows which company you are in
+
+**The two bars now meet in one straight line.** The top bar was 60 pixels tall and the header of the
+side menu beside it was 64, so their bottom edges were 4 pixels apart right at the corner of the
+screen. Both are the same height now.
+
+**The empty left side now shows the company you are working in.** Since each person chooses their own
+company, this is the only place outside Settings that says which one a screen is showing. If you can
+open more than one company, click the name to switch. As in Settings, switching changes what you see,
+not what anyone else sees. Staff who work in a single company see the name without the switch.
+
+**The icons on the right are tidier.** Search and notifications sat far apart, followed by a "divider"
+that had no width, so it drew nothing and only added empty space. The icons are closer together now,
+and a real thin line separates them from your name.
+
+**Your name and role highlight when you point at them**, so it is clear they open a menu. Pointing at
+the search and notification icons now says what they are, and search mentions Ctrl+K.
+
 ## 2026-09-14 — The side menu is tidier
 
 The side menu had grown untidy: four headings, one of them ("Online") sitting over a single item,
