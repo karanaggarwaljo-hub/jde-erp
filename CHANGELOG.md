@@ -2,6 +2,29 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-14 — Recording from the Day Book takes one click
+
+Recording from the Day Book was harder than it should have been. Its three buttons were small, grey
+and jammed against the text above them, and each one only took you to another screen, where you had
+to find and press the right button again. Nothing brought you back to the Day Book to see the entry
+you had just made.
+
+**"Record something" is now the first thing on the page**, with five large buttons: New sale, Money
+received, New purchase, Pay a supplier and Expense. Money received and Pay a supplier are new here,
+and they are the two things a day book is most often used for.
+
+**Each button opens its form straight away.** New sale opens the invoice form, Money received opens
+the payment form, New purchase opens the purchase form, and Expense opens the expense form.
+
+**Saving brings you back to the Day Book**, where the new entry is already in the list. A new invoice
+still opens its printable copy in a new tab, the same as before.
+
+**Pay a supplier shows only the suppliers you still owe**, with a note to press Pay Vendor on the one
+you paid, because a payment needs a supplier before it can be entered.
+
+Using Sales, Purchases, Expenses or Suppliers directly works exactly as before. They only open a form
+and return to the Day Book when you arrive from one of these buttons.
+
 ## 2026-09-14 — Part numbers and codes look like the rest of the app
 
 Part numbers, invoice and order numbers, GSTINs and other codes were shown in a typewriter-style font

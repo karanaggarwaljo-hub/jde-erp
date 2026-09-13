@@ -1,6 +1,7 @@
 'use client';
 
 import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
+import { useEntryIntent } from '@/lib/use-entry-intent';
 import {
   Plus,
   Upload,
@@ -146,6 +147,9 @@ function reviewImportedLines(lines: ImportedLine[], products: Product[], links: 
   });
 }
 
+// Forms the Day Book's Record tiles can open on arrival (see lib/entry-intent.ts).
+const PURCHASE_ENTRY_KINDS = ['purchase'] as const;
+
 export default function PurchasesPage() {
   const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
   const { rows: suppliers, create: createSupplier, reload: reloadSuppliers } = useCompanyTable<Supplier>('suppliers');
@@ -251,6 +255,10 @@ export default function PurchasesPage() {
     setPurchaseError('');
     setShowPurchaseModal(true);
   };
+
+  // Arriving from the Day Book's Record tiles opens the purchase form straight away, and saving
+  // brings the owner back to the Day Book, where the new purchase is already listed.
+  const { finishEntry } = useEntryIntent(PURCHASE_ENTRY_KINDS, () => openPurchaseModal());
 
   const openReturnModal = async (order: PurchaseOrder) => {
     const originalLines = poItems.filter((item) => item.po_id === order.id);
@@ -463,6 +471,7 @@ export default function PurchasesPage() {
       setShowPurchaseModal(false);
       setFeedback(`${po.id} recorded — ${items.length} item(s) added to stock from ${supplierRow.name}.`);
       setActiveTab('purchases');
+      finishEntry();
     } catch (error) {
       setPurchaseError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Inventory before retrying.');
     } finally {
@@ -700,6 +709,7 @@ export default function PurchasesPage() {
       setImportPreview(null);
       setImportLinks({});
       setActiveTab('purchases');
+      finishEntry();
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Inventory before retrying.');
     } finally {

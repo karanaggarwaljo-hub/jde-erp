@@ -908,6 +908,42 @@ Dashboard Priorities & Insights
   margin-top: 2px;
 }
 
+/* The Day Book's "Record something" panel: one large tile per kind of entry, each opening its form
+   straight away. Green for money coming in, amber for money going out, matching the figures below. */
+.entry-panel-title { color: var(--ink); font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+.entry-tiles { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.entry-tile {
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px;
+  text-decoration: none;
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.entry-tile:hover { background: var(--surface-2); box-shadow: var(--sh-2); }
+.entry-tile-in:hover { border-color: var(--em-line); }
+.entry-tile-out:hover { border-color: var(--amber-line); }
+.entry-tile:focus-visible { box-shadow: var(--ring); outline: none; }
+.entry-tile-icon { align-items: center; border-radius: var(--radius-md); display: flex; flex-shrink: 0; height: 40px; justify-content: center; width: 40px; }
+.entry-tile-in .entry-tile-icon { background: var(--em-tint); color: var(--em); }
+.entry-tile-out .entry-tile-icon { background: var(--amber-tint); color: var(--amber-2); }
+.entry-tile-text { display: flex; flex-direction: column; min-width: 0; }
+.entry-tile-text strong { font-size: 14px; font-weight: 600; }
+.entry-tile-text small { color: var(--ink-3); font-size: 12px; }
+
+/* On a phone the tall stacked tiles filled the whole screen before the day's list began. There they
+   become compact rows instead, icon beside the words, still a full-width target to tap. */
+@media (max-width: 640px) {
+  .entry-tiles { grid-template-columns: 1fr; gap: 8px; }
+  .entry-tile { align-items: center; flex-direction: row; gap: 12px; padding: 10px 12px; }
+  .entry-tile-icon { height: 36px; width: 36px; }
+}
+
 /* ===================================================
    Search Bar
    =================================================== */

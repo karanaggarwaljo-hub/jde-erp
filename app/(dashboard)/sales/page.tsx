@@ -39,6 +39,7 @@ import { buildCustomerLedger } from '@/lib/customer-ledger';
 import AddCustomerModal from '@/components/AddCustomerModal';
 import PartPicker from '@/components/PartPicker';
 import ReceivePaymentModal from '@/components/ReceivePaymentModal';
+import { useEntryIntent } from '@/lib/use-entry-intent';
 import { money, paise, round2 } from '@/lib/money';
 import InvoiceFormModal from '@/components/sales/InvoiceFormModal';
 import { amountReceived, billTotals, lineDiscountAmount, lineDiscountPercent, lineGross, lineNet } from '@/lib/invoice-totals';
@@ -113,6 +114,9 @@ function formatDateTime(timestamp: string): string {
   if (Number.isNaN(parsed.getTime())) return timestamp;
   return parsed.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
+
+// Forms the Day Book's Record tiles can open on arrival (see lib/entry-intent.ts).
+const SALES_ENTRY_KINDS = ['sale', 'payment'] as const;
 
 export default function SalesPage() {
   const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
@@ -420,6 +424,13 @@ export default function SalesPage() {
     setInvoiceError('');
     setShowInvoiceModal(true);
   };
+
+  // Arriving from the Day Book's Record tiles opens the form straight away, and saving brings the
+  // owner back to the Day Book, where the new entry is already listed.
+  const { finishEntry } = useEntryIntent(SALES_ENTRY_KINDS, (record) => {
+    if (record === 'sale') openInvoice();
+    else openReceivePayment();
+  });
 
   const quoteItemPayload = (sourceLines: InvoiceLine[]) => sourceLines
     .filter((line) => line.part.trim())
@@ -824,6 +835,7 @@ export default function SalesPage() {
       // id the server just returned — the same document the Print button on any row opens, so
       // there is one invoice document in the app rather than two that could drift apart.
       window.open(`/sales/invoice/${createdId}`, '_blank');
+      finishEntry();
     } catch (error) {
       setInvoiceError(error instanceof Error ? error.message : 'Failed to save this invoice — please check Sales and Inventory before retrying.');
     } finally {
@@ -1917,6 +1929,7 @@ ${stockLine}`)) return;
           onRecorded={(result) => {
             setShowPaymentModal(false);
             setFeedback(`₹${result.appliedTotal.toLocaleString('en-IN')} received from ${result.customerName} (${result.paymentId}).`);
+            finishEntry();
           }}
         />
       )}
