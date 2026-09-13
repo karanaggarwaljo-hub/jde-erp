@@ -15,8 +15,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
-  BookOpen, RefreshCw, ShoppingCart, ShoppingBag, Receipt,
+  BookOpen, RefreshCw, ShoppingCart, HandCoins, Truck, Banknote, Wallet, type LucideIcon,
 } from 'lucide-react';
+import { entryLink, type EntryKind } from '@/lib/entry-intent';
 import { useCompany } from '@/components/CompanyProvider';
 import { getDayBook } from '@/lib/client-daybook';
 import { groupByDay, DAYBOOK_LABELS, type DayBookEntry, type DayBookKind, type DayBookTotals } from '@/lib/daybook';
@@ -36,6 +37,16 @@ function shift(isoDate: string, days: number): string {
 
 
 type RangeName = 'today' | 'yesterday' | 'week' | 'month' | 'custom';
+
+// In the order a counter day usually runs: selling and taking money first, then buying and paying.
+// "in" and "out" only colour the tile, matching the Money in and Money out figures further down.
+const RECORD_ACTIONS: Array<{ kind: EntryKind; label: string; hint: string; icon: LucideIcon; direction: 'in' | 'out' }> = [
+  { kind: 'sale', label: 'New sale', hint: 'Bill a customer', icon: ShoppingCart, direction: 'in' },
+  { kind: 'payment-in', label: 'Money received', hint: 'A customer paid you', icon: HandCoins, direction: 'in' },
+  { kind: 'purchase', label: 'New purchase', hint: 'Stock came in', icon: Truck, direction: 'out' },
+  { kind: 'supplier-payment', label: 'Pay a supplier', hint: 'You paid for stock', icon: Banknote, direction: 'out' },
+  { kind: 'expense', label: 'Expense', hint: 'Rent, salary, freight', icon: Wallet, direction: 'out' },
+];
 
 export default function DayBookPage() {
   const { activeCompany } = useCompany();
@@ -100,20 +111,31 @@ export default function DayBookPage() {
 
   return (
     <div>
-      <div className="page-head">
+      {/* page-header, not page-head: nothing styled page-head, which is why the old buttons sat
+          jammed against the description and the filter card. */}
+      <div className="page-header">
         <div>
           <h1 className="page-title flex items-center gap-2"><BookOpen size={20} /> Day Book</h1>
           <p className="page-subtitle">
-            Every sale, purchase, payment and expense together, in the order it happened. Each one is
-            still recorded on its own screen — this is where they all show up.
+            Everything that happened in the business, day by day. Record something below and it shows up here.
           </p>
         </div>
-        <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-          <Link href="/sales" className="btn btn-secondary btn-sm"><ShoppingCart size={14} /> Record a sale</Link>
-          <Link href="/purchases" className="btn btn-secondary btn-sm"><ShoppingBag size={14} /> Record a purchase</Link>
-          <Link href="/expenses" className="btn btn-secondary btn-sm"><Receipt size={14} /> Log an expense</Link>
-        </div>
       </div>
+
+      {/* Recording is the first thing on the page now, instead of three small grey links. Each tile
+          opens its form straight away on the screen that owns it, and that screen comes back here
+          once the entry is saved, so it is in the list the moment it exists. */}
+      <section className="card mb-4" aria-labelledby="daybook-record-heading">
+        <h2 id="daybook-record-heading" className="entry-panel-title">Record something</h2>
+        <div className="entry-tiles">
+          {RECORD_ACTIONS.map(({ kind, label, hint, icon: Icon, direction }) => (
+            <Link key={kind} href={entryLink(kind)} prefetch={false} className={`entry-tile entry-tile-${direction}`}>
+              <span className="entry-tile-icon"><Icon size={20} aria-hidden="true" /></span>
+              <span className="entry-tile-text"><strong>{label}</strong><small>{hint}</small></span>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <div className="card mb-4">
         <div className="flex gap-2 items-end" style={{ flexWrap: 'wrap' }}>
@@ -193,7 +215,7 @@ export default function DayBookPage() {
         <div className="card"><div className="empty-state" style={{ padding: '36px 20px' }}>
           <p className="empty-state-title">Nothing recorded {from === to ? niceDate(from, todayIso()).toLowerCase() : 'in this period'}</p>
           <p className="empty-state-desc">
-            Sales, purchases, payments and expenses all appear here the moment they are saved on their own screens.
+            Use Record something above, and the entry appears here as soon as it is saved.
           </p>
         </div></div>
       )}

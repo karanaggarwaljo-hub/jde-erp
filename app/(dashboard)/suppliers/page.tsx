@@ -4,6 +4,7 @@ import { Fragment, FormEvent, useMemo, useState } from 'react';
 import { Plus, Search, Phone, Mail, Sparkles, IndianRupee, Truck, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { useEntryIntent } from '@/lib/use-entry-intent';
 import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
 
@@ -32,6 +33,9 @@ const categoryChipColor = (category: string) => {
   for (let i = 0; i < category.length; i += 1) hash = (hash * 31 + category.charCodeAt(i)) % 100003;
   return CATEGORY_CHIP_COLORS[hash % CATEGORY_CHIP_COLORS.length];
 };
+
+// Forms the Day Book's Record tiles can open on arrival (see lib/entry-intent.ts).
+const SUPPLIER_ENTRY_KINDS = ['payment'] as const;
 
 export default function SuppliersPage() {
   const { rows: suppliers, loading, create, reload: reloadSuppliers, activeCompany } = useCompanyTable<Supplier>('suppliers');
@@ -132,6 +136,8 @@ export default function SuppliersPage() {
           (orders > 0 ? ` against ${orders} purchase order${orders > 1 ? 's' : ''}.` : '.')
       );
       setPaymentSupplier(null);
+      setPickSupplierPrompt(false);
+      finishEntry();
     } catch (error) {
       // Nothing partial can be left behind now — the payment either landed whole or not at all.
       setPaymentError(error instanceof Error ? error.message : 'Failed to record this payment.');
@@ -166,6 +172,15 @@ export default function SuppliersPage() {
     setPage(1);
   };
 
+  // Paying needs a supplier, so arriving from the Day Book shows only the suppliers still owed and
+  // says which button to press, rather than opening a payment for nobody. Saving the payment then
+  // brings the owner back to the Day Book.
+  const [pickSupplierPrompt, setPickSupplierPrompt] = useState(false);
+  const { finishEntry } = useEntryIntent(SUPPLIER_ENTRY_KINDS, () => {
+    selectFilter('balance');
+    setPickSupplierPrompt(true);
+  });
+
   // Tab counts are taken from the search result rather than the whole directory, so the number on
   // a tab is always exactly how many rows clicking it will show.
   const searchedOwing = filteredSuppliers.filter((supplier) => balanceOf(supplier) > 0);
@@ -194,6 +209,11 @@ export default function SuppliersPage() {
     </div>
 
     {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
+    {pickSupplierPrompt && (
+      <div className="alert alert-info mb-4" role="status">
+        Find the supplier you paid and press <strong>Pay Vendor</strong> on their row. Only suppliers you still owe are shown.
+      </div>
+    )}
 
     {/* auto-fit rather than the shared auto-fill so three cards stretch across the row
         instead of leaving two empty tracks on a wide screen. */}

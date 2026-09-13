@@ -5,6 +5,7 @@ import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import { Plus, Sparkles, IndianRupee, PieChart, Receipt, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { createExpense } from '@/lib/client-expenses';
+import { useEntryIntent } from '@/lib/use-entry-intent';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type Expense = { id: string; company_id: string; category: string; description: string; amount: number; date: string; paid_by: string; mode: string };
@@ -35,6 +36,9 @@ const MODE_LABELS: Record<string, string> = {
 const titleCase = (value: string) => (value ? value.charAt(0).toUpperCase() + value.slice(1) : '');
 const categoryLabel = (value: string) => CATEGORY_LABELS[value] ?? titleCase((value || '').replace(/_/g, ' '));
 const modeLabel = (value: string) => MODE_LABELS[value] ?? titleCase((value || '').replace(/_/g, ' '));
+
+// Forms the Day Book's Record tiles can open on arrival (see lib/entry-intent.ts).
+const EXPENSE_ENTRY_KINDS = ['expense'] as const;
 
 export default function ExpensesPage() {
   const { rows: expenses, loading, reload, activeCompany } = useCompanyTable<Expense>('expenses');
@@ -84,6 +88,13 @@ export default function ExpensesPage() {
   for (const exp of expenses) categoryTotals.set(exp.category, (categoryTotals.get(exp.category) ?? 0) + exp.amount);
   const largestCategory = Array.from(categoryTotals.entries()).sort((a, b) => b[1] - a[1])[0];
 
+  // Arriving from the Day Book's Record tiles opens the expense form straight away, and saving
+  // brings the owner back to the Day Book, where the new expense is already listed.
+  const { finishEntry } = useEntryIntent(EXPENSE_ENTRY_KINDS, () => {
+    setCategorizeFailed(false);
+    setShowModal(true);
+  });
+
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeCompany) return;
@@ -106,6 +117,7 @@ export default function ExpensesPage() {
       setShowModal(false);
       setFeedback(`Expense ${newExp.description} saved.`);
       setNewExp({ category: 'transport', description: '', amount: '', paid_by: 'Karan Aggarwal', mode: 'upi' });
+      finishEntry();
     } catch (error) {
       setExpenseError(error instanceof Error ? error.message : 'Failed to log this expense — please try again.');
     } finally {
