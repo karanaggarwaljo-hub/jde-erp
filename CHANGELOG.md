@@ -2,6 +2,46 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-14 — The parts worksheet can now correct names, not just part numbers
+
+You asked whether a file of real part numbers, compatibility and correct names could update the
+existing inventory. It could only do part of that. The Inventory import called **Fill in part
+numbers & details** filled in blank fields and swapped made-up codes for real numbers, but it
+**never changed a part's name**, and it **never replaced compatibility** that was already written.
+Worse, because it found each part by its name, a row with the name spelled correctly — "Big Pinion
+Bearing" where the ERP says "big pinion beraing" — matched nothing and was skipped.
+
+**Now, when you import the parts worksheet you downloaded from Inventory:**
+
+- **Each row is matched by its Old label**, the code the part carries in the ERP today. That code
+  names exactly one part, so a row still finds its part after you correct both the name and the
+  number. For the few parts that already had a real number, the row is matched by that number.
+- **The name, part number, brand, category and compatibility become what you wrote.** Every change
+  is still shown as old and new before anything saves, ticked by default, and you can untick any.
+- **A blank cell never erases anything.** Leave a cell empty and that field stays as it is.
+- **A corrected part number that another part already has is held back**, with the other part
+  named on screen. The rest of that row still goes through. Before, a clash like that stopped the
+  save partway, with some parts changed and some not.
+
+**Only your own worksheet gets this.** A supplier's invoice imported the same way still never
+renames a part and still leaves existing compatibility alone, because a supplier describes a part
+in its own words.
+
+**Renaming does not break anything that happened before it.** Invoices you already printed keep the
+name they were printed with. But reopening an old invoice or quotation to edit it now still links
+each line to its part, so stock moves correctly. And the "last billed at" and "last paid" prices on
+the sale and purchase screens are still found for a renamed part. Both of those would have quietly
+stopped working the moment a part was renamed.
+
+**Checked against all 252 of your real parts.** The worksheet was built from them, saved as a file,
+read back and planned. Every one of the 252 can be renamed. A worksheet imported without any edits
+changes only the 8 part numbers it pre-filled itself from numbers already written inside part names,
+such as 803149/10 from "big pinion beraing 803149/10".
+
+**One practical tip.** The import reads the first tab of a spreadsheet. If your corrections are on
+another tab of a Google Sheet, use **File → Download → Comma-separated values**, which saves just the
+tab you are looking at.
+
 ## 2026-09-14 — Everyday Activity is the big card on the Dashboard
 
 **The Sales vs Purchases chart is gone** from the Dashboard, as asked.

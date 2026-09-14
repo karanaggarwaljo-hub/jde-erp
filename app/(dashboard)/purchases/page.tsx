@@ -1,4 +1,5 @@
 'use client';
+import { currentIdentity, indexProductsById } from '@/lib/trade-history';
 
 import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
 import { useEntryIntent } from '@/lib/use-entry-intent';
@@ -325,9 +326,12 @@ export default function PurchasesPage() {
   // What this supplier last charged for each part — the question actually being asked whenever a
   // cost is typed, and the only way a supplier quietly raising a rate is visible at this desk.
   // Built from orders already loaded for the list, so it costs no extra fetch.
+  // Products by id, so what a supplier last charged for a part is still found after the part is
+  // renamed or given its real number. See currentIdentity in lib/trade-history.ts.
+  const productsById = useMemo(() => indexProductsById(products), [products]);
   const lastPaid = useMemo(
-    () => buildLastPaidIndex(supplierName, purchaseOrders, poItems),
-    [supplierName, purchaseOrders, poItems]
+    () => buildLastPaidIndex(supplierName, purchaseOrders, poItems.map((item) => currentIdentity(item, productsById))),
+    [supplierName, purchaseOrders, poItems, productsById]
   );
 
 

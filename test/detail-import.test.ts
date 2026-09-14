@@ -5,6 +5,7 @@ import {
   fieldsToWrite,
   looksLikeAnInventedCode,
   planDetailUpdates,
+  isOfferedDetail,
   type DetailMatchProduct,
 } from '../lib/detail-import';
 import type { ImportedProduct } from '../lib/client-import';
@@ -179,4 +180,131 @@ test('no price or stock field is ever part of a plan', () => {
     assert.equal(forbidden in written, false, `${forbidden} must never be written by this tool`);
   }
   assert.deepEqual(Object.keys(written), ['part_number']);
+});
+
+// ── The owner's own worksheet, matched by the part's current code ───────────────────────────
+
+const WORKSHEET_STOCK: DetailMatchProduct[] = [
+  product({ id: 'bearing', part_number: 'BIG-P17', name: 'big pinion beraing 803149/10', category: 'bearing' }),
+  product({ id: 'grari', part_number: 'PLA-G30', name: 'plantary grari', compatibility: 'N/m bs4' }),
+  product({ id: 'pin', part_number: 'P00-12400', name: 'PIN (12400)' }),
+];
+
+test('a row matched by its current code can rename the part', () => {
+  const [match] = planDetailUpdates([row({ current_code: 'BIG-P17', name: 'Big Pinion Bearing' })], WORKSHEET_STOCK);
+  assert.equal(match.matchedBy, 'current code');
+  assert.equal(match.outcome, 'update');
+  const rename = match.changes.find((c) => c.field === 'name');
+  assert.deepEqual(
+    { from: rename?.from, to: rename?.to, kind: rename?.kind },
+    { from: 'big pinion beraing 803149/10', to: 'Big Pinion Bearing', kind: 'replace' },
+  );
+});
+
+test('the current code is matched however its punctuation was kept', () => {
+  const [match] = planDetailUpdates([row({ current_code: 'big p17', name: 'Big Pinion Bearing' })], WORKSHEET_STOCK);
+  assert.equal(match.product?.id, 'bearing');
+});
+
+test('an existing compatibility is replaced when the row is certainly this part', () => {
+  const [match] = planDetailUpdates([row({ current_code: 'PLA-G30', name: 'plantary grari', compatibility: 'JCB N/M BS4' })], WORKSHEET_STOCK);
+  assert.equal(match.changes.find((c) => c.field === 'compatibility')?.kind, 'replace');
+  assert.equal(fieldsToWrite(match, () => true).compatibility, 'JCB N/M BS4');
+});
+
+test('a correction that only changes capitals or punctuation is still offered', () => {
+  const [match] = planDetailUpdates([row({ current_code: 'PLA-G30', name: 'Plantary Grari', compatibility: 'N/M BS4' })], WORKSHEET_STOCK);
+  assert.deepEqual(match.changes.map((c) => c.field).sort(), ['compatibility', 'name']);
+});
+
+test('a blank cell in the worksheet never erases what the part has', () => {
+  const [match] = planDetailUpdates([row({ current_code: 'PLA-G30', name: 'plantary grari', compatibility: '' })], WORKSHEET_STOCK);
+  assert.equal(match.outcome, 'nothing_to_add');
+  assert.deepEqual(match.changes, []);
+});
+
+test('a part left exactly as exported produces nothing', () => {
+  const [match] = planDetailUpdates([row({ current_code: 'BIG-P17', name: 'big pinion beraing 803149/10', category: 'bearing' })], WORKSHEET_STOCK);
+  assert.equal(match.outcome, 'nothing_to_add');
+});
+
+test('without the current code a name is never changed', () => {
+  // A supplier invoice matched by part number describes the part in its own words.
+  const [match] = planDetailUpdates([row({ part_number: 'P00-12400', name: 'Pin for pivot, 12400 series' })], WORKSHEET_STOCK);
+  assert.equal(match.matchedBy, 'part number');
+  assert.ok(!match.changes.some((c) => c.field === 'name'));
+});
+
+test('without the current code a disagreeing compatibility is still left alone', () => {
+  const [match] = planDetailUpdates([row({ name: 'plantary grari', compatibility: 'JCB N/M BS4' })], WORKSHEET_STOCK);
+  assert.equal(match.matchedBy, 'name');
+  assert.equal(match.changes.find((c) => c.field === 'compatibility')?.kind, 'keep');
+  assert.deepEqual(fieldsToWrite(match, () => true), {});
+});
+
+test('a current code that matches nothing falls back to the ordinary, cautious match', () => {
+  const [match] = planDetailUpdates([row({ current_code: 'NOPE-1', name: 'plantary grari', compatibility: 'JCB N/M BS4' })], WORKSHEET_STOCK);
+  assert.equal(match.matchedBy, 'name');
+  assert.equal(match.changes.find((c) => c.field === 'compatibility')?.kind, 'keep');
+});
+
+test('a corrected part number already on another part is shown and not written', () => {
+  const [match] = planDetailUpdates([row({ current_code: 'PLA-G30', name: 'plantary grari', part_number: 'P00-12400' })], WORKSHEET_STOCK);
+  const number = match.changes.find((c) => c.field === 'part_number');
+  assert.ok(number);
+  assert.equal(number.kind, 'clash');
+  assert.ok((number.note ?? '').includes('PIN (12400)'), 'the note names the part that already has it');
+  assert.equal(isOfferedDetail(number), false);
+  assert.equal(fieldsToWrite(match, () => true).part_number, undefined);
+  assert.equal(match.outcome, 'nothing_to_add');
+});
+
+test('two rows handing the same new number to two parts are both held back', () => {
+  const matches = planDetailUpdates([
+    row({ current_code: 'BIG-P17', name: 'big pinion beraing 803149/10', part_number: '803149/10' }),
+    row({ current_code: 'PLA-G30', name: 'plantary grari', part_number: '803149-10' }),
+  ], WORKSHEET_STOCK);
+  for (const match of matches) {
+    assert.equal(match.changes.find((c) => c.field === 'part_number')?.kind, 'clash', match.name);
+  }
+});
+
+test('swapping two parts numbers is held back rather than failing halfway through the save', () => {
+  const matches = planDetailUpdates([
+    row({ current_code: 'BIG-P17', name: 'big pinion beraing 803149/10', part_number: 'PLA-G30' }),
+    row({ current_code: 'PLA-G30', name: 'plantary grari', part_number: 'BIG-P17' }),
+  ], WORKSHEET_STOCK);
+  assert.ok(matches.every((m) => m.changes.find((c) => c.field === 'part_number')?.kind === 'clash'));
+});
+
+test('a rename is still offered when the number beside it clashes', () => {
+  const [match] = planDetailUpdates([row({ current_code: 'PLA-G30', name: 'Plantary Grari', part_number: 'P00-12400' })], WORKSHEET_STOCK);
+  assert.equal(match.outcome, 'update');
+  assert.deepEqual(fieldsToWrite(match, () => true), { name: 'Plantary Grari' });
+});
+
+test('two worksheet rows naming the same current code are both left alone', () => {
+  const matches = planDetailUpdates([
+    row({ current_code: 'BIG-P17', name: 'Big Pinion Bearing' }),
+    row({ current_code: 'BIG-P17', name: 'Pinion Bearing, Big' }),
+  ], WORKSHEET_STOCK);
+  assert.ok(matches.every((m) => m.outcome === 'conflict'));
+});
+
+test('an unticked rename is not written', () => {
+  const [match] = planDetailUpdates([row({ current_code: 'BIG-P17', name: 'Big Pinion Bearing', compatibility: 'JCB 3DX' })], WORKSHEET_STOCK);
+  assert.deepEqual(fieldsToWrite(match, (c) => c.field !== 'name'), { compatibility: 'JCB 3DX' });
+});
+
+test('a worksheet row whose part already had a real number can still be renamed', () => {
+  // Old label is blank for these parts, but the column was in the file: the row is the owner's.
+  const [match] = planDetailUpdates([row({ current_code: '', part_number: 'P00-12400', name: 'Pin 12400' })], WORKSHEET_STOCK);
+  assert.equal(match.matchedBy, 'part number');
+  assert.deepEqual(fieldsToWrite(match, () => true), { name: 'Pin 12400' });
+});
+
+test('a worksheet row found only by its name stays cautious', () => {
+  const [match] = planDetailUpdates([row({ current_code: '', name: 'plantary grari', compatibility: 'JCB N/M BS4' })], WORKSHEET_STOCK);
+  assert.equal(match.matchedBy, 'name');
+  assert.equal(match.changes.find((c) => c.field === 'compatibility')?.kind, 'keep');
 });

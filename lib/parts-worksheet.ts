@@ -35,8 +35,10 @@ export type WorksheetRow = {
   Category: string;
   Compatibility: string;
   Stock: string;
-  /** Deliberately NOT a name any importer key matches, so the invented code cannot be read back
-   *  in and re-saved as the answer. It is here only so a row can be recognised on screen. */
+  /** The code this part carries in the ERP right now. Read back on import as the part's identity
+   *  only (current_code in lib/client-import.ts), which is what lets a row rename its part or
+   *  correct its number and still be matched. Never written as a value: no importer key for part
+   *  number or anything else matches this heading, so the invented code cannot be re-saved. */
   'Old label': string;
 };
 

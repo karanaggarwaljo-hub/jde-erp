@@ -252,6 +252,12 @@ export type ImportedProduct = {
   current_stock: number;
   min_stock: number;
   location: string;
+  /** The code a part carries in the ERP right now, read from the parts worksheet's Old label
+   *  column. Used only to find which part a row is about, never written back as anything. Optional
+   *  because only the worksheet has it; a supplier document or a hand-made sheet does not.
+   *  Undefined when the file has no Old label column; a blank string when it does, but this part
+   *  already had a real number. The planner reads that difference, so keep the two distinct. */
+  current_code?: string;
 };
 
 const PRODUCT_KEYS = {
@@ -269,6 +275,9 @@ const PRODUCT_KEYS = {
   current_stock: ['current stock', 'stock', 'quantity', 'qty', 'initial stock', 'units', 'no of units', 'nos', 'available stock', 'in stock', 'stock qty'],
   min_stock: ['min stock', 'minimum stock', 'reorder level', 'reorder point', 'min qty'],
   location: ['location', 'loc', 'rack', 'bin', 'shelf', 'warehouse'],
+  // Deliberately only these two phrases. A heading with "code" or "part no" in it would also be
+  // claimed as the part number, and the invented code would be read back as the answer.
+  current_code: ['old label', 'current label'],
 } as const;
 
 export type InventoryImportResult = { products: ImportedProduct[]; guessedFields: string[] };
@@ -309,6 +318,7 @@ export async function parseInventoryFile(file: File): Promise<InventoryImportRes
     current_stock: findKey(sampleRow, PRODUCT_KEYS.current_stock),
     min_stock: findKey(sampleRow, PRODUCT_KEYS.min_stock),
     location: findKey(sampleRow, PRODUCT_KEYS.location),
+    current_code: findKey(sampleRow, PRODUCT_KEYS.current_code),
   };
 
   const claimedKeys = new Set(Object.values(headerKeys).filter((k): k is string => Boolean(k)));
@@ -357,6 +367,7 @@ export async function parseInventoryFile(file: File): Promise<InventoryImportRes
       current_stock: currentStock,
       min_stock: Number(get(row, PRODUCT_KEYS.min_stock)) || 0,
       location: get(row, PRODUCT_KEYS.location),
+      current_code: headerKeys.current_code ? get(row, PRODUCT_KEYS.current_code) : undefined,
     });
   }
   return { products, guessedFields };

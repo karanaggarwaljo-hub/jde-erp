@@ -1,4 +1,5 @@
 'use client';
+import { currentIdentity, indexProductsById, savedLineLabel } from '@/lib/trade-history';
 
 import { FormEvent, useMemo, useState } from 'react';
 import {
@@ -279,9 +280,12 @@ export default function SalesPage() {
   // What this customer was actually charged for each part last time, which is the question being
   // asked whenever a rate is set at the counter. Built from invoices already loaded for the list,
   // so it costs no extra fetch, and empty for a walk-in sale — there is no account to look back on.
+  // Products by id, so a line saved under a part's old name or made-up code still resolves to that
+  // part after it is renamed. See currentIdentity in lib/trade-history.ts.
+  const productsById = useMemo(() => indexProductsById(products), [products]);
   const lastSold = useMemo(
-    () => buildLastSoldIndex(customer, invoices, invoiceItems, DRAFT_STATUS),
-    [customer, invoices, invoiceItems]
+    () => buildLastSoldIndex(customer, invoices, invoiceItems.map((item) => currentIdentity(item, productsById)), DRAFT_STATUS),
+    [customer, invoices, invoiceItems, productsById]
   );
   const customerLabel = customer.trim() || WALK_IN_CUSTOMER;
   // A parked draft opens in this dialog exactly like an edit, with one difference that matters for
@@ -416,7 +420,7 @@ export default function SalesPage() {
     // Older invoices have no stored rate at all, so 18 stays the fallback for those only.
     setGstPercent(invoice.gst_percent == null ? 18 : Number(invoice.gst_percent));
     setGstInclusive(invoice.gst_mode === 'inclusive');
-    setLines(items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
+    setLines(items.map((item) => ({ part: savedLineLabel(item, productsById), qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
     const paid = Number(invoice.paid);
     const invoiceTotal = Number(invoice.total);
     setPaymentStatus(paid >= invoiceTotal && invoiceTotal > 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid');
@@ -486,7 +490,7 @@ export default function SalesPage() {
       );
       setQuoteDate(detail.date);
       setQuoteValidity(detail.validity);
-      setQuoteLines(detail.items.map((item) => ({ part: `${item.part_number} - ${item.name}`, qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
+      setQuoteLines(detail.items.map((item) => ({ part: savedLineLabel(item, productsById), qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
       setQuoteDiscountPercent(Number(detail.discount_percent ?? 0));
       setQuoteGstPercent(Number(detail.gst_percent ?? 18));
       setQuoteGstInclusive(detail.gst_mode === 'inclusive');

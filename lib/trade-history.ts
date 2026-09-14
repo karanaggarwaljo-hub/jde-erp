@@ -75,3 +75,39 @@ export function buildLastTradedIndex(
   }
   return index;
 }
+
+/** A part's current number and name, looked up by id. */
+export type NamedPart = { part_number: string; name: string };
+
+/** Products by id, so a saved line can be traced to the part it was for. */
+export function indexProductsById<T extends { id: string; part_number?: string | null; name?: string | null }>(products: T[]): Map<string, NamedPart> {
+  const index = new Map<string, NamedPart>();
+  for (const product of products) {
+    index.set(product.id, { part_number: product.part_number ?? '', name: product.name ?? '' });
+  }
+  return index;
+}
+
+/**
+ * A saved invoice, quotation or purchase line, carrying the part's CURRENT number and name.
+ *
+ * Lines store the number and name as they were on the day, as text. That is right for the document
+ * itself: an invoice already handed to a customer must not change. But everything that works out
+ * which part a line WAS for compared that old text against today's catalogue. The day a part is
+ * renamed, or its made-up code is replaced with the real one, the two stop matching. Reopening an
+ * old invoice to edit it would then save its lines as one-off text with no part behind them, so no
+ * stock would move, and the last-price hints would go blank for that part.
+ *
+ * A line's product_id never changes, so it is used whenever it still points at a part. A line with
+ * no part behind it, or whose part has since been deleted, keeps its saved text.
+ */
+export function currentIdentity<T extends { product_id?: string | null; part_number: string; name: string }>(item: T, byId: Map<string, NamedPart>): T {
+  const current = item.product_id ? byId.get(item.product_id) : undefined;
+  return current ? { ...item, part_number: current.part_number, name: current.name } : item;
+}
+
+/** The picker label for a saved line, under the part's current number and name where it has one. */
+export function savedLineLabel(item: { product_id?: string | null; part_number: string; name: string }, byId: Map<string, NamedPart>): string {
+  const current = currentIdentity(item, byId);
+  return partLabel(current.part_number, current.name);
+}
