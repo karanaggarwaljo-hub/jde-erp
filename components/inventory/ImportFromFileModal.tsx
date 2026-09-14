@@ -24,7 +24,7 @@ import type { Company } from '@/components/CompanyProvider';
 import { money } from '@/lib/money';
 import { extractCostRows, sampleColumnValues, type ImportedProduct } from '@/lib/client-import';
 import { planCostUpdates, countOutcomes, findExistingProduct, type CostMatch } from '@/lib/cost-import';
-import { planDetailUpdates, countDetailOutcomes, fieldsToWrite, type DetailChange } from '@/lib/detail-import';
+import { planDetailUpdates, countDetailOutcomes, fieldsToWrite, isOfferedDetail, type DetailChange } from '@/lib/detail-import';
 import type { CostSheetImport, ImportMode, Product } from '@/lib/inventory-types';
 
 export type ImportFromFileModalProps = {
@@ -99,7 +99,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
           .map((m) => ({ match: m, patch: fieldsToWrite(m, detailAccepted(m.rowNumber)) }))
           .filter(({ patch }) => Object.keys(patch).length > 0);
         const detailOfferedCount = detailMatches.reduce(
-          (total, m) => total + m.changes.filter((c) => c.kind !== 'keep').length,
+          (total, m) => total + m.changes.filter(isOfferedDetail).length,
           0
         );
         const detailTickedCount = detailPending.reduce((total, { patch }) => total + Object.keys(patch).length, 0);
@@ -231,7 +231,11 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                                 {m.changes.length === 0 && <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>}
                                 {m.changes.map((change) => (
                                   <div key={change.field} style={{ fontSize: '12px', marginBottom: '2px' }}>
-                                    {change.kind === 'keep' ? (
+                                    {change.kind === 'clash' ? (
+                                      <span style={{ color: 'var(--color-warning)' }}>
+                                        {change.label}: <strong>{change.to}</strong> is {change.note} — left alone, so two parts do not end up sharing one number
+                                      </span>
+                                    ) : change.kind === 'keep' ? (
                                       <span style={{ color: 'var(--color-warning)' }}>
                                         {change.label}: document says <strong>{change.to}</strong>, you have <strong>{change.from}</strong> — left alone
                                       </span>

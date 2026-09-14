@@ -14,13 +14,24 @@ import type { ImportedProduct } from './client-import';
  *  identifying fields WOULD do, so it can be shown in full and tested on its own before anything
  *  is written. Nothing here touches the database, stock, or money — this changes what a part is
  *  called, never how many there are or what they cost.
+ *
+ *  One kind of file is trusted further: the parts worksheet this app exports. Its "Old label"
+ *  column carries the code each part holds in the ERP right now, and since part numbers were made
+ *  unique per company that code names exactly one part. A row matched that way is the owner
+ *  saying, in their own sheet, "this row IS this part". So what they wrote is what the part
+ *  becomes: the name can be corrected, and a brand, category, compatibility or part number that
+ *  disagrees is offered as a replacement instead of being left alone. Every one is still shown old
+ *  and new, and can be unticked. Any other file, matched any other way, gets exactly the caution it
+ *  always had — a supplier's invoice must never rename a part because it words it differently.
  */
 
-export type DetailField = 'part_number' | 'oem_number' | 'hsn_code' | 'brand' | 'category' | 'compatibility';
+/** The name is only ever planned for a row matched by the part's current code — see the header. */
+export type DetailField = 'name' | 'part_number' | 'oem_number' | 'hsn_code' | 'brand' | 'category' | 'compatibility';
 
 /** Every field this will touch, in the order it is shown. Deliberately excludes anything
  *  numeric: prices and stock are other jobs, with their own preview and their own confirmation. */
 export const DETAIL_FIELDS: { field: DetailField; label: string }[] = [
+  { field: 'name', label: 'Name' },
   { field: 'part_number', label: 'Part no' },
   { field: 'oem_number', label: 'OEM no' },
   { field: 'hsn_code', label: 'HSN' },
@@ -49,7 +60,11 @@ export type DetailChangeKind =
   | 'replace'
   /** Both have a value and they disagree, but the existing one does NOT look invented. Never
    *  applied automatically: it may well be right, and the document may be the wrong part. */
-  | 'keep';
+  | 'keep'
+  /** Would give this part a part number another part already has, or will have once this file is
+   *  applied. Shown, never written: the database refuses it with a unique index, and in a bulk save
+   *  that refusal arrives partway through, after other parts have already changed. */
+  | 'clash';
 
 export type DetailChange = {
   field: DetailField;
@@ -57,6 +72,8 @@ export type DetailChange = {
   from: string;
   to: string;
   kind: DetailChangeKind;
+  /** Why a change is not offered, in words. Set on a clash. */
+  note?: string;
 };
 
 export type DetailOutcome =
@@ -74,7 +91,7 @@ export type DetailMatch = {
   name: string;
   outcome: DetailOutcome;
   product?: DetailMatchProduct;
-  matchedBy?: 'part number' | 'OEM number' | 'name';
+  matchedBy?: 'current code' | 'part number' | 'OEM number' | 'name';
   changes: DetailChange[];
   reason?: string;
 };
@@ -130,10 +147,20 @@ function indexBy(products: DetailMatchProduct[], pick: (p: DetailMatchProduct) =
 }
 
 /** What one field of one part would become. Returns null when there is nothing to say. */
-function planField(field: DetailField, label: string, existingRaw: string, incomingRaw: string): DetailChange | null {
+function planField(field: DetailField, label: string, existingRaw: string, incomingRaw: string, certain = false): DetailChange | null {
   const existing = text(existingRaw);
   const incoming = text(incomingRaw);
+  // A blank cell never erases anything, however the row was matched.
   if (!incoming) return null;
+
+  // The owner's own worksheet, matched by the part's current code: what they typed is the answer.
+  // Compared exactly as written, because a correction that only fixes capitals or punctuation —
+  // "big pinion beraing" to "Big Pinion Bearing", "331-34392" to "331/34392" — is still one.
+  if (certain) {
+    if (existing === incoming) return null;
+    return { field, label, from: existing, to: incoming, kind: existing ? 'replace' : 'fill' };
+  }
+
   if (codeKey(existing) === codeKey(incoming) && existing) return null; // already the same
 
   if (!existing) return { field, label, from: '', to: incoming, kind: 'fill' };
@@ -157,6 +184,9 @@ export function planDetailUpdates(rows: ImportedProduct[], products: DetailMatch
   const byName = indexBy(products, (p) => p.name, nameKey);
 
   const attempts: Array<{ label: DetailMatch['matchedBy']; value: (r: ImportedProduct) => string; index: Map<string, DetailMatchProduct[]> }> = [
+    // First: the code the ERP gave this part, carried in the worksheet's Old label column. Part
+    // numbers are unique per company, so it names exactly one part.
+    { label: 'current code', value: (r) => codeKey(r.current_code ?? ''), index: byPart },
     { label: 'part number', value: (r) => codeKey(r.part_number), index: byPart },
     { label: 'OEM number', value: (r) => codeKey(r.oem_number), index: byOem },
     { label: 'name', value: (r) => nameKey(r.name), index: byName },
@@ -183,11 +213,21 @@ export function planDetailUpdates(rows: ImportedProduct[], products: DetailMatch
       }
 
       const product = found[0];
+      // Certain when matched by the current code, or when the row comes from the owner's own
+      // worksheet and matched by part number. The worksheet leaves Old label blank for a part that
+      // already carries a real number, and pre-fills Part No with that same number, so for those
+      // parts the number is the identity. A supplier document has no Old label column at all, so
+      // none of its rows qualify however well their part numbers match.
+      const fromWorksheet = row.current_code !== undefined;
+      const certain = attempt.label === 'current code' || (fromWorksheet && attempt.label === 'part number');
       const changes = DETAIL_FIELDS
-        .map(({ field, label }) => planField(field, label, text((product as Record<string, unknown>)[field] as string), text((row as Record<string, unknown>)[field] as string)))
+        // Renaming is only for a row that is certainly this part. A supplier invoice matched by part
+        // number describes the part in its own words, and those are not the owner's name for it.
+        .filter(({ field }) => field !== 'name' || certain)
+        .map(({ field, label }) => planField(field, label, text((product as Record<string, unknown>)[field] as string), text((row as Record<string, unknown>)[field] as string), certain))
         .filter((change): change is DetailChange => change !== null);
 
-      const worthWriting = changes.some((change) => change.kind !== 'keep');
+      const worthWriting = changes.some(isOfferedDetail);
       return {
         rowNumber,
         name,
@@ -221,15 +261,56 @@ export function planDetailUpdates(rows: ImportedProduct[], products: DetailMatch
     }
   }
 
+  // A corrected part number must not land on a number another part holds now, or will hold once
+  // this file is applied. Both count: swapping two parts' numbers ends in a clean state, but saved
+  // one part at a time the first save collides with the second part's current number. Compared
+  // with punctuation ignored, as a scan compares them — "SP-258" and "sp258" are one number.
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const offeredNumber = (match: DetailMatch) =>
+    match.outcome === 'update' ? match.changes.find((c) => c.field === 'part_number' && isOfferedDetail(c)) : undefined;
+
+  const holders = new Map<string, Set<string>>();
+  const hold = (key: string, id: string) => {
+    if (!key) return;
+    const set = holders.get(key);
+    if (set) set.add(id);
+    else holders.set(key, new Set([id]));
+  };
+  for (const p of products) hold(codeKey(p.part_number), p.id);
+  for (const match of matches) {
+    const change = offeredNumber(match);
+    if (change && match.product) hold(codeKey(change.to), match.product.id);
+  }
+
+  for (const match of matches) {
+    const change = offeredNumber(match);
+    if (!change || !match.product) continue;
+    const self = match.product.id;
+    const others = Array.from(holders.get(codeKey(change.to)) ?? []).filter((id) => id !== self);
+    if (others.length === 0) continue;
+    change.kind = 'clash';
+    change.note = 'already on ' + others.map((id) => productById.get(id)?.name ?? id).join(', ');
+    if (!match.changes.some(isOfferedDetail)) {
+      match.outcome = 'nothing_to_add';
+      match.reason = 'the only change would give it a part number another part already has';
+    }
+  }
+
   return matches;
 }
 
+/** True for a change the owner can tick — a fill or a replacement. A keep and a clash are shown as
+ *  warnings and are never written. */
+export function isOfferedDetail(change: DetailChange): boolean {
+  return change.kind === 'fill' || change.kind === 'replace';
+}
+
 /** The fields of one match that would actually be written, given what the owner has left ticked.
- *  'keep' changes are never included: they are shown as a warning, not offered. */
+ *  Only a fill or a replacement is ever included; a keep or a clash is a warning, not an offer. */
 export function fieldsToWrite(match: DetailMatch, accepted: (change: DetailChange) => boolean): Record<string, string> {
   const patch: Record<string, string> = {};
   for (const change of match.changes) {
-    if (change.kind === 'keep') continue;
+    if (!isOfferedDetail(change)) continue;
     if (!accepted(change)) continue;
     patch[change.field] = change.to;
   }
