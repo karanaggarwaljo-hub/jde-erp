@@ -2,6 +2,30 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-14 — Merge a part that was entered twice
+
+"bkt main pin" and "PIN (12400)" are the same part, entered twice. One entry showed 20 on the shelf
+and no sales. The other showed 5 sold to jasspal and **−5 in stock**, because nothing had ever been
+bought under that entry. Neither number was true. The sale was also costed at a guess, since its
+entry had no stock to take a cost from. There was no way to fix this in the ERP.
+
+**Every part in Inventory now has a Merge button**, between Edit and Delete. Click it on one entry
+and find the other. You see exactly what the single part will look like before anything changes:
+
+- **The stock adds up.** 20 and −5 become 15.
+- **Every sale, purchase, return and quotation moves** to the part you keep, so its whole history is
+  in one place. Printed invoices keep the name and number they were printed with.
+- **You choose which part number stays** when the two have different ones. A real manufacturer's
+  number is suggested over a code the ERP made up.
+- **The name never changes.** The part you keep keeps its own name. You can keep either entry.
+- **Blank details are filled in** from the other entry, such as brand, compatibility and sale price.
+  Anything the kept part already has stays as it is.
+- **Sales made while the stock showed below zero get their real cost.** Those 5 pins were costed at
+  ₹390, a guess. They now carry the ₹440 the pins on the shelf cost, and the shelf shows 15 left.
+
+The other entry is then removed. A merge cannot be undone, so the dialog says so, and each merge is
+written to the audit log.
+
 ## 2026-09-14 — The parts worksheet can now correct names, not just part numbers
 
 You asked whether a file of real part numbers, compatibility and correct names could update the
