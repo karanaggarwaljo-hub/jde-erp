@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   XCircle,
   ArrowRight,
+  Merge,
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { money, wholeMoney } from '@/lib/money';
@@ -34,6 +35,8 @@ import { fifoCostLookup, totalStockValue } from '@/lib/stock-value';
 import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
 import PartFormModal from '@/components/inventory/PartFormModal';
 import DeletePartModal from '@/components/inventory/DeletePartModal';
+import MergePartModal from '@/components/inventory/MergePartModal';
+import type { MergePartsResult } from '@/lib/client-part-merge';
 import ImportFromFileModal from '@/components/inventory/ImportFromFileModal';
 import type {
   CostSheetImport,
@@ -108,6 +111,8 @@ export default function InventoryPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<Product | null>(null);
+  // A part entered twice, chosen from its row. The dialog finds the other entry and merges them.
+  const [mergeCandidate, setMergeCandidate] = useState<Product | null>(null);
   const [feedback, setFeedback] = useState('');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
@@ -452,6 +457,17 @@ export default function InventoryPage() {
     } finally {
       setDeletingProduct(false);
     }
+  };
+
+  const afterMerge = async (result: MergePartsResult, removed: Product) => {
+    setMergeCandidate(null);
+    // Batches moved and may have been drawn down, so the cost column needs them fresh too.
+    await Promise.all([reload(), reloadStockLayers()]);
+    const recosted = Number(result.recosted_units) || 0;
+    setFeedback(
+      `Merged ${removed.name} into ${result.name}. It now has ${result.current_stock} in stock` +
+      (recosted > 0 ? `, and ${recosted} unit(s) sold earlier now carry the cost of the stock on the shelf.` : '.'),
+    );
   };
 
   /** Everything a chosen file goes through, shared by the picker and by drag-and-drop so the two
@@ -989,6 +1005,9 @@ export default function InventoryPage() {
                       <button className="btn btn-ghost btn-sm" aria-label={`Edit ${p.name}`} onClick={() => handleEdit(p)}>
                         <Edit size={14} />
                       </button>
+                      <button className="btn btn-ghost btn-sm" aria-label={`Merge ${p.name} with another part`} title="Same part entered twice? Merge it with the other entry" onClick={() => setMergeCandidate(p)}>
+                        <Merge size={14} />
+                      </button>
                       <button className="btn btn-ghost btn-sm" aria-label={`Delete ${p.name}`} style={{ color: 'var(--color-danger)' }} onClick={() => { setDeleteError(''); setDeleteCandidate(p); }}>
                         <Trash2 size={14} />
                       </button>
@@ -1035,6 +1054,13 @@ export default function InventoryPage() {
         <DeletePartModal
           deleteCandidate={deleteCandidate} setDeleteCandidate={setDeleteCandidate}
           deleteError={deleteError} deletingProduct={deletingProduct} confirmDelete={confirmDelete}
+        />
+      )}
+
+      {mergeCandidate && activeCompany && (
+        <MergePartModal
+          duplicate={mergeCandidate} products={products} companyId={activeCompany.id}
+          onClose={() => setMergeCandidate(null)} onMerged={afterMerge}
         />
       )}
 
