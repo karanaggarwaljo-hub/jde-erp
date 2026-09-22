@@ -37,6 +37,7 @@ import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize
 import PartFormModal from '@/components/inventory/PartFormModal';
 import DeletePartModal from '@/components/inventory/DeletePartModal';
 import MergePartModal from '@/components/inventory/MergePartModal';
+import PartDetailModal from '@/components/inventory/PartDetailModal';
 import type { MergePartsResult } from '@/lib/client-part-merge';
 import ImportFromFileModal from '@/components/inventory/ImportFromFileModal';
 import type {
@@ -114,6 +115,8 @@ export default function InventoryPage() {
   const [deleteCandidate, setDeleteCandidate] = useState<Product | null>(null);
   // A part entered twice, chosen from its row. The dialog finds the other entry and merges them.
   const [mergeCandidate, setMergeCandidate] = useState<Product | null>(null);
+  // The part whose full picture is open: what it fits, what it has done, what replaces it.
+  const [detailPartId, setDetailPartId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState('');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
@@ -981,7 +984,10 @@ export default function InventoryPage() {
                       : <span className="text-muted" style={{ fontSize: '12px' }}>no part number</span>}
                   </td>
                   <td className="hsn-code">{p.hsn_code || '-'}</td>
-                  <td style={{ fontWeight: 600, maxWidth: '150px' }} className="truncate">{p.name}</td>
+                  <td style={{ maxWidth: '150px' }} className="truncate">
+                    <button className="part-name-btn"
+                      title="See everything about this part" onClick={() => setDetailPartId(p.id)}>{p.name}</button>
+                  </td>
                   <td>
                     {p.brand
                       ? <span className="brand-chip" style={{ '--brand-chip-color': brandChipColor(p.brand) } as React.CSSProperties}>{p.brand}</span>
@@ -1068,6 +1074,19 @@ export default function InventoryPage() {
         <DeletePartModal
           deleteCandidate={deleteCandidate} setDeleteCandidate={setDeleteCandidate}
           deleteError={deleteError} deletingProduct={deletingProduct} confirmDelete={confirmDelete}
+        />
+      )}
+
+      {detailPartId && activeCompany && (
+        <PartDetailModal
+          companyId={activeCompany.id} productId={detailPartId}
+          onOpenPart={setDetailPartId}
+          onClose={() => setDetailPartId(null)}
+          onEdit={(productId) => {
+            const product = products.find((row) => row.id === productId);
+            setDetailPartId(null);
+            if (product) handleEdit(product);
+          }}
         />
       )}
 

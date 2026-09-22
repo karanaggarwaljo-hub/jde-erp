@@ -2096,3 +2096,19 @@ Modal
   .part-picker-option { flex-direction: column; align-items: flex-start; gap: 4px; }
   .part-picker-meta { gap: 8px; }
 }
+
+/* A part's name in the Inventory table: reads as text, behaves as the way into that part. */
+.part-name-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.part-name-btn:hover,
+.part-name-btn:focus-visible {
+  text-decoration: underline;
+}
