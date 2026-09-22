@@ -26,6 +26,7 @@ import { savePurchase, receivePurchaseStock, recordPurchasePayment } from '@/lib
 import { buildLastPaidIndex, partLabel } from '@/lib/purchase-entry';
 import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-purchase-returns';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { usePartPhotos } from '@/lib/usePartPhotos';
 import { money, wholeMoney } from '@/lib/money';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { createPart } from '@/lib/client-inventory';
@@ -51,7 +52,7 @@ type PurchaseTab = 'purchases' | 'invoices';
 
 // Only this page reads these two: a product row as Inventory stores it, and the goods-received
 // note the save writes. Everything the dialogs also need lives in lib/purchase-types.ts.
-type Product = { id: string; company_id: string; part_number: string; oem_number: string; hsn_code: string; brand: string; name: string; category: string; cost_price: number; sale_price: number; current_stock: number };
+type Product = { id: string; company_id: string; part_number: string; oem_number: string; hsn_code: string; brand: string; name: string; category: string; cost_price: number; sale_price: number; current_stock: number; image_url?: string | null };
 type Grn = { id: string; company_id: string; po_number: string; supplier: string; received_at: string; status: string };
 
 /** Which purchase orders the table is showing. Purely a view filter — it never changes what is
@@ -153,6 +154,7 @@ const PURCHASE_ENTRY_KINDS = ['purchase'] as const;
 
 export default function PurchasesPage() {
   const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
+  const photoFor = usePartPhotos();
   const { rows: suppliers, create: createSupplier, reload: reloadSuppliers } = useCompanyTable<Supplier>('suppliers');
   const { rows: purchaseOrders, loading: poLoading, reload: reloadPurchaseOrders } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const { reload: reloadGrns } = useCompanyTable<Grn>('grns');
@@ -174,7 +176,8 @@ export default function PurchasesPage() {
     name: product.name,
     brand: product.brand,
     stock: Number(product.current_stock) || 0,
-  })), [products]);
+    photo: photoFor(product)?.url ?? null,
+  })), [products, photoFor]);
   const supplierOptions = suppliers.map((s) => s.name);
 
   const [activeTab, setActiveTab] = useState<PurchaseTab>('purchases');

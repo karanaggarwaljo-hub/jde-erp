@@ -23,6 +23,7 @@ export type Product = {
   /** What the part cost to buy, used to warn before it is billed below cost. */
   cost_price: number;
   current_stock: number;
+  image_url?: string | null;
 };
 
 export type Customer = {

@@ -29,6 +29,8 @@ export type Product = {
   current_stock: number;
   min_stock: number;
   location: string;
+  /** The owner's own photo of the part, if one has been added. */
+  image_url?: string | null;
 };
 
 /** What is currently typed into the add/edit dialog. Every field is a string because it is what an

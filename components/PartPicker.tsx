@@ -22,11 +22,13 @@ import { Search, Plus, AlertTriangle } from 'lucide-react';
 import { money } from '@/lib/money';
 import { isAmbiguousCode, searchParts, scannedPart, type SearchablePart } from '@/lib/part-search';
 import type { LastTraded } from '@/lib/trade-history';
+import PartPhoto from '@/components/PartPhoto';
 
 /** Anything this can offer: findable, plus the rate it fills into a new line — the sale price
  *  when selling, the cost when buying. Deliberately structural, so neither screen's row type is
  *  imported here and neither screen constrains the other. */
-export type PickablePart = SearchablePart & { price: number };
+// `photo` is the part's picture, so the right part can be told apart at a glance while billing.
+export type PickablePart = SearchablePart & { price: number; photo?: string | null };
 
 export type PartPickerProps<T extends PickablePart> = {
   parts: T[];
@@ -55,6 +57,8 @@ export default function PartPicker<T extends PickablePart>({ parts, onPick, onCu
   const listId = useId();
 
   const matches = useMemo(() => searchParts(query, parts, MAX_RESULTS), [query, parts]);
+  // A picture column only once any part has a picture; until then it would be a row of empty boxes.
+  const showPhotos = useMemo(() => parts.some((part) => Boolean(part.photo)), [parts]);
 
   // Clamped on read rather than corrected from an effect. The list can shrink out from under the
   // highlight whenever the query or the catalogue changes, and fixing that in an effect would
@@ -163,6 +167,7 @@ export default function PartPicker<T extends PickablePart>({ parts, onPick, onCu
                 onMouseDown={(event) => { event.preventDefault(); pick(part); }}
               >
                 <div className="part-picker-main">
+                  {showPhotos && <PartPhoto url={part.photo} name={part.name} size={32} />}
                   <span className="pn-chip">{part.partNumber}</span>
                   <span className="part-picker-name">{part.name}</span>
                   {part.brand && <span className="text-muted text-sm">{part.brand}</span>}

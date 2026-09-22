@@ -17,6 +17,7 @@ export type PartDetailPart = {
   sale_price: number;
   current_stock: number;
   min_stock: number;
+  image_url: string | null;
 };
 
 export type PartDetailAlternate = {
@@ -35,6 +36,8 @@ export type PartDetail = {
   part: PartDetailPart;
   overview: PartOverview;
   alternates: PartDetailAlternate[];
+  /** Its published Website Catalog picture, used only when it has no photo of its own. */
+  catalogPhoto: string | null;
 };
 
 /** Everything one part has and has done, in a single request. */

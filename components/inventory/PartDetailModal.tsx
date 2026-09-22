@@ -1,20 +1,23 @@
 'use client';
 
 /**
- * One part, opened from its row: what it fits, what it is worth, what it has done, and what else
- * could be sold in its place.
+ * One part, opened from its row: what it looks like, what it fits, what it is worth, what it has
+ * done, and what else could be sold in its place.
  *
  * Everything shown is this company's own recorded data — no estimate is presented as a fact. An
  * alternative always carries the reason it was offered, and clicking one opens that part here, so
  * a customer asking "what else have you got" is a couple of clicks rather than a search and a guess.
  */
 
-import { useEffect, useState } from 'react';
-import { X, ArrowRight, AlertTriangle, Edit } from 'lucide-react';
+import { ChangeEvent, useEffect, useRef, useState } from 'react';
+import { X, ArrowRight, AlertTriangle, Edit, Camera } from 'lucide-react';
 import { money } from '@/lib/money';
 import { looksLikeAnInventedCode } from '@/lib/detail-import';
 import { marginPercent } from '@/lib/margin';
 import { fetchPartDetail, type PartDetail } from '@/lib/client-part-overview';
+import { removePartPhoto, savePartPhoto } from '@/lib/client-part-photo';
+import type { PartPhotoRef } from '@/lib/part-photos';
+import PartPhoto from '@/components/PartPhoto';
 
 export type PartDetailModalProps = {
   companyId: string;
@@ -23,6 +26,8 @@ export type PartDetailModalProps = {
   onOpenPart: (productId: string) => void;
   onClose: () => void;
   onEdit: (productId: string) => void;
+  /** A photo was added, changed or removed, so the list behind this panel should show it too. */
+  onPhotoChanged: () => void;
 };
 
 const amount = (value: unknown) => {
@@ -39,9 +44,14 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-export default function PartDetailModal({ companyId, productId, onOpenPart, onClose, onEdit }: PartDetailModalProps) {
+export default function PartDetailModal({ companyId, productId, onOpenPart, onClose, onEdit, onPhotoChanged }: PartDetailModalProps) {
   const [detail, setDetail] = useState<PartDetail | null>(null);
   const [failure, setFailure] = useState<{ productId: string; message: string } | null>(null);
+  // Bumped after a photo changes, to read the part again.
+  const [version, setVersion] = useState(0);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState('');
+  const photoInput = useRef<HTMLInputElement>(null);
 
   // Nothing is set before the fetch resolves, and what came back carries the part it belongs to.
   // Opening an alternative therefore never shows the previous part's figures under the new name,
@@ -60,7 +70,7 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
       }
     })();
     return () => { active = false; };
-  }, [companyId, productId]);
+  }, [companyId, productId, version]);
 
   const showing = detail && detail.part.id === productId ? detail : null;
   const error = failure && failure.productId === productId ? failure.message : '';
@@ -69,6 +79,29 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
   const part = showing?.part;
   const totals = showing?.overview.totals;
   const margin = part ? marginPercent(amount(part.sale_price), totals?.nextCost ?? amount(part.cost_price)) : null;
+  const photo: PartPhotoRef | null = part?.image_url
+    ? { url: part.image_url, source: 'own' }
+    : showing?.catalogPhoto ? { url: showing.catalogPhoto, source: 'catalog' } : null;
+
+  const changePhoto = async (work: () => Promise<unknown>) => {
+    setPhotoBusy(true);
+    setPhotoError('');
+    try {
+      await work();
+      setVersion((value) => value + 1);
+      onPhotoChanged();
+    } catch (cause) {
+      setPhotoError(cause instanceof Error ? cause.message : 'The photo was not changed.');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const handlePhotoChosen = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (file) void changePhoto(() => savePartPhoto(companyId, productId, file));
+  };
 
   return (
     <div className="modal-overlay">
@@ -98,10 +131,37 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
 
           {part && showing && totals && (
             <>
-              <section style={{ marginBottom: 18 }}>
-                <div style={{ fontSize: 13, marginBottom: 4 }} className="text-muted">Fits</div>
-                <div style={{ fontWeight: 600, fontSize: 16 }}>
-                  {part.compatibility || <span className="text-muted" style={{ fontWeight: 400 }}>Not recorded yet &mdash; add it with Edit</span>}
+              <section className="part-detail-photo">
+                <PartPhoto
+                  url={photo?.url} name={part.name} size={150} addable={!photo} busy={photoBusy}
+                  onClick={photo ? undefined : () => photoInput.current?.click()}
+                  title={photo ? undefined : `Add a photo of ${part.name}`}
+                />
+                <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                  <div style={{ fontSize: 13, marginBottom: 4 }} className="text-muted">Fits</div>
+                  <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12 }}>
+                    {part.compatibility || <span className="text-muted" style={{ fontWeight: 400 }}>Not recorded yet &mdash; add it with Edit</span>}
+                  </div>
+                  <div className="text-muted" style={{ fontSize: 12, marginBottom: 8 }}>
+                    {photo?.source === 'own'
+                      ? 'Your photo of this part.'
+                      : photo?.source === 'catalog'
+                        ? 'Picture from your Website Catalog. Add your own photo and it is used instead.'
+                        : 'No photo yet. Add one so this part is known on sight.'}
+                  </div>
+                  <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+                    <button className="btn btn-secondary btn-sm" disabled={photoBusy} onClick={() => photoInput.current?.click()}>
+                      <Camera size={14} /> {photoBusy ? 'Saving…' : photo?.source === 'own' ? 'Change photo' : 'Add photo'}
+                    </button>
+                    {photo?.source === 'own' && (
+                      <button className="btn btn-ghost btn-sm" disabled={photoBusy}
+                        onClick={() => void changePhoto(() => removePartPhoto(companyId, productId))}>
+                        Remove photo
+                      </button>
+                    )}
+                  </div>
+                  {photoError && <p className="form-error" role="alert" style={{ marginTop: 8 }}>{photoError}</p>}
+                  <input ref={photoInput} type="file" accept="image/*" hidden onChange={handlePhotoChosen} />
                 </div>
               </section>
 

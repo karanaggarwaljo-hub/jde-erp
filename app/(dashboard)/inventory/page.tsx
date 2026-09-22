@@ -38,6 +38,9 @@ import PartFormModal from '@/components/inventory/PartFormModal';
 import DeletePartModal from '@/components/inventory/DeletePartModal';
 import MergePartModal from '@/components/inventory/MergePartModal';
 import PartDetailModal from '@/components/inventory/PartDetailModal';
+import PartPhoto from '@/components/PartPhoto';
+import { usePartPhotos } from '@/lib/usePartPhotos';
+import { savePartPhoto } from '@/lib/client-part-photo';
 import type { MergePartsResult } from '@/lib/client-part-merge';
 import ImportFromFileModal from '@/components/inventory/ImportFromFileModal';
 import type {
@@ -117,6 +120,13 @@ export default function InventoryPage() {
   const [mergeCandidate, setMergeCandidate] = useState<Product | null>(null);
   // The part whose full picture is open: what it fits, what it has done, what replaces it.
   const [detailPartId, setDetailPartId] = useState<string | null>(null);
+  // Adding a photo straight from a row: which part it is for, the one hidden file picker, and
+  // the part whose photo is uploading right now.
+  const [photoTarget, setPhotoTarget] = useState<string | null>(null);
+  const [photoSaving, setPhotoSaving] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState('');
+  const photoInputRef = useRef<HTMLInputElement>(null);
+  const photoFor = usePartPhotos();
   const [feedback, setFeedback] = useState('');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
@@ -465,6 +475,30 @@ export default function InventoryPage() {
       setDeleteError(error instanceof Error ? error.message : `Failed to remove ${deleteCandidate.part_number}.`);
     } finally {
       setDeletingProduct(false);
+    }
+  };
+
+  const pickPhotoFor = (productId: string) => {
+    setPhotoError('');
+    setPhotoTarget(productId);
+    photoInputRef.current?.click();
+  };
+
+  const handlePhotoChosen = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    const productId = photoTarget;
+    setPhotoTarget(null);
+    if (!file || !productId || !activeCompany) return;
+    setPhotoSaving(productId);
+    try {
+      const saved = await savePartPhoto(activeCompany.id, productId, file);
+      await reload();
+      setFeedback(`Photo added to ${String(saved.name ?? 'the part')}.`);
+    } catch (error) {
+      setPhotoError(error instanceof Error ? error.message : 'The photo was not saved.');
+    } finally {
+      setPhotoSaving(null);
     }
   };
 
@@ -837,6 +871,7 @@ export default function InventoryPage() {
       <>
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
       {importError && <div className="alert alert-danger mb-4" role="alert">{importError}</div>}
+      {photoError && <div className="alert alert-danger mb-4" role="alert">{photoError}</div>}
 
       {/* Headline figures. Each one is summed from the parts this page already loaded — there is
           no month-on-month delta or trend line here because the page holds no historical series
@@ -971,6 +1006,7 @@ export default function InventoryPage() {
               const status = isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
               const statusBadge = isOut ? 'badge-danger' : isLow ? 'badge-warning' : 'badge-success';
               const meter = meterPercent(p);
+              const photo = photoFor(p);
               return (
                 <tr key={p.id}>
                   <td>
@@ -984,9 +1020,14 @@ export default function InventoryPage() {
                       : <span className="text-muted" style={{ fontSize: '12px' }}>no part number</span>}
                   </td>
                   <td className="hsn-code">{p.hsn_code || '-'}</td>
-                  <td style={{ maxWidth: '150px' }} className="truncate">
-                    <button className="part-name-btn"
-                      title="See everything about this part" onClick={() => setDetailPartId(p.id)}>{p.name}</button>
+                  <td style={{ maxWidth: '230px' }}>
+                    <div className="part-name-cell">
+                      {photo
+                        ? <PartPhoto url={photo.url} name={p.name} onClick={() => setDetailPartId(p.id)} title={`Open ${p.name}`} />
+                        : <PartPhoto name={p.name} addable busy={photoSaving === p.id} onClick={() => pickPhotoFor(p.id)} title={`Add a photo of ${p.name}`} />}
+                      <button className="part-name-btn"
+                        title="See everything about this part" onClick={() => setDetailPartId(p.id)}>{p.name}</button>
+                    </div>
                   </td>
                   <td>
                     {p.brand
@@ -1077,11 +1118,15 @@ export default function InventoryPage() {
         />
       )}
 
+      {/* One picker for every row's "add a photo". On a phone it offers the camera. */}
+      <input ref={photoInputRef} type="file" accept="image/*" hidden onChange={handlePhotoChosen} />
+
       {detailPartId && activeCompany && (
         <PartDetailModal
           companyId={activeCompany.id} productId={detailPartId}
           onOpenPart={setDetailPartId}
           onClose={() => setDetailPartId(null)}
+          onPhotoChanged={() => { void reload(); }}
           onEdit={(productId) => {
             const product = products.find((row) => row.id === productId);
             setDetailPartId(null);

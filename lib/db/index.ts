@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import { BACKUP_TABLES, TABLES, isWritableTable, type TableName } from './schema';
+import { partPhotoPath } from '../part-photos';
 
 export type { TableName };
 
@@ -1249,18 +1250,20 @@ export async function getPartOverviewRows(companyId: string, productId: string):
   purchaseOrders: PartRow[];
   returnItems: PartRow[];
   returns: PartRow[];
+  catalogRows: PartRow[];
 }> {
   const client = getClient();
   const lines = client.from('jde_invoice_items').select('*').eq('company_id', companyId).eq('product_id', productId);
-  const [product, products, layers, invoiceItems, poItems, returnItems] = await Promise.all([
+  const [product, products, layers, invoiceItems, poItems, returnItems, catalogRows] = await Promise.all([
     client.from('jde_products').select('*').eq('company_id', companyId).eq('id', productId).maybeSingle(),
     client.from('jde_products').select('id, part_number, oem_number, name, brand, category, compatibility, current_stock, sale_price').eq('company_id', companyId),
     client.from('jde_stock_layers').select('*').eq('company_id', companyId).eq('product_id', productId),
     lines,
     client.from('jde_po_items').select('*').eq('company_id', companyId).eq('product_id', productId),
     client.from('jde_sales_return_items').select('*').eq('company_id', companyId).eq('product_id', productId),
+    client.from('jde_catalog_products').select('erp_product_id, image_url, image_status, publication_status, updated_at').eq('company_id', companyId).eq('erp_product_id', productId),
   ]);
-  for (const result of [product, products, layers, invoiceItems, poItems, returnItems]) {
+  for (const result of [product, products, layers, invoiceItems, poItems, returnItems, catalogRows]) {
     if (result.error) throw result.error;
   }
 
@@ -1292,5 +1295,46 @@ export async function getPartOverviewRows(companyId: string, productId: string):
     purchaseOrders: rowsOf(purchaseOrders),
     returnItems: rowsOf(returnItems),
     returns: rowsOf(returns),
+    catalogRows: rowsOf(catalogRows),
   };
+}
+
+/** Stores the owner's own photo of a part in the catalog's public bucket, under part-photos/, and
+ *  returns where it went. A new file every time — see partPhotoPath — so a browser that cached the
+ *  old photo never keeps showing it. */
+export async function uploadPartPhoto(companyId: string, productId: string, base64: string, mimeType: string): Promise<{ url: string; path: string }> {
+  if (!isSupportedCatalogImageType(mimeType)) throw new Error('Please use a JPEG, PNG or WebP photo.');
+  const path = partPhotoPath(companyId, productId, mimeType, Date.now());
+  const { error } = await getClient()
+    .storage.from(CATALOG_IMAGE_BUCKET)
+    .upload(path, Buffer.from(base64, 'base64'), { contentType: mimeType, upsert: false });
+  if (error) throw error;
+  const { data } = getClient().storage.from(CATALOG_IMAGE_BUCKET).getPublicUrl(path);
+  return { url: data.publicUrl, path };
+}
+
+/** Points a part at a photo, or at none. Scoped to the company, so another company's part id
+ *  changes nothing. Returns the updated part and the photo it had before, or undefined when the
+ *  part is not this company's. */
+export async function setPartPhoto(
+  companyId: string,
+  productId: string,
+  url: string | null,
+): Promise<{ row: Record<string, unknown>; previous: string | null } | undefined> {
+  const client = getClient();
+  const { data: before, error: readError } = await client
+    .from('jde_products').select('image_url').eq('company_id', companyId).eq('id', productId).maybeSingle();
+  if (readError) throw readError;
+  if (!before) return undefined;
+  const { data, error } = await client
+    .from('jde_products').update({ image_url: url }).eq('company_id', companyId).eq('id', productId).select('*').single();
+  if (error) throw error;
+  return { row: data as Record<string, unknown>, previous: (before as { image_url: string | null }).image_url ?? null };
+}
+
+/** Deletes a stored part photo's file. Best effort: the part no longer points at it either way,
+ *  and a leftover file costs a little space and nothing else. */
+export async function removeStoredPartPhoto(path: string): Promise<void> {
+  const { error } = await getClient().storage.from(CATALOG_IMAGE_BUCKET).remove([path]);
+  if (error) console.error('Could not remove an old part photo:', path, error);
 }

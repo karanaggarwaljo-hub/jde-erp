@@ -2,6 +2,7 @@ import { checkCompanyAccess } from '@/lib/auth/dal';
 import { dbErrorMessage, getPartOverviewRows } from '@/lib/db';
 import { buildPartOverview } from '@/lib/part-overview';
 import { findAlternates, type AlternatePart } from '@/lib/part-alternates';
+import { catalogPhotoIndex } from '@/lib/part-photos';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +40,9 @@ export async function GET(request: Request) {
       detail: match.detail,
     }));
 
-    return Response.json({ part: rows.product, overview: buildPartOverview(rows), alternates });
+    // Shown only when the part has no photo of its own; see lib/part-photos.ts for why only published ones.
+    const catalogPhoto = catalogPhotoIndex(rows.catalogRows).get(productId) ?? null;
+    return Response.json({ part: rows.product, overview: buildPartOverview(rows), alternates, catalogPhoto });
   } catch (error) {
     console.error('GET /api/inventory/part failed:', error);
     return Response.json({ error: dbErrorMessage(error, 'Could not load this part.') }, { status: 500 });
