@@ -2,6 +2,41 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-23 — Filling in part numbers from a file is four times faster, and the count stops going backwards
+
+You imported a 26-row file through Inventory → **Import from File** → **Fill in part numbers &
+details**. Every part was saved correctly, but the button counted **"Updating 0 of 26", then "3 of
+23", then "7 of 19", then "17 of 9"** — the total shrinking as it went — and the whole run took
+about two and a half minutes.
+
+**What was happening.** After saving each part, the app read your entire parts list back from the
+database and worked the plan out again from scratch. A part that had just been given its real
+number no longer needed anything, so it dropped out of the plan, and the "of 26" was counted from
+whatever was still left rather than from what you pressed Apply on. That re-reading is also what
+made it slow: every part cost one save **plus** a full re-read of every part you own.
+
+**Now, when you press Apply:**
+
+- **The total is fixed at that moment.** It counts 1 of 26, 2 of 26, all the way to 26 of 26.
+- **The plan on screen stays exactly as you approved it** until the run finishes. The rows, the
+  ticks and the "52 of 52 details" line no longer shift under you while parts are being saved.
+- **The whole dialog is locked while it runs** — every tick box, both column pickers and the
+  "what should this file do?" buttons — so a half-finished run can't be changed underneath itself.
+- **Parts are saved a few at a time** instead of one after another, and your parts list is read
+  once at the end instead of after every part. On a 26-part test the same import went from **2
+  minutes 9 seconds to 33 seconds**.
+- **If something goes wrong partway you are still told exactly how many parts were saved** before
+  it stopped, and the dialog then shows just the ones still to do, so pressing Apply again picks up
+  the rest.
+
+**Update cost prices from a file got all of the same fixes**, since it counted down the same way
+and re-read the whole list after every part too.
+
+Nothing about what gets written has changed: stock, cost and selling price are still never touched
+by "fill in part numbers", a blank cell still erases nothing, and a corrected number another part
+already holds is still held back. Checked end to end in a browser against a test company: 26 parts,
+52 details, every one correct in the database afterwards, with stock and prices untouched.
+
 ## 2026-09-14 — The parts worksheet can now correct names, not just part numbers
 
 You asked whether a file of real part numbers, compatibility and correct names could update the
