@@ -2,6 +2,29 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-23 — Click a part to see everything about it
+
+Finding out what a part fits, what it cost, who bought it last and what else you could sell in its
+place meant looking in four places. **Now click a part's name in Inventory** and it all opens in one
+window:
+
+- **What it fits**, right at the top, in big letters.
+- **The numbers that matter:** how many are on the shelf, what that stock is worth batch by batch,
+  what the next sale of it will cost you, what you sell it for, and the margin between them. Plus
+  MRP, OEM number, HSN, where it is kept, and what it has sold and cost you in total.
+- **Other parts you could use instead**, each with the reason it is suggested — it carries the same
+  number, it is the same part written twice ("Pinion seal" and "Pinion seal (orignal)"), or it is
+  the same kind of part for the same machine. Click one and that part opens, so a customer's "what
+  else have you got" takes two clicks.
+- **Every batch on the shelf:** when it was bought, how many are left of how many, and at what cost.
+- **Sold and Bought:** the recent bills and purchase orders naming this part, with the customer or
+  supplier, quantity and rate.
+
+**Nothing is guessed.** Every figure comes from your own records, and a part with no purchase batch
+says so plainly, because a sale of it is costed from the cost price you typed rather than a real
+purchase. Parts for different machines are never offered as substitutes for each other: "charging
+pump 3D" and "charging pump 3DX" stay separate.
+
 ## 2026-09-14 — Merge a part that was entered twice
 
 "bkt main pin" and "PIN (12400)" are the same part, entered twice. One entry showed 20 on the shelf

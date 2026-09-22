@@ -1232,3 +1232,65 @@ export async function mergeProducts(companyId: string, keepId: string, removeId:
   if (error) throw error;
   return data as MergeProductsResult;
 }
+
+type PartRow = Record<string, unknown>;
+
+/** Everything behind one part: the part itself, the whole catalogue (the alternates are worked
+ *  out from it), its stock batches, and every sale, purchase and credit note that names it.
+ *  Two round trips rather than one per table — the documents can only be fetched once their
+ *  lines say which ones to ask for. */
+export async function getPartOverviewRows(companyId: string, productId: string): Promise<{
+  product: PartRow | undefined;
+  products: PartRow[];
+  layers: PartRow[];
+  invoiceItems: PartRow[];
+  invoices: PartRow[];
+  poItems: PartRow[];
+  purchaseOrders: PartRow[];
+  returnItems: PartRow[];
+  returns: PartRow[];
+}> {
+  const client = getClient();
+  const lines = client.from('jde_invoice_items').select('*').eq('company_id', companyId).eq('product_id', productId);
+  const [product, products, layers, invoiceItems, poItems, returnItems] = await Promise.all([
+    client.from('jde_products').select('*').eq('company_id', companyId).eq('id', productId).maybeSingle(),
+    client.from('jde_products').select('id, part_number, oem_number, name, brand, category, compatibility, current_stock, sale_price').eq('company_id', companyId),
+    client.from('jde_stock_layers').select('*').eq('company_id', companyId).eq('product_id', productId),
+    lines,
+    client.from('jde_po_items').select('*').eq('company_id', companyId).eq('product_id', productId),
+    client.from('jde_sales_return_items').select('*').eq('company_id', companyId).eq('product_id', productId),
+  ]);
+  for (const result of [product, products, layers, invoiceItems, poItems, returnItems]) {
+    if (result.error) throw result.error;
+  }
+
+  const rowsOf = (result: { data: unknown }) => (result.data as PartRow[] | null) ?? [];
+  const idsIn = (rows: PartRow[], key: string) =>
+    [...new Set(rows.map((row) => String(row[key] ?? '')).filter(Boolean))];
+
+  const invoiceIds = idsIn(rowsOf(invoiceItems), 'invoice_id');
+  const orderIds = idsIn(rowsOf(poItems), 'po_id');
+  const returnIds = idsIn(rowsOf(returnItems), 'sales_return_id');
+  const none = Promise.resolve({ data: [] as PartRow[], error: null });
+
+  const [invoices, purchaseOrders, returns] = await Promise.all([
+    invoiceIds.length ? client.from('jde_invoices').select('id, date, customer, total').eq('company_id', companyId).in('id', invoiceIds) : none,
+    orderIds.length ? client.from('jde_purchase_orders').select('id, date, supplier, status').eq('company_id', companyId).in('id', orderIds) : none,
+    returnIds.length ? client.from('jde_sales_returns').select('id, created_at, invoice_id, reason').eq('company_id', companyId).in('id', returnIds) : none,
+  ]);
+  for (const result of [invoices, purchaseOrders, returns]) {
+    if (result.error) throw result.error;
+  }
+
+  return {
+    product: (product.data as PartRow | null) ?? undefined,
+    products: rowsOf(products),
+    layers: rowsOf(layers),
+    invoiceItems: rowsOf(invoiceItems),
+    invoices: rowsOf(invoices),
+    poItems: rowsOf(poItems),
+    purchaseOrders: rowsOf(purchaseOrders),
+    returnItems: rowsOf(returnItems),
+    returns: rowsOf(returns),
+  };
+}
