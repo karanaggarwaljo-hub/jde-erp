@@ -2,6 +2,27 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-23 — A photo beside every part
+
+You wanted to see what a part looks like next to its name, so you can tell parts apart at a glance.
+
+**Every part in Inventory now has a picture box before its name.**
+
+- **Adding a photo is one click.** Click the camera box beside a part and choose a photo. On a
+  phone you can take one there and then. It is shrunk before it is sent, so a big phone photo
+  uploads quickly and the list stays fast.
+- **Click a part's photo, or its name, to open the part.** The photo is shown large at the top,
+  whole rather than cropped, with **Change photo** and **Remove photo**.
+- **The same picture shows while billing.** On a sale or a purchase, the parts list beside the
+  search box shows each part's picture, so the right one is easy to pick.
+- **Your 12 parts that already have a published Website Catalog picture show it straight away.**
+  Your own photo always takes its place once you add one, and the part window says which picture
+  you are looking at. A catalog picture you have not published is never shown as the part, because
+  it may have been made by AI and nobody has checked it.
+
+Adding, changing and removing a photo are each written to the audit log. Nothing else about a part
+changes when its photo does.
+
 ## 2026-09-23 — Click a part to see everything about it
 
 Finding out what a part fits, what it cost, who bought it last and what else you could sell in its

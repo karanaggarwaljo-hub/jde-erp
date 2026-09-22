@@ -36,6 +36,7 @@ import { createSalesReturn, deleteSalesReturn, getReturnableInvoiceItems, type R
 import { duplicateCreditNotes } from '@/lib/sales-returns';
 import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } from '@/lib/client-quotations';
 import { useCompanyTable } from '@/lib/useCompanyTable';
+import { usePartPhotos } from '@/lib/usePartPhotos';
 import { buildCustomerLedger } from '@/lib/customer-ledger';
 import AddCustomerModal from '@/components/AddCustomerModal';
 import PartPicker from '@/components/PartPicker';
@@ -121,6 +122,7 @@ const SALES_ENTRY_KINDS = ['sale', 'payment'] as const;
 
 export default function SalesPage() {
   const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
+  const photoFor = usePartPhotos();
   const { rows: customers, create: createCustomer, reload: reloadCustomers } = useCompanyTable<Customer>('customers');
   const { rows: invoices, loading: invoicesLoading, reload: reloadInvoices } = useCompanyTable<Invoice>('invoices');
   const { rows: quotations, loading: quotationsLoading, reload: reloadQuotations } = useCompanyTable<Quotation>('quotations');
@@ -146,7 +148,8 @@ export default function SalesPage() {
     brand: product.brand,
     stock: Number(product.current_stock) || 0,
     hsn: product.hsn_code,
-  })), [products]);
+    photo: photoFor(product)?.url ?? null,
+  })), [products, photoFor]);
 
   const [activeTab, setActiveTab] = useState<SalesTab>('invoices');
   const [search, setSearch] = useState('');

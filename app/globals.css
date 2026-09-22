@@ -2112,3 +2112,29 @@ Modal
 .part-name-btn:focus-visible {
   text-decoration: underline;
 }
+
+/* A part's picture: a thumbnail in lists, large when the part is opened. */
+.part-photo {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+  background: var(--panel-2);
+  color: var(--ink);
+}
+.part-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.part-photo.is-empty svg { opacity: 0.45; }
+button.part-photo { cursor: pointer; }
+button.part-photo:hover,
+button.part-photo:focus-visible { border-color: var(--border-focus); }
+button.part-photo.is-empty:hover svg { opacity: 0.85; }
+.part-photo.is-busy { opacity: 0.5; cursor: progress; }
+.part-name-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.part-name-cell .part-name-btn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Opened large, a picture is shown whole rather than cropped to a square. */
+.part-detail-photo { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 18px; }
+.part-detail-photo .part-photo img { object-fit: contain; }
