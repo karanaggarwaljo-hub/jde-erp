@@ -1209,3 +1209,26 @@ export async function deleteSalesReturn(companyId: string, returnId: string): Pr
   if (error) throw error;
   return data as DeleteSalesReturnResult;
 }
+
+export type MergeProductsResult = {
+  id: string;
+  part_number: string;
+  name: string;
+  current_stock: number;
+  moved_lines: number;
+  recosted_units: number;
+};
+
+/** Merges a part that was entered twice through jde_merge_products, in one transaction: every
+ *  sale, purchase, quotation, return, batch and FIFO consumption of the duplicate moves to the
+ *  kept part, the stock counts add up, blank details are filled from the duplicate, sales made
+ *  while stock showed below zero are re-costed from the batches really on the shelf, and the
+ *  duplicate is deleted. The kept part keeps its name; its part number is `partNumber`, which must
+ *  be one of the two parts' own. */
+export async function mergeProducts(companyId: string, keepId: string, removeId: string, partNumber: string): Promise<MergeProductsResult> {
+  const { data, error } = await getClient()
+    .rpc('jde_merge_products', { p_company_id: companyId, p_keep_id: keepId, p_remove_id: removeId, p_part_number: partNumber })
+    .single();
+  if (error) throw error;
+  return data as MergeProductsResult;
+}
