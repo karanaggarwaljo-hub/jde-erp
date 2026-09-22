@@ -29,6 +29,7 @@ import { matchesProductSearch, duplicatePartNumbers as findDuplicatePartNumbers 
 import { averageMarginPercent, marginPercent } from '@/lib/margin';
 import { buildPartsWorksheet, countUnanswered, worksheetToCsv, worksheetFileName } from '@/lib/parts-worksheet';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
+import { saveEach, IMPORT_SAVES_AT_ONCE } from '@/lib/bulk-save';
 import { createPart } from '@/lib/client-inventory';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { fifoCostLookup, totalStockValue } from '@/lib/stock-value';
@@ -140,7 +141,12 @@ export default function InventoryPage() {
   const [draggingFile, setDraggingFile] = useState(false);
   const dragDepth = useRef(0);
   const [applyingCosts, setApplyingCosts] = useState(false);
-  const [costProgress, setCostProgress] = useState(0);
+  // How far an Apply run has got. The total is fixed when Apply is pressed: working it out again
+  // from the plan on screen counted down as saved parts stopped needing anything.
+  const [costProgress, setCostProgress] = useState({ done: 0, total: 0 });
+  // The parts list the import preview was worked out from, held still while Apply runs, so the
+  // plan on screen is the one being saved rather than one re-worked from half-saved parts.
+  const [plannedProducts, setPlannedProducts] = useState<Product[] | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestFailed, setSuggestFailed] = useState(false);
   const [savingProduct, setSavingProduct] = useState(false);
@@ -694,61 +700,69 @@ export default function InventoryPage() {
   const applyDetailPlan = async (pending: { productId: string; patch: Record<string, string>; name: string }[]) => {
     if (!costSheet) return;
     setApplyingCosts(true);
-    setCostProgress(0);
+    setPlannedProducts(products);
+    setCostProgress({ done: 0, total: pending.length });
     setImportError('');
-    let done = 0;
-    let fields = 0;
     try {
-      for (const item of pending) {
-        await update(item.productId, item.patch);
-        fields += Object.keys(item.patch).length;
-        done += 1;
-        setCostProgress(done);
+      // A few parts at a time, and without re-reading every part after each one — the list is read
+      // once, below. The plan never lets two rows touch one part, so the saves can overlap.
+      const result = await saveEach(pending, (item) => update(item.productId, item.patch, { reload: false }), {
+        concurrency: IMPORT_SAVES_AT_ONCE,
+        onSaved: (done) => setCostProgress({ done, total: pending.length }),
+      });
+      await reload();
+      if (result.failed) {
+        // Say exactly how far it got — a half-applied run whose shape the owner knows is
+        // recoverable; a silent one is not.
+        setImportError(
+          `${result.error instanceof Error ? result.error.message : 'Failed to update part details.'} ` +
+            `${result.done} of ${pending.length} part(s) were updated before this stopped.`
+        );
+        return;
       }
-      await reload();
-      setFeedback(`Filled in ${fields} detail(s) across ${done} part(s) from ${costSheet.fileName}. Stock and prices were not touched.`);
+      const fields = pending.reduce((total, item) => total + Object.keys(item.patch).length, 0);
+      setFeedback(`Filled in ${fields} detail(s) across ${result.done} part(s) from ${costSheet.fileName}. Stock and prices were not touched.`);
       setCostSheet(null);
-    } catch (err) {
-      // Say exactly how far it got — a half-applied run whose shape the owner knows is
-      // recoverable; a silent one is not.
-      await reload();
-      setImportError(
-        `${err instanceof Error ? err.message : 'Failed to update part details.'} ` +
-          `${done} of ${pending.length} part(s) were updated before this stopped.`
-      );
     } finally {
       setApplyingCosts(false);
+      setPlannedProducts(null);
     }
   };
 
   const applyCostPlan = async (pending: CostMatch[]) => {
     if (!costSheet) return;
     setApplyingCosts(true);
-    setCostProgress(0);
+    setPlannedProducts(products);
+    setCostProgress({ done: 0, total: pending.length });
     setImportError('');
-    let done = 0;
     try {
-      for (const match of pending) {
-        // Same two steps the edit form performs for a cost change: the part's own field, and the
-        // purchase batch the displayed cost and margin actually read from. Updating only the
-        // first is the bug that made a typed-in cost price appear not to take effect.
-        await update(match.product!.id, { cost_price: match.row.cost });
-        await correctOldestLayerCost(match.product!.id, match.row.cost);
-        done += 1;
-        setCostProgress(done);
-      }
-      await Promise.all([reload(), reloadStockLayers()]);
-      setFeedback(`Updated the cost price of ${done} part(s) from ${costSheet.fileName}.`);
-      setCostSheet(null);
-    } catch (err) {
-      // Say exactly how far it got — a half-applied run the owner knows the shape of is
-      // recoverable; a silent one is not.
-      await Promise.all([reload(), reloadStockLayers()]);
-      setImportError(
-        `${err instanceof Error ? err.message : 'Failed to update costs.'} ${done} of ${pending.length} part(s) were updated before this stopped; re-uploading the same file will retry the rest.`
+      const result = await saveEach(
+        pending,
+        async (match) => {
+          // Same two steps the edit form performs for a cost change: the part's own field, and the
+          // purchase batch the displayed cost and margin actually read from. Updating only the
+          // first is the bug that made a typed-in cost price appear not to take effect. The two
+          // stay in this order for each part — only different parts overlap — and neither re-reads
+          // a whole list; both lists are read once, below.
+          await update(match.product!.id, { cost_price: match.row.cost }, { reload: false });
+          await correctOldestLayerCost(match.product!.id, match.row.cost);
+        },
+        { concurrency: IMPORT_SAVES_AT_ONCE, onSaved: (done) => setCostProgress({ done, total: pending.length }) }
       );
+      await Promise.all([reload(), reloadStockLayers()]);
+      if (result.failed) {
+        // Say exactly how far it got — a half-applied run the owner knows the shape of is
+        // recoverable; a silent one is not.
+        setImportError(
+          `${result.error instanceof Error ? result.error.message : 'Failed to update costs.'} ${result.done} of ${pending.length} part(s) were updated before this stopped; re-uploading the same file will retry the rest.`
+        );
+        return;
+      }
+      setFeedback(`Updated the cost price of ${result.done} part(s) from ${costSheet.fileName}.`);
+      setCostSheet(null);
     } finally {
       setApplyingCosts(false);
+      setPlannedProducts(null);
     }
   };
 
@@ -1086,7 +1100,7 @@ export default function InventoryPage() {
       {costSheet && (
         <ImportFromFileModal
           costSheet={costSheet} setCostSheet={setCostSheet}
-          products={products} activeCompany={activeCompany}
+          products={plannedProducts ?? products} activeCompany={activeCompany}
           importMode={importMode} setImportMode={setImportMode}
           costColumn={costColumn} setCostColumn={setCostColumn}
           idColumn={idColumn} setIdColumn={setIdColumn}
