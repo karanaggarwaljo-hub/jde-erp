@@ -47,7 +47,8 @@ export type ImportFromFileModalProps = {
   excludedDetails: Set<string>;
   setExcludedDetails: Dispatch<SetStateAction<Set<string>>>;
   applyingCosts: boolean;
-  costProgress: number;
+  /** Parts saved so far, out of the number there were when Apply was pressed. */
+  costProgress: { done: number; total: number };
   importError: string;
   applyCostPlan: (pending: CostMatch[]) => void;
   applyNewParts: (chosen: ImportedProduct[]) => void;
@@ -144,6 +145,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                     <button
                       type="button"
                       className={'btn btn-sm ' + (importMode === 'costs' ? 'btn-primary' : 'btn-secondary')}
+                      disabled={applyingCosts}
                       onClick={() => setImportMode('costs')}
                     >
                       Update cost prices of parts I already have
@@ -151,7 +153,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                     <button
                       type="button"
                       className={'btn btn-sm ' + (importMode === 'new' ? 'btn-primary' : 'btn-secondary')}
-                      disabled={costSheet.newParts.length === 0}
+                      disabled={applyingCosts || costSheet.newParts.length === 0}
                       onClick={() => setImportMode('new')}
                     >
                       Add as new parts{costSheet.newParts.length > 0 ? ' (' + costSheet.newParts.length + ')' : ''}
@@ -159,7 +161,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                     <button
                       type="button"
                       className={'btn btn-sm ' + (importMode === 'details' ? 'btn-primary' : 'btn-secondary')}
-                      disabled={detailCounts.update === 0}
+                      disabled={applyingCosts || detailCounts.update === 0}
                       onClick={() => setImportMode('details')}
                     >
                       Fill in part numbers &amp; details{detailCounts.update > 0 ? ' (' + detailCounts.update + ')' : ''}
@@ -170,7 +172,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                 <div className="flex gap-4 flex-wrap" style={{ marginBottom: '12px', display: importMode === 'costs' ? undefined : 'none' }}>
                   <div className="form-group" style={{ margin: 0, minWidth: '230px' }}>
                     <label className="form-label" htmlFor="cost-col">Which column holds the cost?</label>
-                    <select id="cost-col" className="form-select" value={costColumn} onChange={(e) => { setCostColumn(e.target.value); setExcludedRows(new Set()); }}>
+                    <select id="cost-col" className="form-select" value={costColumn} disabled={applyingCosts} onChange={(e) => { setCostColumn(e.target.value); setExcludedRows(new Set()); }}>
                       <option value="">— choose a column —</option>
                       {sheet.columns.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
@@ -182,7 +184,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                   </div>
                   <div className="form-group" style={{ margin: 0, minWidth: '230px' }}>
                     <label className="form-label" htmlFor="id-col">Which column names the part?</label>
-                    <select id="id-col" className="form-select" value={idColumn} onChange={(e) => { setIdColumn(e.target.value); setExcludedRows(new Set()); }}>
+                    <select id="id-col" className="form-select" value={idColumn} disabled={applyingCosts} onChange={(e) => { setIdColumn(e.target.value); setExcludedRows(new Set()); }}>
                       <option value="">— choose a column —</option>
                       {sheet.columns.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
@@ -286,6 +288,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                                 type="checkbox"
                                 aria-label={allNewTicked ? 'Clear all' : 'Select all'}
                                 checked={allNewTicked}
+                                disabled={applyingCosts}
                                 ref={(el) => { if (el) el.indeterminate = chosenNew.length > 0 && !allNewTicked; }}
                                 onChange={toggleAllNew}
                               />
@@ -302,6 +305,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                                   <input
                                     type="checkbox"
                                     aria-label={'Add ' + (part.part_number || part.name)}
+                                    disabled={applyingCosts}
                                     checked={!excludedNew.has(index)}
                                     onChange={() => toggleNew(index)}
                                   />
@@ -352,7 +356,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                                 type="checkbox"
                                 aria-label={allTicked ? 'Clear all' : 'Select all'}
                                 checked={allTicked}
-                                disabled={updatable.length === 0}
+                                disabled={applyingCosts || updatable.length === 0}
                                 // Partly-ticked has to be set on the node; there is no attribute for it.
                                 ref={(el) => { if (el) el.indeterminate = pending.length > 0 && !allTicked; }}
                                 onChange={toggleAll}
@@ -370,6 +374,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                                     type="checkbox"
                                     aria-label={`Update ${m.product?.part_number || m.product?.name || `row ${m.row.rowNumber}`}`}
                                     checked={!excludedRows.has(m.row.rowNumber)}
+                                    disabled={applyingCosts}
                                     onChange={() => toggleRow(m.row.rowNumber)}
                                   />
                                 )}
@@ -402,7 +407,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                     onClick={() => applyDetailPlan(detailPending.map(({ match, patch }) => ({ productId: match.product!.id, patch, name: match.product!.name })))}
                   >
                     {applyingCosts
-                      ? `Updating ${costProgress} of ${detailPending.length}…`
+                      ? `Updating ${costProgress.done} of ${costProgress.total}…`
                       : detailPending.length === 0
                         ? (detailCounts.update === 0 ? 'Nothing to fill in' : 'Nothing ticked')
                         : `Fill in ${detailTickedCount} detail(s) on ${detailPending.length} part(s)`}
@@ -414,7 +419,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                 ) : (
                 <button className="btn btn-primary" disabled={applyingCosts || pending.length === 0} onClick={() => applyCostPlan(pending)}>
                   {applyingCosts
-                    ? `Updating ${costProgress} of ${pending.length}…`
+                    ? `Updating ${costProgress.done} of ${costProgress.total}…`
                     : pending.length === 0
                       // "Nothing to update" would be wrong when there are updates and the owner
                       // has simply unticked them all — say which of the two it is.

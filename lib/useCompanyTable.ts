@@ -138,14 +138,17 @@ export function useCompanyTable<T extends Record<string, unknown>>(table: string
     return created as T;
   }, [table, activeCompany, reload]);
 
-  const update = useCallback(async (id: string, patch: Record<string, unknown>) => {
+  /** Pass `{ reload: false }` when saving many rows one after another, and call `reload()` once
+   *  when the batch is finished. Re-reading the whole table after every row is what made a
+   *  26-part import take minutes, and it re-plans any preview built from these rows mid-save. */
+  const update = useCallback(async (id: string, patch: Record<string, unknown>, options?: { reload?: boolean }) => {
     const res = await fetch(`/api/local/${table}/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
     const updated = await parseJsonOrThrow(res, 'Failed to update record.');
-    await reload();
+    if (options?.reload !== false) await reload();
     return updated as T;
   }, [table, reload]);
 
