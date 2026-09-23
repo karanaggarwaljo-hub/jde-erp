@@ -2,6 +2,20 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-23 — The menu button sits where the company name was
+
+**The company name in the top bar is now a menu button**, as asked.
+
+**Press it to hide the side menu**, which gives the whole width of the screen to the page you are
+on — useful on Inventory. Press it again to bring the menu back. Your computer remembers which way
+you left it. On a phone it slides the menu in and out, exactly as before.
+
+**The company moved into your own menu**, behind your name at the top right. It shows which company
+you are working in, and if you keep more than one, you switch between them there. Your name and
+role are shown there too, which a phone had no room for anywhere else.
+
+The Dashboard still prints the company name and address under its heading.
+
 ## 2026-09-23 — A photo beside every part
 
 You wanted to see what a part looks like next to its name, so you can tell parts apart at a glance.
