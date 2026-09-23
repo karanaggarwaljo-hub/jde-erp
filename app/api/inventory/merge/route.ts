@@ -1,8 +1,25 @@
-import { dbErrorMessage, isBusinessRuleError, mergeProducts } from '@/lib/db';
+import { dbErrorMessage, getPartPhotoUrl, isBusinessRuleError, isPictureInUse, mergeProducts, removeStoredPartPhoto } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { recordAudit } from '@/lib/audit-log';
+import { ownPhotoPath } from '@/lib/part-photos';
 
 export const dynamic = 'force-dynamic';
+
+/** Deletes the duplicate's own photo once nothing shows it — which is when the kept part had a
+ *  photo of its own and so did not take it. Only a file the part-photo feature stored, never a
+ *  catalog picture. Best effort: the merge has already happened, and a leftover file costs a
+ *  little space and nothing else. */
+async function deleteLeftoverPhoto(url: string | null): Promise<boolean> {
+  const path = ownPhotoPath(url);
+  if (!url || !path) return false;
+  try {
+    if (await isPictureInUse(url)) return false;
+    return await removeStoredPartPhoto(path);
+  } catch (error) {
+    console.error('Could not tidy up the photo of a merged part:', error);
+    return false;
+  }
+}
 
 /**
  * Merges a part that was entered twice into the entry being kept.
@@ -35,13 +52,17 @@ export async function POST(request: Request) {
   }
 
   try {
+    // Read first: once merged the duplicate is gone, and the function reports only the kept part.
+    const removedPhoto = await getPartPhotoUrl(companyId, removeId);
     const merged = await mergeProducts(companyId, keepId, removeId, partNumber);
+    const photoDeleted = await deleteLeftoverPhoto(removedPhoto);
     await recordAudit({
       companyId, action: 'products.merge', entity: 'products', entityId: merged.id,
       summary: `Merged ${removeLabel || removeId} into ${merged.part_number ? `${merged.part_number} — ` : ''}${merged.name}, now ${merged.current_stock} in stock`,
       details: {
         kept_id: keepId, removed_id: removeId, removed: removeLabel, part_number: merged.part_number,
         moved_lines: merged.moved_lines, recosted_units: merged.recosted_units,
+        ...(photoDeleted ? { deleted_photo: removedPhoto } : {}),
       },
     });
     return Response.json(merged);

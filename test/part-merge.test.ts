@@ -70,3 +70,29 @@ test('the kept part’s own details are never overwritten', () => {
   );
   assert.deepEqual(plan.fills, []);
 });
+
+const PHOTO = 'https://example.supabase.co/storage/v1/object/public/jde-catalog-images/part-photos/co/pin-1.jpg';
+const OTHER_PHOTO = 'https://example.supabase.co/storage/v1/object/public/jde-catalog-images/part-photos/co/bkt-2.jpg';
+
+test('a kept part with no photo takes the duplicate’s, and nothing is thrown away', () => {
+  const plan = planPartMerge(BKT_MAIN_PIN, { ...PIN_12400, image_url: PHOTO });
+  assert.deepEqual(plan.fills.find((fill) => fill.field === 'image_url'), { field: 'image_url', label: 'photo', value: PHOTO });
+  assert.equal(plan.droppedPhoto, '');
+});
+
+test('a kept part with its own photo keeps it, and the duplicate’s is the one dropped', () => {
+  const plan = planPartMerge({ ...BKT_MAIN_PIN, image_url: OTHER_PHOTO }, { ...PIN_12400, image_url: PHOTO });
+  assert.ok(!plan.fills.some((fill) => fill.field === 'image_url'));
+  assert.equal(plan.droppedPhoto, PHOTO);
+});
+
+test('no photo on the duplicate, or a blank one, changes nothing about photos', () => {
+  for (const removed of [undefined, null, '', '   ']) {
+    const kept = planPartMerge({ ...BKT_MAIN_PIN, image_url: OTHER_PHOTO }, { ...PIN_12400, image_url: removed });
+    assert.ok(!kept.fills.some((fill) => fill.field === 'image_url'));
+    assert.equal(kept.droppedPhoto, '');
+    const neither = planPartMerge(BKT_MAIN_PIN, { ...PIN_12400, image_url: removed });
+    assert.ok(!neither.fills.some((fill) => fill.field === 'image_url'));
+    assert.equal(neither.droppedPhoto, '');
+  }
+});

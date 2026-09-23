@@ -2,6 +2,22 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-23 — Merging a part no longer loses its photo
+
+When you merge a part that was entered twice, the part you keep already takes any detail it is
+missing from the other entry: brand, compatibility, prices and so on. It did not take the photo, so
+a photo on the removed entry was lost.
+
+**Now the photo comes across too.**
+
+- **If the part you keep has no photo of its own, it takes the other entry's.** The merge window
+  shows that photo before you confirm.
+- **If both have a photo, the part you keep keeps its own.** The merge window says so, and shows
+  the other photo that will be deleted. The file is deleted too, so it does not sit in storage
+  unused.
+- A Website Catalog picture is never deleted by a merge. It still moves with its catalogue entry,
+  as before.
+
 ## 2026-09-23 — "Not added yet" shows every part, not just the first 50
 
 The **Not added yet** tab on the Website Catalog stopped at 50 parts and said "Showing the first 50
