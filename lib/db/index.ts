@@ -1333,8 +1333,32 @@ export async function setPartPhoto(
 }
 
 /** Deletes a stored part photo's file. Best effort: the part no longer points at it either way,
- *  and a leftover file costs a little space and nothing else. */
-export async function removeStoredPartPhoto(path: string): Promise<void> {
+ *  and a leftover file costs a little space and nothing else. Says whether it went. */
+export async function removeStoredPartPhoto(path: string): Promise<boolean> {
   const { error } = await getClient().storage.from(CATALOG_IMAGE_BUCKET).remove([path]);
   if (error) console.error('Could not remove an old part photo:', path, error);
+  return !error;
+}
+
+/** The owner's own photo a part points at, or null. Read before a merge, because the duplicate
+ *  it belongs to no longer exists afterwards. */
+export async function getPartPhotoUrl(companyId: string, productId: string): Promise<string | null> {
+  const { data, error } = await getClient()
+    .from('jde_products').select('image_url').eq('company_id', companyId).eq('id', productId).maybeSingle();
+  if (error) throw error;
+  return (data as { image_url: string | null } | null)?.image_url ?? null;
+}
+
+/** Whether any part or catalogue entry, in any company, still shows this picture — checked before
+ *  a file is deleted, so tidying up can never take away a picture something still uses. */
+export async function isPictureInUse(url: string): Promise<boolean> {
+  const client = getClient();
+  const [parts, catalog] = await Promise.all([
+    client.from('jde_products').select('id', { count: 'exact', head: true }).eq('image_url', url),
+    client.from('jde_catalog_products').select('id', { count: 'exact', head: true }).eq('image_url', url),
+  ]);
+  for (const result of [parts, catalog]) {
+    if (result.error) throw result.error;
+  }
+  return (parts.count ?? 0) + (catalog.count ?? 0) > 0;
 }

@@ -13,6 +13,7 @@
 import { useMemo, useState } from 'react';
 import { ArrowLeftRight } from 'lucide-react';
 import PartPicker from '@/components/PartPicker';
+import PartPhoto from '@/components/PartPhoto';
 import { money } from '@/lib/money';
 import { planPartMerge, type MergeFill } from '@/lib/part-merge';
 import { mergeParts, type MergePartsResult } from '@/lib/client-part-merge';
@@ -29,6 +30,7 @@ export type MergePartModalProps = {
 const describe = (p: Product) => (p.part_number ? `${p.part_number} — ${p.name}` : p.name);
 const stockOf = (p: Product) => Number(p.current_stock) || 0;
 const fillText = (fill: MergeFill) => `${fill.label} ${fill.money ? `₹${money(Number(fill.value))}` : fill.value}`;
+const photoLine = { display: 'inline-flex', alignItems: 'center', gap: 8, verticalAlign: 'middle' } as const;
 
 export default function MergePartModal({ duplicate, products, companyId, onClose, onMerged }: MergePartModalProps) {
   const [other, setOther] = useState<Product | null>(null);
@@ -58,6 +60,9 @@ export default function MergePartModal({ duplicate, products, companyId, onClose
   const plan = keep && remove ? planPartMerge(keep, remove) : null;
   const number = plan ? (chosenNumber ?? plan.defaultNumber) : '';
   const soldBelowZero = keep && remove ? stockOf(keep) < 0 || stockOf(remove) < 0 : false;
+  // The photo is shown, not spelled out as an address, so it has its own line.
+  const detailFills = plan ? plan.fills.filter((fill) => fill.field !== 'image_url') : [];
+  const photoFill = plan?.fills.find((fill) => fill.field === 'image_url');
 
   const confirm = async () => {
     if (!keep || !remove || merging) return;
@@ -127,8 +132,24 @@ export default function MergePartModal({ duplicate, products, companyId, onClose
                 ) : plan.numberChoices.length === 1 ? (
                   <li>Part number stays <span className="pn-chip">{plan.numberChoices[0]}</span>.</li>
                 ) : null}
-                {plan.fills.length > 0 && (
-                  <li>{keep.name} has no {plan.fills.map((fill) => fill.label).join(', ')}, so it takes {remove.name}’s: {plan.fills.map(fillText).join(', ')}.</li>
+                {detailFills.length > 0 && (
+                  <li>{keep.name} has no {detailFills.map((fill) => fill.label).join(', ')}, so it takes {remove.name}’s: {detailFills.map(fillText).join(', ')}.</li>
+                )}
+                {photoFill && (
+                  <li>
+                    <span style={photoLine}>
+                      <PartPhoto url={photoFill.value} name={remove.name} size={40} />
+                      <span>{keep.name} has no photo of its own, so it takes {remove.name}’s photo.</span>
+                    </span>
+                  </li>
+                )}
+                {plan.droppedPhoto && (
+                  <li>
+                    <span style={photoLine}>
+                      <PartPhoto url={plan.droppedPhoto} name={remove.name} size={40} />
+                      <span>{keep.name} keeps its own photo, so {remove.name}’s photo is deleted.</span>
+                    </span>
+                  </li>
                 )}
                 {soldBelowZero && (
                   <li>Anything sold while the stock showed below zero takes its cost from the stock that was really on the shelf.</li>

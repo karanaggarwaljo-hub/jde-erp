@@ -15,9 +15,16 @@
 --
 --   details    the kept part keeps its own name, always. Its part number is whichever of the two
 --              the owner chose. Any other detail it is blank on (OEM number, HSN, brand, category,
---              compatibility, location, cost, MRP, sale price, reorder level) is taken from the
---              duplicate; anything it already has stays. lib/part-merge.ts applies the same rules
---              to show the owner the result before they confirm, and must be kept in step.
+--              compatibility, location, cost, MRP, sale price, reorder level, the owner's own
+--              photo) is taken from the duplicate; anything it already has stays. lib/part-merge.ts
+--              applies the same rules to show the owner the result before they confirm, and must
+--              be kept in step.
+--
+--   photo      when both entries have the owner's photo, the kept part keeps its own and the
+--              duplicate's file is left pointed at by nothing. The route (app/api/inventory/merge)
+--              deletes that file after the merge, having read the duplicate's photo beforehand —
+--              the function cannot hand it back, because adding a column to what it returns would
+--              mean dropping and recreating it rather than replacing it in place.
 --
 --   cost       a sale made while stock showed below zero was costed without a batch (layer_id is
 --              null) at the part's static cost. Once the kept part has batches with units left,
@@ -146,7 +153,8 @@ begin
     cost_price = case when coalesce(v_keep.cost_price, 0) > 0 then v_keep.cost_price else coalesce(v_remove.cost_price, v_keep.cost_price) end,
     mrp = case when coalesce(v_keep.mrp, 0) > 0 then v_keep.mrp else coalesce(v_remove.mrp, v_keep.mrp) end,
     sale_price = case when coalesce(v_keep.sale_price, 0) > 0 then v_keep.sale_price else coalesce(v_remove.sale_price, v_keep.sale_price) end,
-    min_stock = case when coalesce(v_keep.min_stock, 0) > 0 then v_keep.min_stock else coalesce(v_remove.min_stock, v_keep.min_stock) end
+    min_stock = case when coalesce(v_keep.min_stock, 0) > 0 then v_keep.min_stock else coalesce(v_remove.min_stock, v_keep.min_stock) end,
+    image_url = case when coalesce(trim(v_keep.image_url), '') = '' then v_remove.image_url else v_keep.image_url end
   where p.id = p_keep_id and p.company_id = p_company_id;
 
   -- Cost: sales made below zero take their cost from the batches that were really on the shelf.

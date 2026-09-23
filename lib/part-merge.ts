@@ -23,9 +23,13 @@ export type MergeablePart = {
   sale_price: number | string;
   current_stock: number | string;
   min_stock: number | string;
+  /** The owner's own photo. A published catalog picture is not this — it moves with the
+   *  catalogue entry, not with the part. */
+  image_url?: string | null;
 };
 
-/** A detail the kept part is blank on, and takes from the duplicate. */
+/** A detail the kept part is blank on, and takes from the duplicate. For the photo, `value` is
+ *  the picture's address, to be shown rather than printed. */
 export type MergeFill = { field: keyof MergeablePart; label: string; value: string; money?: boolean };
 
 export type MergePlan = {
@@ -36,6 +40,9 @@ export type MergePlan = {
   /** A real manufacturer's number over a code the ERP made up; otherwise the kept part's own. */
   defaultNumber: string;
   fills: MergeFill[];
+  /** The duplicate's photo when the kept part has its own: nothing shows it after the merge, and
+   *  its file is deleted. Empty otherwise. */
+  droppedPhoto: string;
 };
 
 const TEXT_FIELDS = [
@@ -87,11 +94,15 @@ export function planPartMerge(keep: MergeablePart, remove: MergeablePart): Merge
       fills.push({ field, label, value: String(amount(remove[field])), money: isMoney });
     }
   }
+  const keepPhoto = clean(keep.image_url);
+  const removePhoto = clean(remove.image_url);
+  if (!keepPhoto && removePhoto) fills.push({ field: 'image_url', label: 'photo', value: removePhoto });
 
   return {
     stockAfter: amount(keep.current_stock) + amount(remove.current_stock),
     numberChoices,
     defaultNumber,
     fills,
+    droppedPhoto: keepPhoto && removePhoto && keepPhoto !== removePhoto ? removePhoto : '',
   };
 }
