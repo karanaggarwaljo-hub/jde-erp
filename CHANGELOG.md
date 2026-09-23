@@ -18,6 +18,39 @@ a photo on the removed entry was lost.
 - A Website Catalog picture is never deleted by a merge. It still moves with its catalogue entry,
   as before.
 
+## 2026-09-23 — The Website Catalog shows one list at a time: live, not live, or not added
+
+The Website Catalog screen showed every catalog entry, live and draft mixed together, and under that
+every Inventory part not yet in the catalog, more than 230 rows. It was too cluttered to see what
+was actually on the website.
+
+**Now there are three tabs at the top, each with a count:**
+
+- **Live on website:** exactly what customers can see right now. The screen opens here.
+- **Not live:** entries you started but have not published, and anything taken down. Open one to
+  finish it and publish it.
+- **Not added yet:** Inventory parts that have no website listing. Add one to start a draft.
+
+**One search box works on whichever tab is open**, and the counts on the tabs follow your search,
+so you can see at a glance where a part is. Part numbers are found however they are written:
+"331/34392" finds "331-34392", the same as in Inventory.
+
+If nothing is live yet, the screen opens on the first tab that has something in it, so it never
+opens on an empty list. Nothing about publishing itself has changed.
+## 2026-09-23 — The menu button sits where the company name was
+
+**The company name in the top bar is now a menu button**, as asked.
+
+**Press it to hide the side menu**, which gives the whole width of the screen to the page you are
+on — useful on Inventory. Press it again to bring the menu back. Your computer remembers which way
+you left it. On a phone it slides the menu in and out, exactly as before.
+
+**The company moved into your own menu**, behind your name at the top right. It shows which company
+you are working in, and if you keep more than one, you switch between them there. Your name and
+role are shown there too, which a phone had no room for anywhere else.
+
+The Dashboard still prints the company name and address under its heading.
+
 ## 2026-09-23 — A photo beside every part
 
 You wanted to see what a part looks like next to its name, so you can tell parts apart at a glance.
