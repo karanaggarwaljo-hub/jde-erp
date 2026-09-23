@@ -27,9 +27,8 @@ const searchTargets = [
 
 type TopbarProps = {
   currentUser: { email: string; name: string | null; role: string };
-  /** Toggles the mobile slide-out sidebar. The button that calls this is only visible below
-   *  the 768px breakpoint (see .mobile-menu-btn in globals.css) — above it the sidebar is
-   *  always on screen and there's nothing for this button to do. */
+  /** Shows or hides the side menu: the slide-out drawer on a phone, the whole menu column on
+   *  anything wider. See DashboardChrome, which owns that state. */
   onMenuClick?: () => void;
 };
 
@@ -85,7 +84,6 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [companyOpen, setCompanyOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [switchError, setSwitchError] = useState('');
 
@@ -100,7 +98,6 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
         setSearchOpen(false);
         setNotificationsOpen(false);
         setProfileOpen(false);
-        setCompanyOpen(false);
       }
     };
     window.addEventListener('keydown', handleShortcut);
@@ -113,7 +110,6 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
         setSearchOpen(false);
         setNotificationsOpen(false);
         setProfileOpen(false);
-        setCompanyOpen(false);
       }
     };
     document.addEventListener('mousedown', handleOutsideClick);
@@ -148,14 +144,14 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
 
   const chooseCompany = async (companyId: string) => {
     if (companyId === activeCompany?.id) {
-      setCompanyOpen(false);
+      setProfileOpen(false);
       return;
     }
     setSwitchError('');
     setSwitchingTo(companyId);
     try {
       await switchCompany(companyId);
-      setCompanyOpen(false);
+      setProfileOpen(false);
     } catch (error) {
       setSwitchError(error instanceof Error ? error.message : 'Could not switch company.');
     } finally {
@@ -170,7 +166,9 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
 
   return (
     <header className="erp-topbar" ref={topbarRef}>
-      <button className="btn btn-ghost btn-icon mobile-menu-btn" aria-label="Open menu" onClick={onMenuClick}>
+      {/* Shows and hides the side menu, where the company name used to sit — the owner asked for
+          the menu button to be here instead. On a phone it opens the drawer, as it always did. */}
+      <button className="btn btn-ghost btn-icon nav-toggle" aria-label="Menu" title="Show or hide the menu" onClick={onMenuClick}>
         <Menu size={20} />
       </button>
 
@@ -201,62 +199,13 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
         </div>
       )}
 
-      {/* Which company this screen is showing. It is chosen per person now, and until this it was
-          shown nowhere outside Settings — while the left of this bar sat empty. Nothing is shown
-          until the company has actually loaded, rather than a placeholder name. */}
-      {activeCompany && (
-        <div className="topbar-menu-wrap topbar-company">
-          {canSwitchCompany ? (
-            <button
-              type="button"
-              className="topbar-company-trigger"
-              aria-label={`Working in ${activeCompany.name}. Switch company`}
-              aria-expanded={companyOpen}
-              onClick={() => { setCompanyOpen((open) => !open); setNotificationsOpen(false); setProfileOpen(false); }}
-            >
-              <Store size={16} className="topbar-company-icon" aria-hidden="true" />
-              <span className="topbar-company-name">{activeCompany.name}</span>
-              <ChevronDown size={14} className="topbar-company-chevron" aria-hidden="true" />
-            </button>
-          ) : (
-            <div className="topbar-company-trigger">
-              <Store size={16} className="topbar-company-icon" aria-hidden="true" />
-              <span className="topbar-company-name">{activeCompany.name}</span>
-            </div>
-          )}
-          {companyOpen && canSwitchCompany && (
-            <div className="topbar-popover company-popover" role="menu" aria-label="Switch company">
-              <strong>Switch company</strong>
-              {companies.map((company) => {
-                const current = company.id === activeCompany.id;
-                return (
-                  <button
-                    key={company.id}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={current}
-                    disabled={switchingTo !== null}
-                    onClick={() => chooseCompany(company.id)}
-                  >
-                    <span>{company.name}</span>
-                    {switchingTo === company.id ? <small>Switching…</small> : current && <Check size={14} aria-hidden="true" />}
-                  </button>
-                );
-              })}
-              <p className="popover-note">Changes what you see, not what anyone else sees.</p>
-              {switchError && <p className="popover-error" role="alert">{switchError}</p>}
-            </div>
-          )}
-        </div>
-      )}
-
       <div className="topbar-actions">
         <button className="btn btn-ghost btn-icon" aria-label="Search pages" title="Search pages (Ctrl+K)" onClick={() => setSearchOpen(true)}>
           <Search size={18} />
         </button>
 
         <div className="topbar-menu-wrap">
-          <button className="btn btn-ghost btn-icon" aria-label="Notifications" title="Notifications" aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((open) => !open); setProfileOpen(false); setCompanyOpen(false); }}>
+          <button className="btn btn-ghost btn-icon" aria-label="Notifications" title="Notifications" aria-expanded={notificationsOpen} onClick={() => { setNotificationsOpen((open) => !open); setProfileOpen(false); }}>
             <Bell size={18} />
           </button>
           {notificationsOpen && (
@@ -267,13 +216,51 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
         <span className="topbar-rule" aria-hidden="true" />
 
         <div className="topbar-menu-wrap">
-          <button className="profile-trigger" aria-label="User menu" aria-expanded={profileOpen} onClick={() => { setProfileOpen((open) => !open); setNotificationsOpen(false); setCompanyOpen(false); }}>
+          <button className="profile-trigger" aria-label="User menu" aria-expanded={profileOpen} onClick={() => { setProfileOpen((open) => !open); setNotificationsOpen(false); }}>
             <span className="profile-avatar">{initialsFor(currentUser.name, currentUser.email)}</span>
             <span className="profile-copy"><strong>{currentUser.name || currentUser.email}</strong><small>{roleLabel}</small></span>
             <ChevronDown size={14} aria-hidden="true" />
           </button>
           {profileOpen && (
             <div className="topbar-popover profile-popover">
+              {/* The name and role are hidden beside the avatar on a phone, so the menu says them. */}
+              <div className="profile-popover-head">
+                <strong>{currentUser.name || currentUser.email}</strong>
+                <small>{roleLabel}</small>
+              </div>
+
+              {/* Which company this screen is showing, and the only way to change it outside
+                  Settings. It used to be a chip in the bar itself, where the menu button now is. */}
+              {activeCompany && (
+                <div className="profile-company" role={canSwitchCompany ? 'group' : undefined} aria-label={canSwitchCompany ? 'Switch company' : undefined}>
+                  <span className="profile-company-label">Working in</span>
+                  {canSwitchCompany ? (
+                    companies.map((company) => {
+                      const current = company.id === activeCompany.id;
+                      return (
+                        <button
+                          key={company.id}
+                          type="button"
+                          className="profile-company-option"
+                          role="menuitemradio"
+                          aria-checked={current}
+                          disabled={switchingTo !== null}
+                          onClick={() => chooseCompany(company.id)}
+                        >
+                          <Store size={15} aria-hidden="true" />
+                          <span>{company.name}</span>
+                          {switchingTo === company.id ? <small>Switching…</small> : current && <Check size={15} aria-hidden="true" />}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <span className="profile-company-current"><Store size={15} aria-hidden="true" />{activeCompany.name}</span>
+                  )}
+                  {canSwitchCompany && <p className="popover-note">Changes what you see, not what anyone else sees.</p>}
+                  {switchError && <p className="popover-error" role="alert">{switchError}</p>}
+                </div>
+              )}
+
               <Link href="/settings" prefetch={false} onClick={() => setProfileOpen(false)}><Settings size={15} /> Account settings</Link>
               <button type="button" onClick={handleSignOut}><LogOut size={15} /> Sign out</button>
             </div>

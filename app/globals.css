@@ -189,7 +189,7 @@ input, textarea, select { font-family: inherit; }
   display: flex;
   flex-direction: column;
   z-index: 50;
-  transition: width var(--transition-base);
+  transition: width var(--transition-base), transform var(--transition-base);
   overflow: hidden;
 }
 
@@ -201,6 +201,21 @@ input, textarea, select { font-family: inherit; }
   min-height: 100vh;
   min-width: 0;
   transition: margin-left var(--transition-base);
+}
+
+/* The menu hidden from the top bar's menu button, giving the page the whole width. Scoped above
+   the phone breakpoint on purpose: below it the menu is already a drawer that opens over the page
+   with .erp-sidebar.open, and this rule would out-specificity that and jam the drawer shut. */
+@media (min-width: 769px) {
+  .erp-root.nav-hidden { --sidebar-width: 0px; }
+  .erp-root.nav-hidden .erp-sidebar {
+    transform: translateX(-100%);
+    /* Out of the tab order once it has slid away, so the keyboard can't land inside a menu that
+       isn't on screen. The delay holds it visible until the slide finishes; bringing the menu
+       back drops this whole rule, so it reappears at once. */
+    visibility: hidden;
+    transition: transform var(--transition-base), visibility 0s var(--transition-base);
+  }
 }
 
 .erp-topbar {
@@ -218,13 +233,11 @@ input, textarea, select { font-family: inherit; }
   backdrop-filter: blur(8px);
 }
 
-/* Opens the mobile drawer version of .erp-sidebar — hidden above the 768px breakpoint, where
-   the sidebar is always on screen and this button has nothing to do. Selector is .btn.mobile-
-   menu-btn (not just .mobile-menu-btn) to out-specificity .btn's own `display: inline-flex`
-   (same single-class specificity, but .btn is declared later in this file, so plain
-   `.mobile-menu-btn { display: none }` was silently losing to it — this actually shipped
-   showing the button on desktop before this fix). */
-.btn.mobile-menu-btn { display: none; }
+/* Shows and hides the menu, at the left of the top bar where the company name used to be: the
+   slide-out drawer on a phone, the whole menu column on anything wider. Selector is .btn.nav-toggle
+   (not just .nav-toggle) to out-specificity .btn's own `display` rule — same single-class
+   specificity, but .btn is declared later in this file, so the plain class would silently lose. */
+.btn.nav-toggle { align-items: center; display: inline-flex; flex-shrink: 0; justify-content: center; }
 
 /* Only ever present in the DOM while the mobile drawer is open (see DashboardChrome.tsx) — sits
    between the topbar (z-index 40) and the sidebar drawer itself (z-index 50) so it dims the page
@@ -1041,36 +1054,38 @@ Dashboard Priorities & Insights
 .profile-trigger { align-items: center; background: transparent; border: 0; border-radius: var(--radius-md); color: var(--ink); display: flex; gap: 10px; padding: 4px 8px 4px 4px; transition: background var(--transition-fast); }
 .profile-trigger:hover { background: var(--panel-2); }
 .profile-trigger > svg { color: var(--ink-3); }
-.profile-trigger:focus-visible, .topbar-company-trigger:focus-visible { box-shadow: var(--ring); outline: none; }
+.profile-trigger:focus-visible { box-shadow: var(--ring); outline: none; }
 
 /* A real vertical rule between the icons and the name. The old divider was the horizontal
    .divider with no width, so it drew nothing and only added dead space. */
 .topbar-rule { background: var(--line-2); flex-shrink: 0; height: 24px; margin: 0 8px; width: 1px; }
 
-/* Which company this screen is showing, on the left where the bar used to be empty. */
-.topbar-company { display: flex; min-width: 0; }
-.topbar-company-trigger { align-items: center; background: transparent; border: 0; border-radius: var(--radius-md); color: var(--ink); display: flex; font-size: 13.5px; font-weight: 600; gap: 8px; max-width: 320px; min-width: 0; padding: 6px 10px; transition: background var(--transition-fast); }
-button.topbar-company-trigger:hover { background: var(--panel-2); }
-.topbar-company-icon { color: var(--amber-2); flex-shrink: 0; }
-.topbar-company-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.topbar-company-chevron { color: var(--ink-3); flex-shrink: 0; }
-.company-popover { display: flex; flex-direction: column; left: 0; padding: 6px; width: 260px; }
-.company-popover strong { color: var(--ink-3); font-size: 11px; font-weight: 600; padding: 6px 9px 4px; }
-.company-popover button { align-items: center; background: none; border: none; border-radius: var(--radius-sm); color: var(--ink-2); display: flex; font-family: inherit; font-size: 13px; gap: 8px; justify-content: space-between; padding: 9px; text-align: left; width: 100%; }
-.company-popover button:hover:not(:disabled) { background: var(--panel-2); color: var(--ink); }
-.company-popover button[aria-checked="true"] { color: var(--amber-2); font-weight: 600; }
-.company-popover button:disabled { cursor: progress; opacity: 0.7; }
-.company-popover small { color: var(--ink-3); font-size: 11px; }
-.popover-note { border-top: 1px solid var(--line); color: var(--ink-3); font-size: 11px; margin-top: 4px; padding: 8px 9px 4px; }
+.popover-note { color: var(--ink-3); font-size: 11px; padding: 6px 9px 2px; }
 .popover-error { color: var(--rose); font-size: 12px; padding: 4px 9px; }
 .profile-avatar { align-items: center; background: var(--amber-2); border-radius: 50%; color: #FFFFFF; display: flex; font-size: 13px; font-weight: 700; height: 34px; justify-content: center; width: 34px; }
 .profile-copy { display: flex; flex-direction: column; text-align: left; }
 .profile-copy strong { font-size: 13px; line-height: 1.2; }
 .profile-copy small { color: var(--ink-3); font-size: 11px; }
-.profile-popover { display: flex; flex-direction: column; padding: 6px; right: 0; width: 180px; }
+.profile-popover { display: flex; flex-direction: column; padding: 6px; right: 0; width: 260px; }
 .profile-popover a, .profile-popover button { align-items: center; border-radius: var(--radius-sm); color: var(--ink-2); display: flex; font-size: 12.5px; gap: 8px; padding: 9px; }
 .profile-popover a:hover, .profile-popover button:hover { background: var(--panel-2); color: var(--ink); }
 .profile-popover button { width: 100%; background: none; border: none; color: var(--ink-2); font-family: inherit; text-align: left; cursor: pointer; }
+
+/* Who is signed in, and which company they are working in. Both used to be read off the bar
+   itself — the name beside the avatar, which a phone hides, and the company chip the menu
+   button replaced. */
+.profile-popover-head { border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; padding: 6px 9px 10px; }
+.profile-popover-head strong { color: var(--ink); font-size: 13px; }
+.profile-popover-head small { color: var(--ink-3); font-size: 11.5px; }
+
+.profile-company { border-bottom: 1px solid var(--line); display: flex; flex-direction: column; margin-bottom: 4px; padding-bottom: 6px; }
+.profile-company-label { color: var(--ink-4); font-size: 10px; font-weight: 600; letter-spacing: 0.08em; padding: 2px 9px 4px; text-transform: uppercase; }
+.profile-company-current { align-items: center; color: var(--ink-2); display: flex; font-size: 12.5px; font-weight: 600; gap: 8px; padding: 6px 9px; }
+.profile-company-current svg, .profile-company-option svg:first-child { color: var(--amber-2); flex-shrink: 0; }
+.profile-company-option > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-popover button.profile-company-option[aria-checked="true"] { color: var(--amber-2); font-weight: 600; }
+.profile-popover button.profile-company-option:disabled { cursor: progress; opacity: 0.7; }
+.profile-company-option small { color: var(--ink-3); font-size: 11px; }
 
 /* ===================================================
 
@@ -1421,7 +1436,6 @@ Modal
 @media (max-width: 768px) {
   .erp-sidebar { transform: translateX(-100%); }
   .erp-main { margin-left: 0; }
-  .btn.mobile-menu-btn { align-items: center; display: inline-flex; justify-content: center; }
 
   /* The drawer overlays content when open, so it can afford the full labeled width instead of
      the icon-only 72px rail used at tablet widths (see the 1024px breakpoint above) — restore
@@ -1444,8 +1458,6 @@ Modal
   .form-grid-2, .form-grid-3, .form-grid-4, .form-grid-5 { grid-template-columns: 1fr; }
   .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
   .attention-grid, .dashboard-split { grid-template-columns: 1fr; }
-  .topbar-company-trigger { padding: 6px 8px; }
-  .topbar-company-icon { display: none; }
   .keyboard-hint, .profile-copy, .profile-trigger > svg, .topbar-actions > .btn { display: none; }
   .topbar-actions { gap: 6px; }
   .report-tabs { overflow-x: auto; }
