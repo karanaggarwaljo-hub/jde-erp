@@ -18,6 +18,13 @@ a photo on the removed entry was lost.
 - A Website Catalog picture is never deleted by a merge. It still moves with its catalogue entry,
   as before.
 
+## 2026-09-23 — "Not added yet" shows every part, not just the first 50
+
+The **Not added yet** tab on the Website Catalog stopped at 50 parts and said "Showing the first 50
+of 235 — search to find a specific part". **It now lists all of them**, in one list that scrolls
+inside the page the same way Inventory does, with the column headings staying in view as you
+scroll. The Live and Not live tabs scroll the same way. Search still narrows any tab.
+
 ## 2026-09-23 — The Website Catalog shows one list at a time: live, not live, or not added
 
 The Website Catalog screen showed every catalog entry, live and draft mixed together, and under that
