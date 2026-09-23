@@ -163,7 +163,7 @@ export default function CatalogAdminPage() {
         </div>
 
         {tab !== 'not-added' ? (
-          <div className="table-wrap">
+          <div className="table-wrap catalog-table-scroll">
             <table className="erp-table">
               <thead>
                 <tr>
@@ -220,7 +220,7 @@ export default function CatalogAdminPage() {
           </div>
         ) : (
           <>
-            <div className="table-wrap">
+            <div className="table-wrap catalog-table-scroll">
               <table className="erp-table">
                 <thead>
                   <tr>
@@ -231,7 +231,7 @@ export default function CatalogAdminPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.notAdded.slice(0, 50).map((p) => (
+                  {shown.notAdded.map((p) => (
                     <tr key={p.id}>
                       <td style={{ fontFamily: 'monospace' }}>{p.part_number}</td>
                       <td style={{ fontWeight: 600 }}>{p.name}</td>
@@ -256,11 +256,6 @@ export default function CatalogAdminPage() {
                 </tbody>
               </table>
             </div>
-            {shown.notAdded.length > 50 && (
-              <p className="text-center" style={{ padding: '12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                Showing the first 50 of {shown.notAdded.length} — search to find a specific part.
-              </p>
-            )}
           </>
         )}
       </div>
