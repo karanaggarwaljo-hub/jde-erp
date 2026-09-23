@@ -855,7 +855,16 @@ Dashboard Priorities & Insights
   overflow: auto;
 }
 
-.inventory-table-scroll thead th {
+/* The Website Catalog's lists, the same way: every part, scrolling inside a box no taller than the
+   window, but never squeezed below 360px on a small screen. A cap, not a size: a tab holding two
+   drafts stays two rows tall rather than opening onto empty space. */
+.catalog-table-scroll {
+  max-height: max(360px, calc(100vh - var(--chrome-height) - 300px));
+  overflow: auto;
+}
+
+.inventory-table-scroll thead th,
+.catalog-table-scroll thead th {
   position: sticky;
   top: 0;
   z-index: 2;
