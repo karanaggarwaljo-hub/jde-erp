@@ -9,8 +9,9 @@
  * a customer asking "what else have you got" is a couple of clicks rather than a search and a guess.
  */
 
-import { ChangeEvent, useEffect, useRef, useState } from 'react';
-import { X, ArrowRight, AlertTriangle, Edit, Camera } from 'lucide-react';
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
+import { X, ArrowRight, AlertTriangle, Edit, Camera, Pencil } from 'lucide-react';
+import { savePartFitment } from '@/lib/client-part-fitment';
 import { money } from '@/lib/money';
 import { looksLikeAnInventedCode } from '@/lib/detail-import';
 import { marginPercent } from '@/lib/margin';
@@ -27,8 +28,11 @@ export type PartDetailModalProps = {
   onOpenPart: (productId: string) => void;
   onClose: () => void;
   onEdit: (productId: string) => void;
-  /** A photo was added, changed or removed, so the list behind this panel should show it too. */
-  onPhotoChanged: () => void;
+  /** A photo or the fitment changed here, so the list behind this panel should show it too. */
+  onChanged: () => void;
+  /** The ways this shop already writes machines, commonest first, offered while typing a fitment so
+   *  "N/M bs4" and "N/m bs4" stay one thing a search can find. */
+  fitmentSuggestions?: string[];
 };
 
 const amount = (value: unknown) => {
@@ -45,14 +49,42 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-export default function PartDetailModal({ companyId, productId, onOpenPart, onClose, onEdit, onPhotoChanged }: PartDetailModalProps) {
+export default function PartDetailModal({ companyId, productId, onOpenPart, onClose, onEdit, onChanged, fitmentSuggestions = [] }: PartDetailModalProps) {
   const [detail, setDetail] = useState<PartDetail | null>(null);
   const [failure, setFailure] = useState<{ productId: string; message: string } | null>(null);
   // Bumped after a photo changes, to read the part again.
   const [version, setVersion] = useState(0);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoError, setPhotoError] = useState('');
+  const [viewingPhoto, setViewingPhoto] = useState(false);
+  const [editingFitment, setEditingFitment] = useState(false);
+  const [fitmentDraft, setFitmentDraft] = useState('');
+  const [savingFitment, setSavingFitment] = useState(false);
+  const [fitmentError, setFitmentError] = useState('');
+  const [fitmentNote, setFitmentNote] = useState('');
   const photoInput = useRef<HTMLInputElement>(null);
+
+  // Opening an alternative swaps the part underneath, so anything half-done for the last one goes.
+  const [seenProductId, setSeenProductId] = useState(productId);
+  if (seenProductId !== productId) {
+    setSeenProductId(productId);
+    setViewingPhoto(false);
+    setEditingFitment(false);
+    setFitmentError('');
+    setFitmentNote('');
+  }
+
+  // Esc closes the enlarged photo only, leaving the part window open behind it.
+  useEffect(() => {
+    if (!viewingPhoto) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.stopPropagation();
+      setViewingPhoto(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [viewingPhoto]);
 
   // Nothing is set before the fetch resolves, and what came back carries the part it belongs to.
   // Opening an alternative therefore never shows the previous part's figures under the new name,
@@ -83,6 +115,7 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
   // Only batches with something left are on the shelf. A used-up one is counted underneath rather
   // than listed as a row of 0, which read as unexplained sales — FIL-K04's "0 of 4" was an opening
   // count corrected a minute later, and the old table could not say so.
+  const listingFitmentText = showing?.catalogFitment ?? '';
   const shelfBatches = showing ? showing.overview.batches.filter((batch) => batch.left > 0) : [];
   const usedUpBatches = showing ? showing.overview.batches.length - shelfBatches.length : 0;
   const photo: PartPhotoRef | null = part?.image_url
@@ -95,7 +128,7 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
     try {
       await work();
       setVersion((value) => value + 1);
-      onPhotoChanged();
+      onChanged();
     } catch (cause) {
       setPhotoError(cause instanceof Error ? cause.message : 'The photo was not changed.');
     } finally {
@@ -107,6 +140,47 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
     const file = event.target.files?.[0];
     event.target.value = '';
     if (file) void changePhoto(() => savePartPhoto(companyId, productId, file));
+  };
+
+  // Which machines the part fits is edited right here, beside where it is shown — the full Edit
+  // form asked for it under another name ("Fits which machines"), a scroll away.
+  const startFitment = () => {
+    // With nothing on the part, start from what its website listing already says.
+    setFitmentDraft(part?.compatibility || listingFitmentText || '');
+    setFitmentError('');
+    setFitmentNote('');
+    setEditingFitment(true);
+  };
+
+  const cancelFitment = () => {
+    setEditingFitment(false);
+    setFitmentError('');
+  };
+
+  const saveFitment = async (event: FormEvent) => {
+    event.preventDefault();
+    if (savingFitment) return;
+    setSavingFitment(true);
+    setFitmentError('');
+    try {
+      const saved = await savePartFitment(companyId, productId, fitmentDraft);
+      setDetail((current) => current && current.part.id === productId
+        ? { ...current, part: { ...current.part, compatibility: saved.after } }
+        : current);
+      setFitmentNote(
+        saved.listingFollowed
+          ? 'Saved. Your website listing shows it too.'
+          : saved.listingKept !== null
+            ? `Saved. Your website listing keeps its own wording, "${saved.listingKept}" — change that on the Website Catalog page if it should match.`
+            : 'Saved.'
+      );
+      setEditingFitment(false);
+      onChanged();
+    } catch (cause) {
+      setFitmentError(cause instanceof Error ? cause.message : 'The fitment was not saved.');
+    } finally {
+      setSavingFitment(false);
+    }
   };
 
   return (
@@ -140,14 +214,52 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
               <section className="part-detail-photo">
                 <PartPhoto
                   url={photo?.url} name={part.name} size={150} addable={!photo} busy={photoBusy}
-                  onClick={photo ? undefined : () => photoInput.current?.click()}
-                  title={photo ? undefined : `Add a photo of ${part.name}`}
+                  onClick={photo ? () => setViewingPhoto(true) : () => photoInput.current?.click()}
+                  title={photo ? `See the photo of ${part.name} larger` : `Add a photo of ${part.name}`}
                 />
                 <div style={{ flex: '1 1 220px', minWidth: 0 }}>
                   <div style={{ fontSize: 13, marginBottom: 4 }} className="text-muted">Fits</div>
-                  <div style={{ fontWeight: 600, fontSize: 16, marginBottom: 12 }}>
-                    {part.compatibility || <span className="text-muted" style={{ fontWeight: 400 }}>Not recorded yet &mdash; add it with Edit</span>}
-                  </div>
+                  {editingFitment ? (
+                    <form className="fitment-edit" onSubmit={saveFitment}>
+                      <input
+                        id="part-fitment"
+                        className="form-input"
+                        list="part-fitment-options"
+                        placeholder="e.g. JCB 3DX, JCB N/M (bs4)"
+                        aria-label={`Machines ${part.name} fits`}
+                        autoFocus
+                        value={fitmentDraft}
+                        disabled={savingFitment}
+                        onChange={(event) => setFitmentDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Escape') return;
+                          event.stopPropagation();
+                          cancelFitment();
+                        }}
+                      />
+                      <datalist id="part-fitment-options">
+                        {fitmentSuggestions.map((option) => <option key={option} value={option} />)}
+                      </datalist>
+                      <button type="submit" className="btn btn-primary btn-sm" disabled={savingFitment}>{savingFitment ? 'Saving…' : 'Save'}</button>
+                      <button type="button" className="btn btn-ghost btn-sm" disabled={savingFitment} onClick={cancelFitment}>Cancel</button>
+                    </form>
+                  ) : (
+                    <div className="fitment-view">
+                      <span style={{ fontWeight: 600, fontSize: 16 }}>
+                        {part.compatibility || <span className="text-muted" style={{ fontWeight: 400 }}>Not recorded yet</span>}
+                      </span>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={startFitment}>
+                        <Pencil size={13} /> {part.compatibility ? 'Change' : 'Add fitment'}
+                      </button>
+                    </div>
+                  )}
+                  {!part.compatibility && listingFitmentText && !editingFitment && (
+                    <p className="text-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+                      Your website listing says it fits <strong>{listingFitmentText}</strong> — press Add fitment to use that here too.
+                    </p>
+                  )}
+                  {fitmentError && <p className="form-error" role="alert" style={{ marginBottom: 10 }}>{fitmentError}</p>}
+                  {fitmentNote && !editingFitment && <p className="text-muted" role="status" style={{ fontSize: 12, marginBottom: 10 }}>{fitmentNote}</p>}
                   <div className="text-muted" style={{ fontSize: 12, marginBottom: 8 }}>
                     {photo?.source === 'own'
                       ? 'Your photo of this part.'
@@ -299,6 +411,24 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
           {part && <button className="btn btn-primary" onClick={() => onEdit(part.id)}><Edit size={14} /> Edit this part</button>}
         </div>
       </div>
+
+      {/* The photo at full size over everything. A click anywhere or Esc closes it. */}
+      {viewingPhoto && photo && part && (
+        <div className="photo-viewer" role="dialog" aria-modal="true" aria-label={`Photo of ${part.name}`} onClick={() => setViewingPhoto(false)}>
+          <button type="button" className="photo-viewer-close" aria-label="Close the photo" onClick={() => setViewingPhoto(false)}>
+            <X size={20} />
+          </button>
+          <figure className="photo-viewer-figure">
+            {/* Plain <img>, as in PartPhoto: next/image would need every storage host configured. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={photo.url} alt={`Photo of ${part.name}`} />
+            <figcaption>
+              {part.name}{part.part_number ? ` · ${part.part_number}` : ''}
+              {photo.source === 'catalog' ? ' · picture from your Website Catalog' : ''}
+            </figcaption>
+          </figure>
+        </div>
+      )}
     </div>
   );
 }

@@ -42,7 +42,12 @@ export async function GET(request: Request) {
 
     // Shown only when the part has no photo of its own; see lib/part-photos.ts for why only published ones.
     const catalogPhoto = catalogPhotoIndex(rows.catalogRows).get(productId) ?? null;
-    return Response.json({ part: rows.product, overview: buildPartOverview(rows), alternates, catalogPhoto });
+    // What its Website Catalog listing says it fits, offered when the part itself says nothing —
+    // several listings were given a fitment the part never got.
+    const catalogFitment = rows.catalogRows
+      .map((row) => String((row as { compatibility?: unknown }).compatibility ?? '').trim())
+      .find(Boolean) ?? null;
+    return Response.json({ part: rows.product, overview: buildPartOverview(rows), alternates, catalogPhoto, catalogFitment });
   } catch (error) {
     console.error('GET /api/inventory/part failed:', error);
     return Response.json({ error: dbErrorMessage(error, 'Could not load this part.') }, { status: 500 });

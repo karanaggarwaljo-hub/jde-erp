@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import { BACKUP_TABLES, TABLES, isWritableTable, type TableName } from './schema';
 import { partPhotoPath } from '../part-photos';
+import { listingFitment, type PartFitmentResult } from '../part-fitment';
 
 export type { TableName };
 
@@ -1261,7 +1262,7 @@ export async function getPartOverviewRows(companyId: string, productId: string):
     lines,
     client.from('jde_po_items').select('*').eq('company_id', companyId).eq('product_id', productId),
     client.from('jde_sales_return_items').select('*').eq('company_id', companyId).eq('product_id', productId),
-    client.from('jde_catalog_products').select('erp_product_id, image_url, image_status, publication_status, updated_at').eq('company_id', companyId).eq('erp_product_id', productId),
+    client.from('jde_catalog_products').select('erp_product_id, image_url, image_status, publication_status, updated_at, compatibility').eq('company_id', companyId).eq('erp_product_id', productId),
   ]);
   for (const result of [product, products, layers, invoiceItems, poItems, returnItems, catalogRows]) {
     if (result.error) throw result.error;
@@ -1347,6 +1348,43 @@ export async function getPartPhotoUrl(companyId: string, productId: string): Pro
     .from('jde_products').select('image_url').eq('company_id', companyId).eq('id', productId).maybeSingle();
   if (error) throw error;
   return (data as { image_url: string | null } | null)?.image_url ?? null;
+}
+
+/** Sets which machines a part fits, and its Website Catalog listing's copy with it when that copy
+ *  is still the part's old wording or empty — see lib/part-fitment.ts. Null when the part is not
+ *  in this company. */
+export async function savePartFitment(companyId: string, productId: string, compatibility: string): Promise<PartFitmentResult | null> {
+  const client = getClient();
+  const { data: product, error } = await client
+    .from('jde_products').select('id, compatibility').eq('company_id', companyId).eq('id', productId).maybeSingle();
+  if (error) throw error;
+  if (!product) return null;
+  const before = String((product as { compatibility: string | null }).compatibility ?? '');
+
+  const { error: updateError } = await client
+    .from('jde_products').update({ compatibility }).eq('company_id', companyId).eq('id', productId);
+  if (updateError) throw updateError;
+
+  const { data: listings, error: listingError } = await client
+    .from('jde_catalog_products').select('id, compatibility').eq('company_id', companyId).eq('erp_product_id', productId);
+  if (listingError) throw listingError;
+
+  let listingFollowed = false;
+  let listingKept: string | null = null;
+  for (const listing of (listings ?? []) as Array<{ id: string; compatibility: string | null }>) {
+    const decision = listingFitment(listing.compatibility, before, compatibility);
+    if (decision === 'keep') {
+      listingKept = String(listing.compatibility ?? '').trim();
+    } else if (decision === 'follow') {
+      const { error: followError } = await client
+        .from('jde_catalog_products')
+        .update({ compatibility, updated_at: new Date().toISOString() })
+        .eq('company_id', companyId).eq('id', listing.id);
+      if (followError) throw followError;
+      listingFollowed = true;
+    }
+  }
+  return { before, after: compatibility, listingFollowed, listingKept };
 }
 
 /** Whether any part or catalogue entry, in any company, still shows this picture — checked before

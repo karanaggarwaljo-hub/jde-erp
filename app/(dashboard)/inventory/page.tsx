@@ -25,7 +25,7 @@ import { useCompany } from '@/components/CompanyProvider';
 import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sheetFromScannedParts, fileToBase64, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
 import { planCostUpdates, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { planDetailUpdates, looksLikeAnInventedCode } from '@/lib/detail-import';
-import { matchesProductSearch, duplicatePartNumbers as findDuplicatePartNumbers } from '@/lib/product-search';
+import { matchesProductSearch, duplicatePartNumbers as findDuplicatePartNumbers, compatibilitySuggestions } from '@/lib/product-search';
 import { averageMarginPercent, marginPercent } from '@/lib/margin';
 import { buildPartsWorksheet, countUnanswered, worksheetToCsv, worksheetFileName } from '@/lib/parts-worksheet';
 import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
@@ -1126,7 +1126,8 @@ export default function InventoryPage() {
           companyId={activeCompany.id} productId={detailPartId}
           onOpenPart={setDetailPartId}
           onClose={() => setDetailPartId(null)}
-          onPhotoChanged={() => { void reload(); }}
+          onChanged={() => { void reload(); }}
+          fitmentSuggestions={compatibilitySuggestions(products)}
           onEdit={(productId) => {
             const product = products.find((row) => row.id === productId);
             setDetailPartId(null);

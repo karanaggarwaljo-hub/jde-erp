@@ -2163,3 +2163,52 @@ button.part-photo.is-empty:hover svg { opacity: 0.85; }
 /* Opened large, a picture is shown whole rather than cropped to a square. */
 .part-detail-photo { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 18px; }
 .part-detail-photo .part-photo img { object-fit: contain; }
+.part-detail-photo button.part-photo:not(.is-empty) { cursor: zoom-in; }
+
+/* A part's photo at full size, over the part window. A click anywhere or Esc closes it. */
+.photo-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 56px 20px 32px;
+  background: rgba(11, 21, 36, 0.86);
+  cursor: zoom-out;
+  animation: fadeIn 150ms ease;
+}
+.photo-viewer-figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: 100%; }
+.photo-viewer-figure img {
+  display: block;
+  max-width: min(1100px, 100%);
+  max-height: calc(100vh - 140px);
+  object-fit: contain;
+  border-radius: var(--radius-lg);
+  background: #FFFFFF;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+.photo-viewer-figure figcaption { color: #FFFFFF; font-size: 14px; text-align: center; opacity: 0.9; }
+.photo-viewer-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.14);
+  color: #FFFFFF;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.photo-viewer-close:hover,
+.photo-viewer-close:focus-visible { background: rgba(255, 255, 255, 0.28); outline: none; }
+
+/* Fits, and the button that changes it, on one line; typing it keeps the buttons beside the box. */
+.fitment-view,
+.fitment-edit { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.fitment-edit { gap: 8px; }
+.fitment-edit .form-input { flex: 1 1 240px; min-width: 0; }
