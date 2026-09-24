@@ -35,6 +35,7 @@ import { keepEnterInsideForm } from '@/lib/form-keys';
 import { createSalesReturn, deleteSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem, type SalesReturnRow } from '@/lib/client-sales-returns';
 import { duplicateCreditNotes } from '@/lib/sales-returns';
 import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } from '@/lib/client-quotations';
+import { heldByProduct, shortfallNotice, stockShortfalls } from '@/lib/stock-shortfall';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { usePartPhotos } from '@/lib/usePartPhotos';
 import { buildCustomerLedger } from '@/lib/customer-ledger';
@@ -603,7 +604,18 @@ export default function SalesPage() {
       return;
     }
     if (quote.validity < todayIso() && !window.confirm(`${quote.id} expired on ${quote.validity}. Convert it anyway?`)) return;
-    if (!window.confirm(`Create an invoice from ${quote.id}? This will deduct the saved quote quantities from stock.`)) return;
+    // Converting draws the quoted quantities from stock, so a part without enough is named here,
+    // in the same question. Its lines live in their own table, fetched now; if that fails the
+    // conversion is still offered, just without the stock warning.
+    const quoteLines = await getQuotation(quote.id, activeCompany.id).then((detail) => detail.items).catch(() => []);
+    const quoteShortfalls = stockShortfalls(
+      quoteLines.map((item) => ({ productId: item.product_id, label: `${item.part_number} ${item.name}`.trim(), qty: Number(item.qty) })),
+      new Map(products.map((p) => [p.id, Number(p.current_stock) || 0]))
+    );
+    const convertQuestion = quoteShortfalls.length > 0
+      ? `${shortfallNotice(quoteShortfalls)}\n\nCreate an invoice from ${quote.id} anyway?`
+      : `Create an invoice from ${quote.id}? This will deduct the saved quote quantities from stock.`;
+    if (!window.confirm(convertQuestion)) return;
     setConvertingQuotationId(quote.id);
     setQuotationError('');
     try {
@@ -661,6 +673,18 @@ export default function SalesPage() {
       };
     });
 
+  // A sale may take a part below zero — the owner chose a warning over a block, so the counter is
+  // never stuck — but never without saying so first. Saving an existing invoice or parked draft
+  // gives back what it already holds before drawing again, so that counts as on the shelf.
+  const confirmStockShortfalls = (items: ReturnType<typeof invoiceItemPayload>, existingInvoiceId: string | null) => {
+    const shortfalls = stockShortfalls(
+      items.map((item) => ({ productId: item.product_id, label: `${item.part_number} ${item.name}`.trim(), qty: Number(item.qty) })),
+      new Map(products.map((p) => [p.id, Number(p.current_stock) || 0])),
+      existingInvoiceId ? heldByProduct(invoiceItems.filter((item) => item.invoice_id === existingInvoiceId)) : undefined
+    );
+    return shortfalls.length === 0 || window.confirm(`${shortfallNotice(shortfalls)}\n\nSell anyway?`);
+  };
+
   // Parks the sale on screen without billing it. Deliberately the same atomic call as Create
   // Invoice — so the FIFO stock is reserved there and then, which is what the owner asked for —
   // with nothing received and nothing added to the customer's balance, because nothing is owed
@@ -682,6 +706,8 @@ export default function SalesPage() {
       setInvoiceError('Add at least one part with a quantity and price before parking this sale as a draft.');
       return;
     }
+    // A parked draft reserves its stock there and then, so it is warned about like a sale.
+    if (!confirmStockShortfalls(items, editingDraft && editingInvoice ? editingInvoice.id : null)) return;
 
     setInvoiceError('');
     setSavingDraft(true);
@@ -759,6 +785,7 @@ export default function SalesPage() {
       );
       return;
     }
+    if (!confirmStockShortfalls(items, editingInvoice ? editingInvoice.id : null)) return;
 
     setInvoiceError('');
     setSavingInvoice(true);

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { getUserRecord, updateRow, dbErrorMessage } from '@/lib/db';
+import { isLeakedPassword } from '@/lib/pwned-password';
 
 /** Deliberately reachable with just a valid Supabase session, no ACTIVE jde_users row required
  *  (see proxy.ts's SESSION_ONLY paths) — this route serves two flows that both land here with a
@@ -23,6 +24,15 @@ export async function POST(request: Request) {
     const record = await getUserRecord(user.email);
     if (!record) {
       return Response.json({ error: 'No account found for this email — contact your administrator.' }, { status: 403 });
+    }
+
+    // Every new password in the ERP passes through here: finishing an invite and resetting a
+    // forgotten one. See lib/pwned-password.ts for why this check is the ERP's own.
+    if ((await isLeakedPassword(password)) === true) {
+      return Response.json(
+        { error: 'This password has appeared in a data breach on another website, so it is one of the first that people try. Choose a different one.' },
+        { status: 400 }
+      );
     }
 
     const { error: updateError } = await supabase.auth.updateUser({ password });
