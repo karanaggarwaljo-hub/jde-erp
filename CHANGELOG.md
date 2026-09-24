@@ -2,6 +2,49 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-24 — Everything the audit found, fixed
+
+Following the audit, with every decision about your own records made by you.
+
+**Your records**
+- **INV-1013's return was counted four times.** The two parts were removed from the invoice *and*
+  three identical return notes were saved (SRN-1003, 1004 and 1005, ₹3,500 each). The three notes
+  are gone, so the Day Book no longer shows ₹10,500 of returns that never happened. The invoice
+  stays ₹13,000 and the stock was already right (67 plantary grari, 28 big pinion bearings).
+- **STEARING COUPLING 3DX is 0, not −1**, as you counted. The one sold on INV-1014 is now recorded
+  as coming from stock at its ₹250 cost.
+- **petro green greas 18kg is back.** It was deleted in August while 43 were still on record, so
+  that stock had silently dropped out of your books. It is back as PET-G52 with the 20 you counted,
+  at ₹1,850 each.
+- **Two unnamed leftovers cleared** — records of 1 and 7 units from parts deleted before September.
+- **13 opening stock batches that were saved at ₹0 now carry their part's own cost price**, so your
+  stock value and profit figures count them properly. The four parts with no cost price at all are
+  left for you to fill in.
+- **HSN codes filled in for 247 parts by part type** — bearings 8482, filters 8421, gears and
+  shafts 8483, seals 4016, oils and greases 271019, hydraulic cylinder parts 8412, other machine
+  parts 8431, and so on. Show them to your accountant. Four parts are left blank because their names
+  don't say what they are: da wear, dollor, jcb shelf and om.
+
+Every one of these left an entry in the audit trail, with a copy of anything removed.
+
+**So it can't happen again**
+- **Selling a part that isn't in stock now warns you first**, naming the part, how many are on the
+  shelf and how many you're selling. Press OK and the sale goes through as before — the counter is
+  never stuck. It also warns when parking a draft and when turning a quotation into an invoice.
+- **A part that has been bought, sold or quoted, or still has stock, can't be deleted.** That is
+  how petro green grease went missing. The ERP says why and points you to Merge for a part entered
+  twice, which works exactly as before.
+- **Deleting a company now removes everything that belonged to it**, instead of leaving its stock
+  records, sales lines, returns and payments behind.
+- **New passwords are checked against the public list of passwords leaked in data breaches.**
+  Supabase only offers this on its paid plan, so the ERP does it itself, for free. Your password is
+  never sent anywhere — only the first five characters of a scrambled version of it.
+- Five missing database indexes added.
+
+**Corrections to the audit report.** Leaked-password protection is not a free Supabase switch, as
+the report first said: it is a paid feature, replaced by the check above. And returning more than
+was sold was already blocked; the INV-1013 notes were saved before that rule existed.
+
 ## 2026-09-24 — Security patch found by an audit of the ERP
 
 **The website software had two published break-in holes.** The ERP ran Next.js 16.3.0, which has two
