@@ -2,6 +2,21 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-24 — Security patch found by an audit of the ERP
+
+**The website software had two published break-in holes.** The ERP ran Next.js 16.3.0, which has two
+critical, publicly listed faults that let a stranger with no login run their own commands on the
+server — one of them in the picture-handling part that the Website Catalog photos use. Updated to
+16.3.6, where both are closed, along with two smaller faults in the photo and ID libraries. Nothing
+in the ERP works differently.
+
+**Your ERP could be loaded inside another website.** The site sent almost no protective instructions
+to the browser, so another site could load the ERP invisibly inside itself and collect clicks from
+someone already signed in. The site now refuses to be embedded anywhere, stops the browser
+second-guessing the type of an uploaded file, keeps page addresses (an invoice address names a
+customer) from being handed to other sites, and turns off camera, microphone and location access it
+never uses.
+
 ## 2026-09-23 — Merging a part no longer loses its photo
 
 When you merge a part that was entered twice, the part you keep already takes any detail it is
