@@ -38,6 +38,8 @@ export type PartDetail = {
   alternates: PartDetailAlternate[];
   /** Its published Website Catalog picture, used only when it has no photo of its own. */
   catalogPhoto: string | null;
+  /** What its Website Catalog listing says it fits, offered when the part itself says nothing. */
+  catalogFitment?: string | null;
 };
 
 /** Everything one part has and has done, in a single request. */

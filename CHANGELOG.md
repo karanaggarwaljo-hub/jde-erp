@@ -2,6 +2,25 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-25 — Click a part's photo to see it large, and set its fitment right there
+
+**Click the photo in a part's window and it opens full size** over everything, with the part's
+name underneath. Click anywhere, press Esc or use the × to close it.
+
+**"Fits" now has its own button.** Press **Add fitment** (or **Change**), type the machines, and press
+Save — no need to open the full Edit form, where the same thing is called "Fits which machines".
+While you type, it offers the ways your shop already writes machines, so "JCB 3DX" stays spelled
+one way and searches find it.
+
+**Your website listing follows.** When you change a part's fitment, its Website Catalog listing takes
+the new wording too — but only if the listing still said the same as the part, or nothing. If you
+wrote something different for the website on the Website Catalog page, that is left exactly as it
+is, and the window tells you so.
+
+**Some parts' websites already knew their fitment.** Eight parts had a fitment on their website
+listing but none on the part itself (kpc pin bush kit, loder kit and mrv say "JCB 3DX", for
+example). Their window now shows what the website says, and Add fitment starts from it.
+
 ## 2026-09-24 — "Stock on the shelf" reads plainly
 
 Opening a part showed a "Stock on the shelf" table with its headings run together
