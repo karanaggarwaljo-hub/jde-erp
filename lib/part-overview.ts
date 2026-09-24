@@ -23,6 +23,8 @@ export type PartBatch = {
   unitCost: number;
   left: number;
   bought: number;
+  /** The purchase this batch came in on, or null for stock entered as opening stock. */
+  source: string | null;
 };
 
 export type PartMovement = {
@@ -65,15 +67,18 @@ function indexById(rows: Row[]): Map<string, Row> {
 }
 
 export function buildPartOverview(rows: PartOverviewRows, limit = 10): PartOverview {
-  const batches: PartBatch[] = rows.layers
+  // Ordered by the moment each batch was entered, not just its day: two batches entered minutes
+  // apart on the same day (an opening count and its correction, say) must keep their real order.
+  const batches: PartBatch[] = [...rows.layers]
+    .sort((a, b) => (text(a.created_at) < text(b.created_at) ? -1 : text(a.created_at) > text(b.created_at) ? 1 : 0))
     .map((layer) => ({
       id: text(layer.id),
       boughtOn: text(layer.created_at).slice(0, 10),
       unitCost: amount(layer.unit_cost),
       left: amount(layer.qty_remaining),
       bought: amount(layer.qty_original),
-    }))
-    .sort((a, b) => (a.boughtOn < b.boughtOn ? -1 : a.boughtOn > b.boughtOn ? 1 : 0));
+      source: text(layer.source_po_id) || null,
+    }));
 
   const invoices = indexById(rows.invoices);
   const sales: PartMovement[] = rows.invoiceItems.map((item) => {

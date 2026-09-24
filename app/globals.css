@@ -828,6 +828,10 @@ Dashboard Priorities & Insights
   white-space: nowrap;
 }
 
+/* Numbers sit at the right of their cells, so their headings must too. `.erp-table th` outranks the
+   plain .text-right utility, which had left every figure heading in the app over the wrong edge. */
+.erp-table th.text-right { text-align: right; }
+
 .erp-table td {
   padding: 12px 14px;
   font-size: 13.5px;

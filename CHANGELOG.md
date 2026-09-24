@@ -2,6 +2,23 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-09-24 — "Stock on the shelf" reads plainly
+
+Opening a part showed a "Stock on the shelf" table with its headings run together
+("LeftOfCost each") and rows like "0 4" that nobody could read.
+
+- **Each row now says how many of that batch are on the shelf, like "2 of 2"**, where the batch
+  came from ("Opening stock", or the purchase number), the date it came in, and what each one cost.
+  A line above explains it: the oldest batch is always sold first, at the cost it came in at.
+- **Batches that are used up are no longer listed as rows of 0.** One line underneath says how many
+  there are. The "0 of 4" row on FIL-K04 was an opening count of 4 corrected to 2 a minute later, not
+  four sales — the old table had no way to tell you that.
+- **The Sold and Bought tables in the same window, and the three tables in Import from file, were
+  just as cramped.** All of them now look like every other table in the app.
+- **Dates in that window read "6 Aug 2026"** instead of "2026-08-06".
+- **Across the whole app, headings over number columns now sit on the same side as the numbers.**
+  They were left-aligned over right-aligned figures on every table.
+
 ## 2026-09-24 — Everything the audit found, fixed
 
 Following the audit, with every decision about your own records made by you.

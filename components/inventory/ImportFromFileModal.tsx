@@ -209,7 +209,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                       )}
                     </p>
                     <div style={{ maxHeight: '320px', overflowY: 'auto', overflowX: 'auto' }}>
-                      <table className="table">
+                      <table className="erp-table">
                         <thead>
                           <tr>
                             <th>Part on file</th>
@@ -280,7 +280,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                       )}
                     </p>
                     <div style={{ maxHeight: '300px', overflowY: 'auto', overflowX: 'auto' }}>
-                      <table className="table">
+                      <table className="erp-table">
                         <thead>
                           <tr>
                             <th style={{ width: '34px' }}>
@@ -348,7 +348,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                       </p>
                     )}
                     <div style={{ maxHeight: '300px', overflowY: 'auto', overflowX: 'auto' }}>
-                      <table className="table">
+                      <table className="erp-table">
                         <thead>
                           <tr>
                             <th style={{ width: '34px' }}>
