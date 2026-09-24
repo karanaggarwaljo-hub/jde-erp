@@ -14,6 +14,7 @@ import { X, ArrowRight, AlertTriangle, Edit, Camera } from 'lucide-react';
 import { money } from '@/lib/money';
 import { looksLikeAnInventedCode } from '@/lib/detail-import';
 import { marginPercent } from '@/lib/margin';
+import { formatDay } from '@/lib/report-period';
 import { fetchPartDetail, type PartDetail } from '@/lib/client-part-overview';
 import { removePartPhoto, savePartPhoto } from '@/lib/client-part-photo';
 import type { PartPhotoRef } from '@/lib/part-photos';
@@ -79,6 +80,11 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
   const part = showing?.part;
   const totals = showing?.overview.totals;
   const margin = part ? marginPercent(amount(part.sale_price), totals?.nextCost ?? amount(part.cost_price)) : null;
+  // Only batches with something left are on the shelf. A used-up one is counted underneath rather
+  // than listed as a row of 0, which read as unexplained sales — FIL-K04's "0 of 4" was an opening
+  // count corrected a minute later, and the old table could not say so.
+  const shelfBatches = showing ? showing.overview.batches.filter((batch) => batch.left > 0) : [];
+  const usedUpBatches = showing ? showing.overview.batches.length - shelfBatches.length : 0;
   const photo: PartPhotoRef | null = part?.image_url
     ? { url: part.image_url, source: 'own' }
     : showing?.catalogPhoto ? { url: showing.catalogPhoto, source: 'catalog' } : null;
@@ -209,59 +215,79 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
               </section>
 
               <section style={{ marginBottom: 20 }}>
-                <h4 style={{ marginBottom: 8 }}>Stock on the shelf</h4>
+                <h4 style={{ marginBottom: 4 }}>Stock on the shelf</h4>
                 {showing.overview.batches.length === 0 ? (
                   <p className="text-muted" style={{ fontSize: 13 }}>
                     <AlertTriangle size={13} /> No purchase batch recorded, so a sale of this part is costed from its own cost price.
                   </p>
                 ) : (
-                  <table className="table">
-                    <thead><tr><th>Bought on</th><th className="text-right">Left</th><th className="text-right">Of</th><th className="text-right">Cost each</th></tr></thead>
-                    <tbody>
-                      {showing.overview.batches.map((batch) => (
-                        <tr key={batch.id}>
-                          <td>{batch.boughtOn}</td>
-                          <td className="text-right">{batch.left}</td>
-                          <td className="text-right">{batch.bought}</td>
-                          <td className="text-right">&#8377;{money(batch.unitCost)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <>
+                    <p className="text-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+                      What you have of this part, batch by batch. The oldest batch is sold first, at the cost it came in at.
+                    </p>
+                    {shelfBatches.length === 0 ? (
+                      <p className="text-muted" style={{ fontSize: 13 }}>Nothing of this part is left on the shelf.</p>
+                    ) : (
+                      <div className="table-wrap">
+                        <table className="erp-table">
+                          <thead><tr><th>Came in on</th><th>From</th><th className="text-right">On the shelf</th><th className="text-right">Cost each</th></tr></thead>
+                          <tbody>
+                            {shelfBatches.map((batch) => (
+                              <tr key={batch.id}>
+                                <td>{formatDay(batch.boughtOn)}</td>
+                                <td>{batch.source ?? 'Opening stock'}</td>
+                                <td className="text-right"><strong>{batch.left}</strong> <span className="text-muted">of {batch.bought}</span></td>
+                                <td className="text-right">&#8377;{money(batch.unitCost)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {usedUpBatches > 0 && (
+                      <p className="text-muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+                        {usedUpBatches === 1 ? 'One earlier batch is' : `${usedUpBatches} earlier batches are`} used up, so not listed.
+                      </p>
+                    )}
+                  </>
                 )}
               </section>
 
               <section style={{ marginBottom: 20 }}>
                 <h4 style={{ marginBottom: 8 }}>Sold</h4>
                 {showing.overview.sales.length === 0 ? <p className="text-muted" style={{ fontSize: 13 }}>Never sold yet.</p> : (
-                  <table className="table">
-                    <thead><tr><th>Date</th><th>Bill</th><th>Customer</th><th className="text-right">Qty</th><th className="text-right">Rate</th></tr></thead>
-                    <tbody>
-                      {showing.overview.sales.map((line) => (
-                        <tr key={line.id}>
-                          <td>{line.date}</td><td>{line.documentId}</td><td>{line.who}</td>
-                          <td className="text-right">{line.qty}</td><td className="text-right">&#8377;{money(line.rate)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div className="table-wrap">
+                    <table className="erp-table">
+                      <thead><tr><th>Date</th><th>Bill</th><th>Customer</th><th className="text-right">Qty</th><th className="text-right">Rate</th></tr></thead>
+                      <tbody>
+                        {showing.overview.sales.map((line) => (
+                          <tr key={line.id}>
+                            <td>{formatDay(line.date)}</td><td>{line.documentId}</td><td>{line.who}</td>
+                            <td className="text-right">{line.qty}</td><td className="text-right">&#8377;{money(line.rate)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </section>
 
               <section>
                 <h4 style={{ marginBottom: 8 }}>Bought</h4>
                 {showing.overview.purchases.length === 0 ? <p className="text-muted" style={{ fontSize: 13 }}>No purchase recorded for this part.</p> : (
-                  <table className="table">
-                    <thead><tr><th>Date</th><th>Order</th><th>Supplier</th><th className="text-right">Qty</th><th className="text-right">Cost</th></tr></thead>
-                    <tbody>
-                      {showing.overview.purchases.map((line) => (
-                        <tr key={line.id}>
-                          <td>{line.date}</td><td>{line.documentId}</td><td>{line.who}</td>
-                          <td className="text-right">{line.qty}</td><td className="text-right">&#8377;{money(line.rate)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div className="table-wrap">
+                    <table className="erp-table">
+                      <thead><tr><th>Date</th><th>Order</th><th>Supplier</th><th className="text-right">Qty</th><th className="text-right">Cost</th></tr></thead>
+                      <tbody>
+                        {showing.overview.purchases.map((line) => (
+                          <tr key={line.id}>
+                            <td>{formatDay(line.date)}</td><td>{line.documentId}</td><td>{line.who}</td>
+                            <td className="text-right">{line.qty}</td><td className="text-right">&#8377;{money(line.rate)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </section>
             </>

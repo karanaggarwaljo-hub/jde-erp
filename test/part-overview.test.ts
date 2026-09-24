@@ -52,6 +52,30 @@ test('a damaged return says so, and batches read newest first', () => {
   assert.deepEqual(overview.batches.map((batch) => batch.id), ['l2', 'l1']);
 });
 
+test('each batch says whether it was bought or entered as opening stock', () => {
+  const overview = buildPartOverview({
+    ...ROWS,
+    layers: [
+      { id: 'open', created_at: '2026-07-30T18:26:59Z', unit_cost: 440, qty_remaining: 1, qty_original: 1, source_po_id: null },
+      { id: 'bought', created_at: '2026-08-20T10:00:00Z', unit_cost: 460, qty_remaining: 4, qty_original: 4, source_po_id: 'PO-1004' },
+    ],
+  });
+  assert.deepEqual(overview.batches.map((batch) => [batch.id, batch.source]), [['bought', 'PO-1004'], ['open', null]]);
+});
+
+/** FIL-K04's opening count of 4 was corrected to 2 a minute later — two batches on one day. */
+test('batches entered on the same day keep the order they were entered in', () => {
+  const overview = buildPartOverview({
+    ...ROWS,
+    layers: [
+      { id: 'second', created_at: '2026-08-06T05:55:10Z', unit_cost: 9347, qty_remaining: 2, qty_original: 2 },
+      { id: 'first', created_at: '2026-08-06T05:54:30Z', unit_cost: 9347, qty_remaining: 0, qty_original: 4 },
+    ],
+  });
+  assert.deepEqual(overview.batches.map((batch) => batch.id), ['second', 'first'], 'newest first');
+  assert.equal(overview.totals.nextCost, 9347);
+});
+
 test('a part with no history at all still adds up to zero', () => {
   const empty = buildPartOverview({ layers: [], invoiceItems: [], invoices: [], poItems: [], purchaseOrders: [], returnItems: [], returns: [] });
   assert.deepEqual(empty.totals, { soldQty: 0, soldValue: 0, boughtQty: 0, boughtValue: 0, returnedQty: 0, onHandValue: 0, nextCost: null });
