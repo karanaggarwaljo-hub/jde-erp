@@ -23,6 +23,30 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: '**.supabase.co', pathname: '/storage/v1/object/public/**' },
     ],
   },
+  // The live site sent nothing but the HSTS header Vercel adds itself, which left the whole ERP
+  // — signed-in pages included — embeddable in a frame on any other site, the usual setup for
+  // tricking someone into clicking a button they cannot see. These four are the headers that need
+  // no per-page thought; a full script-level Content-Security-Policy is deliberately not here,
+  // because Next inlines its own scripts and a wrong one takes the app down silently.
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          // frame-ancestors is the modern form and covers browsers that ignore X-Frame-Options;
+          // both are sent because some older browsers only honour the latter.
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          // Stops a browser second-guessing a declared type — an uploaded part photo served as an
+          // image must never be run as script.
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          // Another site gets the bare origin, never the path: an invoice URL names a customer.
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
