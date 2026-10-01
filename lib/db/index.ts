@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import { BACKUP_TABLES, TABLES, isWritableTable, type TableName } from './schema';
 import { partPhotoPath } from '../part-photos';
+import type { StartFreshCounts } from '../start-fresh';
 import { listingFitment, type PartFitmentResult } from '../part-fitment';
 
 export type { TableName };
@@ -1399,4 +1400,48 @@ export async function isPictureInUse(url: string): Promise<boolean> {
     if (result.error) throw result.error;
   }
   return (parts.count ?? 0) + (catalog.count ?? 0) > 0;
+}
+
+/** Live counts behind the Start fresh card: each one something jde_reset_company_data would
+ *  clear or delete for this company, or keep. Head-only counts, so no rows cross the wire. */
+export async function getStartFreshCounts(companyId: string): Promise<StartFreshCounts> {
+  const client = getClient();
+  const head = (table: string) => client.from(table).select('*', { count: 'exact', head: true }).eq('company_id', companyId);
+  const results = await Promise.all([
+    head('jde_products'),
+    head('jde_products').neq('current_stock', 0),
+    head('jde_products').or('cost_price.gt.0,sale_price.gt.0,mrp.gt.0'),
+    head('jde_invoices'),
+    head('jde_quotations'),
+    head('jde_sales_returns'),
+    head('jde_payments_received'),
+    head('jde_invoice_writeoffs'),
+    head('jde_purchase_orders'),
+    head('jde_purchase_returns'),
+    head('jde_supplier_payments'),
+    head('jde_expenses'),
+    head('jde_customers'),
+    head('jde_suppliers'),
+    head('jde_catalog_products').eq('publication_status', 'published'),
+  ]);
+  for (const result of results) {
+    if (result.error) throw result.error;
+  }
+  const [
+    parts, partsWithStock, partsWithPrices, invoices, quotations, salesReturns, paymentsReceived, writeOffs,
+    purchases, purchaseReturns, supplierPayments, expenses, customers, suppliers, liveOnWebsite,
+  ] = results.map((result) => result.count ?? 0);
+  return {
+    parts, partsWithStock, partsWithPrices, invoices, quotations, salesReturns, paymentsReceived, writeOffs,
+    purchases, purchaseReturns, supplierPayments, expenses, customers, suppliers, liveOnWebsite,
+  };
+}
+
+/** Starts a company fresh through jde_reset_company_data, which does all of it in one transaction
+ *  or none of it, and refuses unless `confirmName` is the company's own name. Returns how many of
+ *  each thing it cleared or deleted. Callers take a backup first. */
+export async function resetCompanyData(companyId: string, confirmName: string): Promise<Record<string, number>> {
+  const { data, error } = await getClient().rpc('jde_reset_company_data', { p_company_id: companyId, p_confirm_name: confirmName });
+  if (error) throw error;
+  return (data ?? {}) as Record<string, number>;
 }

@@ -2,6 +2,27 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-02 — Start a company fresh, keeping the parts list and the suppliers
+
+You stopped using the ERP for a while and wanted a clean start without typing the parts in again.
+**Settings → Data Backups → Start fresh** does that for the company you are working in:
+
+- **Cleared:** stock goes to 0 on every part, and cost price, sale price and MRP are cleared.
+- **Deleted:** every sales bill, quotation, credit note, payment received, settlement write-off,
+  purchase, purchase return, payment to a supplier and expense, and every customer.
+- **Kept:** every part's name, part number, what it fits, brand, category and photo; your
+  suppliers, with what you owe them set to zero; your website listings; the audit log, staff logins
+  and company details.
+
+The card shows exactly how many of each before you confirm. **You type the company's name to
+confirm**, so it cannot happen by a mis-click. **A full backup is taken first**, and if the backup
+fails nothing is changed. The clearing itself happens all at once or not at all, and is written to
+the audit log.
+
+**Bill numbers never repeat.** Every bill, purchase, receipt, credit note and other document number
+now carries on from the highest one ever used. After a fresh start your next bill is INV-1017, not
+INV-1010 again, so no number a customer already holds is ever given to someone else.
+
 ## 2026-09-25 — Click a part's photo to see it large, and set its fitment right there
 
 **Click the photo in a part's window and it opens full size** over everything, with the part's

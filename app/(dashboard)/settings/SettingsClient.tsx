@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import AuditLogPanel from '@/components/AuditLogPanel';
 import BackupsPanel from '@/components/BackupsPanel';
+import StartFreshCard from '@/components/settings/StartFreshCard';
 import { useCompany, type Company } from '@/components/CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { inviteUser as sendInvite } from '@/lib/client-auth';
@@ -439,7 +440,7 @@ export default function SettingsClient() {
 
     {activeTab === 'audit' && <AuditLogPanel />}
 
-    {activeTab === 'backups' && <BackupsPanel />}
+    {activeTab === 'backups' && <><BackupsPanel /><StartFreshCard /></>}
 
     {inviteOpen && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '480px' }} role="dialog" aria-modal="true" aria-labelledby="invite-title"><form onSubmit={inviteUser}><div className="modal-header"><h3 id="invite-title" className="modal-title">Invite User</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setInviteOpen(false)}>✕</button></div><div className="modal-body flex flex-col gap-4">{inviteError && <p className="form-error">{inviteError}</p>}<div className="form-group"><label className="form-label">Full Name</label><input required className="form-input" value={invite.name} onChange={(event) => setInvite({ ...invite, name: event.target.value })} /></div><div className="form-group"><label className="form-label">Email</label><input required type="email" className="form-input" value={invite.email} onChange={(event) => setInvite({ ...invite, email: event.target.value })} /></div><div className="form-group"><label className="form-label">Role</label><select className="form-input form-select" value={invite.role} onChange={(event) => setInvite({ ...invite, role: event.target.value })}><option value="manager">Manager</option><option value="salesman">Salesperson</option><option value="accountant">Accountant</option><option value="warehouse">Warehouse</option></select></div></div><div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setInviteOpen(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={inviteSubmitting}>{inviteSubmitting ? 'Sending…' : 'Send Invite'}</button></div></form></div></div>}
 

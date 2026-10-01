@@ -39,7 +39,7 @@ begin
     end loop;
     delete from jde_invoice_items where invoice_id = v_invoice_id and company_id = p_company_id;
   else
-    select 'INV-' || (coalesce(max(substring(id from '\d+$')::int), 1000) + 1) into v_invoice_id from jde_invoices;
+    select 'INV-' || (greatest(coalesce(max(substring(id from '\d+$')::int), 1000), public.jde_number_floor('INV')) + 1) into v_invoice_id from jde_invoices;
   end if;
 
   for v_item in select * from jsonb_array_elements(p_items)
