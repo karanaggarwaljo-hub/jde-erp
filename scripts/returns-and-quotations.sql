@@ -85,7 +85,7 @@ begin
     delete from public.jde_quotation_items where company_id = p_company_id and quotation_id = v_id;
   else
     perform pg_advisory_xact_lock(hashtext('jde-quotation-number'));
-    select 'QT-' || (coalesce(max(nullif(regexp_replace(id, '[^0-9]', '', 'g'), '')::int),1000)+1) into v_id from public.jde_quotations;
+    select 'QT-' || (greatest(coalesce(max(nullif(regexp_replace(id, '[^0-9]', '', 'g'), '')::int),1000), public.jde_number_floor('QT'))+1) into v_id from public.jde_quotations;
   end if;
   for v_line in select * from jsonb_to_recordset(p_items) as x(product_id text, qty numeric, unit_price numeric) loop
     select * into v_product from public.jde_products where id = v_line.product_id and company_id = p_company_id;
@@ -153,7 +153,7 @@ begin
   v_discount:=round(v_subtotal*coalesce(v_invoice.discount_percent,0)/100,2); v_gst:=round((v_subtotal-v_discount)*coalesce(v_invoice.gst_percent,0)/100,2); v_credit:=round(v_subtotal-v_discount+v_gst,2);
   v_old_due:=greatest(coalesce(v_invoice.total,0)-coalesce(v_invoice.paid,0),0); v_new_total:=greatest(coalesce(v_invoice.total,0)-v_credit,0); v_new_paid:=least(coalesce(v_invoice.paid,0),v_new_total); v_new_due:=greatest(v_new_total-v_new_paid,0); v_refund:=greatest(coalesce(v_invoice.paid,0)-v_new_total,0);
   perform pg_advisory_xact_lock(hashtext('jde-sales-return-number'));
-  select 'SRN-'||(coalesce(max(nullif(regexp_replace(sr.id,'[^0-9]','','g'),'')::int),1000)+1) into v_id from public.jde_sales_returns sr;
+  select 'SRN-'||(greatest(coalesce(max(nullif(regexp_replace(sr.id,'[^0-9]','','g'),'')::int),1000), public.jde_number_floor('SRN'))+1) into v_id from public.jde_sales_returns sr;
   insert into public.jde_sales_returns(id,company_id,invoice_id,customer_id,reason,subtotal,discount_amount,gst_amount,credit_total,refund_or_credit_amount) values(v_id,p_company_id,p_invoice_id,p_customer_id,trim(p_reason),v_subtotal,v_discount,v_gst,v_credit,v_refund);
   for v_line in select * from jsonb_to_recordset(p_items) as x(invoice_item_id uuid,qty numeric) loop
     select * into v_item from public.jde_invoice_items ii where ii.id=v_line.invoice_item_id;
