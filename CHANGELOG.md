@@ -2,6 +2,28 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-12 — Every invoice saved as a small PDF you can open from any device
+
+**Every sales invoice is now saved as a PDF automatically**, the moment you save the bill, in the
+ERP's own private storage. Nothing to click and nothing to remember.
+
+- **Open it from anywhere.** On the Sales page every invoice has a **PDF** button next to Print, and
+  an open invoice has a **Saved PDF** button at the top. It works on any phone, tablet or computer
+  signed in to the ERP. Nobody who is not signed in can open it.
+- **Very little space.** A one-page invoice is about 2 KB, so the free storage holds hundreds of
+  thousands of them. Each invoice has exactly one file, replaced when the bill changes, so copies
+  never pile up.
+- **Always up to date.** If a bill changes after it is saved (a payment comes in, it is edited or
+  settled), its PDF is drawn again the next time you open it, and every night anyway. Delete a bill
+  and its PDF is deleted too.
+- Amounts in the PDF read **"Rs."** instead of "₹", because the built-in PDF fonts have no ₹ sign
+  and adding a font would make every file many times bigger.
+
+**Why a bill would not save, now said on screen.** After the fresh start every part's sale price is
+empty, so a part comes onto a bill at ₹0 and the bill cannot be saved. Before, the Save button just
+went grey. Now the bill names the part in red: *"Type a rate for … — it has no sale price yet, so
+this bill is ₹0 and cannot be saved."* Type the rate on the line and Save works.
+
 ## 2026-10-02 — Start a company fresh, keeping the parts list and the suppliers
 
 You stopped using the ERP for a while and wanted a clean start without typing the parts in again.
