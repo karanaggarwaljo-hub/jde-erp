@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { backupIfNeededToday, pruneOldBackups } from '@/lib/db/backup';
 import { dbErrorMessage } from '@/lib/db';
+import { syncInvoicePdfs } from '@/lib/invoice-archive';
 
 export const dynamic = 'force-dynamic';
 // Nineteen tables, each paged, then a multi-megabyte upload. Nowhere near a minute in practice
@@ -41,7 +42,15 @@ export async function GET(request: Request) {
         ? `[backup] created ${created.filename} (${created.size_bytes} bytes), pruned ${pruned.length}`
         : `[backup] today's snapshot already exists, pruned ${pruned.length}`
     );
-    return Response.json({ created: created?.filename ?? null, pruned });
+    // Invoice PDFs ride on the same nightly job: a payment or settlement changes what an invoice
+    // prints, and this catches every such change the save itself did not. Never allowed to fail
+    // the backup, and given only what is left of the time limit.
+    const invoicePdfs = await syncInvoicePdfs({ budgetMs: 25_000 }).catch((error) => {
+      console.error('[invoice-pdfs] nightly sync failed:', error);
+      return null;
+    });
+    if (invoicePdfs) console.log(`[invoice-pdfs] saved ${invoicePdfs.saved}, unchanged ${invoicePdfs.unchanged}, removed ${invoicePdfs.removed}, failed ${invoicePdfs.failed}, left for tomorrow ${invoicePdfs.remaining}`);
+    return Response.json({ created: created?.filename ?? null, pruned, invoicePdfs });
   } catch (error) {
     console.error('[backup] scheduled backup failed:', error);
     return Response.json({ error: dbErrorMessage(error, 'Backup failed.') }, { status: 500 });

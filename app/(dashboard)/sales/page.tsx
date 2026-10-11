@@ -5,6 +5,7 @@ import { FormEvent, useMemo, useState } from 'react';
 import {
   Plus,
   Printer,
+  FileDown,
   Search,
   Eye,
   Pencil,
@@ -1370,6 +1371,10 @@ ${stockLine}`)) return;
                         onClick={() => items.length > 0 && openSalesReturn(invoice)}
                       ><Undo2 size={14} /></button>
                       <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={() => window.open(`/sales/invoice/${invoice.id}`, '_blank')}><Printer size={14} /></button>
+                      {activeCompany && (
+                        <button className="btn btn-ghost btn-sm" aria-label={`Saved PDF of ${invoice.id}`} title="Open the saved PDF — works on any device signed in to the ERP"
+                          onClick={() => window.open(`/api/sales/invoice-pdf?companyId=${encodeURIComponent(activeCompany.id)}&invoiceId=${encodeURIComponent(invoice.id)}`, '_blank')}><FileDown size={14} /></button>
+                      )}
                       <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`}
                         title={returnCount > 0 ? 'Delete unavailable — goods have been returned against this invoice' : 'Delete invoice'}
                         disabled={returnCount > 0}

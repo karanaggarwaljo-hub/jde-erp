@@ -1445,3 +1445,113 @@ export async function resetCompanyData(companyId: string, confirmName: string): 
   if (error) throw error;
   return (data ?? {}) as Record<string, number>;
 }
+
+// ── Saved invoice PDFs (see lib/invoice-archive.ts and scripts/invoice-pdfs.sql) ─────────────────
+
+/** Private, unlike jde-catalog-images: an invoice names a customer and what they paid. */
+const INVOICE_BUCKET = 'jde-invoices';
+
+export type InvoiceFileRecord = {
+  invoice_id: string;
+  company_id: string;
+  path: string;
+  fingerprint: string;
+  size_bytes: number;
+  saved_at: string;
+};
+
+/** One file per invoice, replaced in place, so the archive never holds more than one copy. */
+export function invoicePdfPath(companyId: string, invoiceId: string): string {
+  const safe = (value: string) => value.replace(/[^A-Za-z0-9_-]/g, '');
+  return `${safe(companyId)}/${safe(invoiceId)}.pdf`;
+}
+
+/** Everything an invoice's PDF prints: the invoice, its lines in the order the invoice page lists
+ *  them, the company's letterhead and the customer's details. Undefined-free; null when the
+ *  invoice is not in this company. */
+export async function getInvoicePdfSource(companyId: string, invoiceId: string) {
+  const client = getClient();
+  const [invoice, items, company] = await Promise.all([
+    client.from('jde_invoices').select('*').eq('company_id', companyId).eq('id', invoiceId).maybeSingle(),
+    client.from('jde_invoice_items').select('*').eq('company_id', companyId).eq('invoice_id', invoiceId).order('id', { ascending: true }),
+    client.from('jde_companies').select('name, gstin, address, contact_phone, contact_email').eq('id', companyId).maybeSingle(),
+  ]);
+  for (const result of [invoice, items, company]) {
+    if (result.error) throw result.error;
+  }
+  const row = invoice.data as Record<string, unknown> | null;
+  if (!row) return null;
+  const customer = await client
+    .from('jde_customers').select('address, phone, gstin')
+    .eq('company_id', companyId).eq('name', String(row.customer ?? '')).limit(1).maybeSingle();
+  if (customer.error) throw customer.error;
+  return {
+    invoice: row as unknown as import('../invoice-document').DocInvoice,
+    items: ((items.data as unknown[]) ?? []) as import('../invoice-document').DocItem[],
+    company: ((company.data as Record<string, unknown> | null) ?? { name: '' }) as unknown as import('../invoice-document').DocCompany,
+    customer: (customer.data as import('../invoice-document').DocCustomer) ?? null,
+  };
+}
+
+export async function getInvoiceFileRecord(invoiceId: string): Promise<InvoiceFileRecord | undefined> {
+  const { data, error } = await getClient().from('jde_invoice_files').select('*').eq('invoice_id', invoiceId).maybeSingle();
+  if (error) throw error;
+  return (data as InvoiceFileRecord | null) ?? undefined;
+}
+
+/** Stores an invoice's PDF over any earlier one and records it. */
+export async function saveInvoiceFile(input: { companyId: string; invoiceId: string; bytes: Uint8Array; fingerprint: string }): Promise<InvoiceFileRecord> {
+  const client = getClient();
+  const path = invoicePdfPath(input.companyId, input.invoiceId);
+  const { error: uploadError } = await client.storage
+    .from(INVOICE_BUCKET)
+    .upload(path, Buffer.from(input.bytes), { contentType: 'application/pdf', upsert: true });
+  if (uploadError) throw uploadError;
+  const { data, error } = await client
+    .from('jde_invoice_files')
+    .upsert({
+      invoice_id: input.invoiceId,
+      company_id: input.companyId,
+      path,
+      fingerprint: input.fingerprint,
+      size_bytes: input.bytes.byteLength,
+      saved_at: new Date().toISOString(),
+    }, { onConflict: 'invoice_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data as InvoiceFileRecord;
+}
+
+/** A saved PDF's bytes, or null when the file is missing — the caller then draws it again. */
+export async function readInvoiceFile(path: string): Promise<Uint8Array | null> {
+  const { data, error } = await getClient().storage.from(INVOICE_BUCKET).download(path);
+  if (error || !data) return null;
+  return new Uint8Array(await data.arrayBuffer());
+}
+
+/** Deletes an invoice's PDF and its record. */
+export async function removeInvoiceFile(companyId: string, invoiceId: string): Promise<void> {
+  const client = getClient();
+  const record = await getInvoiceFileRecord(invoiceId);
+  const path = record?.path ?? invoicePdfPath(companyId, invoiceId);
+  const { error: removeError } = await client.storage.from(INVOICE_BUCKET).remove([path]);
+  if (removeError) console.error('Could not remove an invoice PDF:', path, removeError);
+  const { error } = await client.from('jde_invoice_files').delete().eq('invoice_id', invoiceId);
+  if (error) throw error;
+}
+
+/** Every invoice that should have a PDF, and every saved PDF whose invoice no longer exists. */
+export async function listInvoicePdfSyncState(): Promise<{
+  invoices: Array<{ id: string; company_id: string }>;
+  orphans: Array<{ invoice_id: string; company_id: string }>;
+}> {
+  const invoices = (await listAllRows('invoices')).map((row) => ({ id: String(row.id), company_id: String(row.company_id) }));
+  const { data, error } = await getClient().from('jde_invoice_files').select('invoice_id, company_id');
+  if (error) throw error;
+  const existing = new Set(invoices.map((invoice) => invoice.id));
+  const orphans = ((data as Array<{ invoice_id: string; company_id: string }>) ?? []).filter((file) => !existing.has(file.invoice_id));
+  // Newest first, so a night that runs out of time has saved the invoices most likely to be opened.
+  invoices.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+  return { invoices, orphans };
+}

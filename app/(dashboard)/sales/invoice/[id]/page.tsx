@@ -2,12 +2,12 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Printer } from 'lucide-react';
+import { ArrowLeft, FileDown, Printer } from 'lucide-react';
 import { useCompany } from '@/components/CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { money } from '@/lib/money';
 import { type Customer, type Invoice, type InvoiceItem } from '@/lib/sales-types';
-import { invoiceBalanceDue, invoiceWrittenOff } from '@/lib/invoice-balance';
+import { invoiceFigures } from '@/lib/invoice-figures';
 
 
 export default function SalesInvoicePrintPage() {
@@ -36,9 +36,10 @@ export default function SalesInvoicePrintPage() {
 
   const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
   const customer = customers.find((row) => row.name === invoice.customer);
-  const balanceDue = invoiceBalanceDue(invoice);
-  const writtenOff = invoiceWrittenOff(invoice);
-  const discountAmount = Number(invoice.discount_amount || 0);
+  // The same figures the saved PDF prints (lib/invoice-figures.ts), so the two never disagree.
+  const {
+    subtotal, anyLineDiscount, lineDiscountTotal, discountAmount, gstInclusive, gstAmount, netTaxableValue, balanceDue, writtenOff,
+  } = invoiceFigures(invoice, items);
 
   // Subtotal and GST are not columns on the invoice row itself — only `total`, `discount_percent`
   // and `discount_amount` are (see the Invoice type above, copied from the sales page). When line
@@ -49,30 +50,23 @@ export default function SalesInvoicePrintPage() {
   // discountAmount; total = taxableAmount + gstAmount). This is exact arithmetic on real stored
   // figures, not an estimate, so it's shown. Invoices that predate line-item tracking have nothing
   // to reconstruct it from, so the subtotal/GST rows are simply left out for them.
-  const subtotal = items.reduce((sum, item) => sum + Number(item.line_total || 0), 0);
-  // Only worth a column when the invoice actually uses per-line discounts.
-  const anyLineDiscount = items.some((item) => Number(item.discount_percent) > 0);
-  const lineDiscountTotal = items.reduce((sum, item) => sum + Number(item.discount_amount || 0), 0);
-  const gstInclusive = invoice.gst_mode === 'inclusive';
-  // Prefer the tax figure the sale actually recorded. The subtraction below only reconstructs the
-  // tax correctly for GST-EXCLUSIVE pricing, where total = taxable + tax; on a GST-inclusive
-  // invoice the tax is already inside the total and that subtraction yields zero. Every invoice
-  // predating the stored split was priced exclusive, so the fallback stays right for those.
-  const storedGst = invoice.gst_amount == null ? null : Number(invoice.gst_amount);
-  const gstAmount = storedGst != null
-    ? storedGst
-    : items.length > 0 ? Number(invoice.total) - (subtotal - discountAmount) : 0;
-  // What the tax was charged on. Priced exclusive that is the discounted amount; priced inclusive
-  // it is that amount with the tax taken back out.
-  const netTaxableValue = (subtotal - discountAmount) - (gstInclusive ? gstAmount : 0);
 
   return (
     <div>
       <div className="no-print flex justify-between items-center mb-4">
         <Link href="/sales" className="btn btn-ghost btn-sm"><ArrowLeft size={14} /> Back to Sales</Link>
-        <button type="button" className="btn btn-primary btn-sm" onClick={() => window.print()}>
-          <Printer size={14} /> Print / Save as PDF
-        </button>
+        <div className="flex gap-2">
+          {activeCompany && (
+            <a className="btn btn-secondary btn-sm" target="_blank" rel="noopener"
+              href={`/api/sales/invoice-pdf?companyId=${encodeURIComponent(activeCompany.id)}&invoiceId=${encodeURIComponent(invoice.id)}`}
+              title="The invoice as it is saved — opens on any device signed in to the ERP">
+              <FileDown size={14} /> Saved PDF
+            </a>
+          )}
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => window.print()}>
+            <Printer size={14} /> Print
+          </button>
+        </div>
       </div>
 
       <div className="invoice-sheet">

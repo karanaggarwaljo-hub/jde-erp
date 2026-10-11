@@ -1,6 +1,8 @@
 import { dbErrorMessage, getRow, saveSalesInvoice } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { money, recordAudit } from '@/lib/audit-log';
+import { after } from 'next/server';
+import { ensureInvoicePdf } from '@/lib/invoice-archive';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,6 +70,15 @@ export async function POST(request: Request) {
         ...(before ? { before: { total: before.total, paid: before.paid, status: before.status, items: before.items } } : {}),
         after: { total: invoice.total, paid: invoice.paid, status: invoice.status, items: invoice.items },
       },
+    });
+    // Saved after the response, so a sale is never slowed down by it. If it fails, opening the
+    // PDF or the nightly job draws it instead.
+    after(async () => {
+      try {
+        await ensureInvoicePdf(companyId, savedId, { needBytes: false });
+      } catch (error) {
+        console.error('Saving the PDF of ' + savedId + ' failed:', error);
+      }
     });
     return Response.json(invoice, { status: 201 });
   } catch (error) {
