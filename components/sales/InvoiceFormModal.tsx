@@ -24,7 +24,7 @@ import { useState, type Dispatch, type FormEvent, type SetStateAction } from 're
 import { Plus, Minus, X, AlertTriangle, Keyboard } from 'lucide-react';
 import { money, paise } from '@/lib/money';
 import { lineDiscountPercent, lineGross, lineNet, type Totals } from '@/lib/invoice-totals';
-import { addCustomLine, addPartToLines, lineWarnings, type LastSold } from '@/lib/sale-entry';
+import { addCustomLine, addPartToLines, lineWarnings, partsWithoutRate, type LastSold } from '@/lib/sale-entry';
 import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import PartPicker from '@/components/PartPicker';
 import {
@@ -467,7 +467,12 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
         <div className="modal-footer">
           <div className="text-muted text-sm" style={{ marginRight: 'auto', maxWidth: '340px' }}>
             {total <= 0
-              ? 'Scan or type a part above to bill this sale.'
+              ? (() => {
+                  const unpriced = partsWithoutRate(lines);
+                  if (unpriced.length === 0) return 'Scan or type a part above to bill this sale.';
+                  const named = unpriced.slice(0, 2).join(', ') + (unpriced.length > 2 ? ` and ${unpriced.length - 2} more` : '');
+                  return <span className="text-danger">Type a rate for <strong>{named}</strong> — {unpriced.length === 1 ? 'it has' : 'they have'} no sale price yet, so this bill is ₹0 and cannot be saved.</span>;
+                })()
               : newOutstanding > 0
                 ? <>₹{paise(paidAmount)} received now · <strong>₹{paise(newOutstanding)}</strong> stays outstanding{selectedCustomer ? ` on ${selectedCustomer.name}'s account` : ' on this invoice'}.</>
                 : 'Settled in full — nothing will be added to any outstanding balance.'}

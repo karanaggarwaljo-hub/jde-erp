@@ -131,3 +131,12 @@ export function lineWarnings(line: InvoiceLine, part: PartOption | undefined): L
   }
   return warnings;
 }
+
+/** The parts on a sale that have a quantity but no rate. A sale of nothing but these comes to ₹0
+ *  and cannot be saved, so the screen names them rather than greying the button out in silence —
+ *  which is what happened after the fresh start cleared every sale price. */
+export function partsWithoutRate(lines: InvoiceLine[]): string[] {
+  return lines
+    .filter((line) => line.part.trim() && (Number(line.qty) || 0) > 0 && !((Number(line.price) || 0) > 0))
+    .map((line) => line.part.trim());
+}

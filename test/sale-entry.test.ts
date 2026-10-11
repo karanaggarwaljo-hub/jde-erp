@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addPartToLines, buildLastSoldIndex, lineWarnings, partLabel } from '../lib/sale-entry';
+import { addPartToLines, buildLastSoldIndex, lineWarnings, partLabel, partsWithoutRate } from '../lib/sale-entry';
 import type { InvoiceLine, PartOption } from '../lib/sales-types';
 
 function part(partNumber: string, name: string, extra: Partial<PartOption> = {}): PartOption {
@@ -144,4 +144,15 @@ test('a part with no cost on file is not called below cost', () => {
   const noCost = part('X-1', 'UNKNOWN COST', { costPrice: 0 });
   const warnings = lineWarnings({ part: noCost.value, qty: 1, price: 10, discount: 0 }, noCost);
   assert.ok(!warnings.some((warning) => warning.kind === 'below-cost'));
+});
+
+test('the parts holding up a sale are the ones with a quantity and no rate', () => {
+  const lines: InvoiceLine[] = [
+    { part: 'SP-003 - filter kit', qty: 1, price: 0 },
+    { part: '911-12400 - bkt main pin', qty: 2, price: 450 },
+    { part: '', qty: 1, price: 0 },
+    { part: 'SUN-G32 - sun gear', qty: 0, price: 0 },
+  ];
+  assert.deepEqual(partsWithoutRate(lines), ['SP-003 - filter kit']);
+  assert.deepEqual(partsWithoutRate([{ part: 'a', qty: 1, price: 10 }]), []);
 });

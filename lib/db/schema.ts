@@ -78,6 +78,9 @@ export const BACKUP_ONLY_TABLES: Record<string, TableSchema> = {
   // it is read through its own owner-only route rather than published to every logged-in browser.
   // A restore without it loses the evidence of everything that happened before the restore.
   audit_log: { primaryKey: 'id', companyScoped: true },
+  // The highest number each kind of document has reached (scripts/start-fresh.sql). Without it a
+  // restore after a fresh start would let numbers already given to customers be issued again.
+  number_floors: { primaryKey: 'prefix' },
 };
 
 /**

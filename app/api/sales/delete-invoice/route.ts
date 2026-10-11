@@ -1,6 +1,8 @@
 import { dbErrorMessage, isBusinessRuleError, deleteSalesInvoice } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { recordAudit } from '@/lib/audit-log';
+import { after } from 'next/server';
+import { removeInvoicePdf } from '@/lib/invoice-archive';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +24,13 @@ export async function POST(request: Request) {
     await recordAudit({
       companyId, action: 'invoice.delete', entity: 'invoices', entityId: invoiceId,
       summary: `Deleted invoice ${invoiceId}`,
+    });
+    after(async () => {
+      try {
+        await removeInvoicePdf(companyId, invoiceId);
+      } catch (error) {
+        console.error('Removing the PDF of deleted invoice ' + invoiceId + ' failed:', error);
+      }
     });
     return Response.json({ ok: true });
   } catch (error) {
