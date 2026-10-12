@@ -10,6 +10,8 @@ test('the menu still reaches every screen it reached before', () => {
     '/dashboard', '/daybook', '/inventory', '/sales', '/purchases',
     '/customers', '/suppliers', '/expenses', '/reports', '/analytics',
     '/catalog-admin', '/settings',
+    // Added October 2026: every activity with its time, who and which device.
+    '/logbook',
   ];
   assert.deepEqual(everyScreen.map((item) => item.href).sort(), [...before].sort());
 });

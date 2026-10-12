@@ -1,6 +1,7 @@
 import { inviteStaffUser, insertRow, dbErrorMessage } from '@/lib/db';
 import { resolveRequestCompanyId } from '@/lib/company-context';
 import { isRole } from '@/lib/authTypes';
+import { ALL_COMPANIES, recordAudit } from '@/lib/audit-log';
 import { resolveSiteOrigin } from '@/lib/supabase/server';
 
 /** Owner-only — enforced centrally by proxy.ts (see its OWNER_ONLY_PREFIXES), not re-checked
@@ -23,6 +24,10 @@ export async function POST(request: Request) {
   try {
     const company_id = await resolveRequestCompanyId();
     await insertRow('users', { email, name, role, status: 'invited', company_id });
+    await recordAudit({
+      companyId: company_id ?? ALL_COMPANIES, action: 'users.invite', entity: 'users', entityId: email,
+      summary: `Invited ${name} (${email}) as ${role}`,
+    });
     return Response.json({ ok: true }, { status: 201 });
   } catch (error) {
     console.error('POST /api/auth/invite failed (jde_users insert):', error);

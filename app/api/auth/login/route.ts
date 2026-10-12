@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { getUserRecord, dbErrorMessage } from '@/lib/db';
+import { ALL_COMPANIES, recordAudit } from '@/lib/audit-log';
 
 export async function POST(request: Request) {
   const { email, password } = await request.json();
@@ -10,6 +11,16 @@ export async function POST(request: Request) {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error || !data.user?.email) {
+    // Logged only for addresses that belong to someone here: a stranger guessing addresses would
+    // otherwise fill the Log Book with noise.
+    const known = await getUserRecord(email).catch(() => null);
+    if (known) {
+      await recordAudit({
+        companyId: ALL_COMPANIES, action: 'auth.signin_failed', entity: 'users', entityId: known.email,
+        summary: `Wrong password for ${known.name || known.email}`,
+        actor: { email: known.email, name: known.name ?? '' },
+      });
+    }
     return Response.json({ error: 'Invalid email or password.' }, { status: 401 });
   }
 
@@ -24,6 +35,12 @@ export async function POST(request: Request) {
         : "Your account isn't set up for this ERP yet. Contact your administrator.";
       return Response.json({ error: message }, { status: 403 });
     }
+    await recordAudit({
+      companyId: ALL_COMPANIES, action: 'auth.signin', entity: 'users', entityId: record.email,
+      summary: `${record.name || record.email} signed in`,
+      // The new session's cookie is only being set on this response, so name them directly.
+      actor: { email: record.email, name: record.name ?? '' },
+    });
     return Response.json({ role: record.role, name: record.name });
   } catch (dbError) {
     await supabase.auth.signOut();

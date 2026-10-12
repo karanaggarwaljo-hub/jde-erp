@@ -1,7 +1,8 @@
 'use client';
 import { currentIdentity, indexProductsById } from '@/lib/trade-history';
 
-import { ChangeEvent, FormEvent, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import BillButton, { type PurchaseBillSummary } from '@/components/purchases/BillButton';
 import { useEntryIntent } from '@/lib/use-entry-intent';
 import {
   Plus,
@@ -179,6 +180,29 @@ export default function PurchasesPage() {
     photo: photoFor(product)?.url ?? null,
   })), [products, photoFor]);
   const supplierOptions = suppliers.map((s) => s.name);
+
+  // Which purchases have their supplier bill kept, for the Bill / Attach bill button. Asked again
+  // a few seconds after the list changes too: a scanned bill is attached by the server just after
+  // the purchase is saved, not before the answer.
+  const [bills, setBills] = useState<Record<string, PurchaseBillSummary>>({});
+  const [billsKey, setBillsKey] = useState(0);
+  const activeCompanyId = activeCompany?.id ?? '';
+  useEffect(() => {
+    if (!activeCompanyId) return;
+    let active = true;
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/purchases/bill?companyId=${encodeURIComponent(activeCompanyId)}&list=1`);
+        const data = (await parseJsonOrThrow(res, 'Could not load supplier bills.')) as Record<string, PurchaseBillSummary>;
+        if (active) setBills(data);
+      } catch {
+        // The buttons simply offer "Attach bill"; nothing else on the page depends on this.
+      }
+    };
+    void load();
+    const again = setTimeout(() => { void load(); }, 5000);
+    return () => { active = false; clearTimeout(again); };
+  }, [activeCompanyId, purchaseOrders.length, billsKey]);
 
   const [activeTab, setActiveTab] = useState<PurchaseTab>('purchases');
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
@@ -602,7 +626,7 @@ export default function PurchasesPage() {
         const res = await fetch('/api/purchases/import-scan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ base64, mimeType, fileHash, companyId: activeCompany?.id }),
+          body: JSON.stringify({ base64, mimeType, fileHash, fileName: file.name, companyId: activeCompany?.id }),
         });
         const data = (await parseJsonOrThrow(res, 'Failed to scan document.')) as { items?: unknown; supplier_name?: string; supplier_gstin?: string; supplier_invoice_no?: string };
 
@@ -996,6 +1020,10 @@ export default function PurchasesPage() {
                     : <button className="btn btn-secondary btn-sm" onClick={() => openReturnModal(po)} title="Return some or all received items to this supplier"><Undo2 size={14} /> Return Items</button>}
                   {balance > 0 && (
                     <button className="btn btn-secondary btn-sm" onClick={() => openPaymentModal(po)} title={`Record a payment against ${po.id}`}><Wallet size={14} /> Record Payment</button>
+                  )}
+                  {activeCompanyId && (
+                    <BillButton companyId={activeCompanyId} purchaseId={po.id} bill={bills[po.id]}
+                      onAttached={(message) => { setFeedback(message); setBillsKey((key) => key + 1); }} />
                   )}
                 </div>
               </td>

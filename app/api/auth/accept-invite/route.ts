@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { getUserRecord, updateRow, dbErrorMessage } from '@/lib/db';
 import { isLeakedPassword } from '@/lib/pwned-password';
+import { ALL_COMPANIES, recordAudit } from '@/lib/audit-log';
 
 /** Deliberately reachable with just a valid Supabase session, no ACTIVE jde_users row required
  *  (see proxy.ts's SESSION_ONLY paths) — this route serves two flows that both land here with a
@@ -43,6 +44,14 @@ export async function POST(request: Request) {
     if (record.status === 'invited') {
       await updateRow('users', user.email, { status: 'active' });
     }
+    await recordAudit({
+      companyId: ALL_COMPANIES, action: record.status === 'invited' ? 'auth.invite_accepted' : 'auth.password_reset',
+      entity: 'users', entityId: record.email,
+      summary: record.status === 'invited'
+        ? `${record.name || record.email} accepted the invite and set a password`
+        : `${record.name || record.email} set a new password`,
+      actor: { email: record.email, name: record.name ?? '' },
+    });
     return Response.json({ ok: true });
   } catch (error) {
     console.error('POST /api/auth/accept-invite failed:', error);

@@ -1,5 +1,6 @@
 import { getBackupDownloadUrl, isValidBackupFilename } from '@/lib/db/backup';
 import { dbErrorMessage } from '@/lib/db';
+import { ALL_COMPANIES, recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ fil
     return Response.json({ error: 'Not a backup filename.' }, { status: 400 });
   }
   try {
-    return Response.redirect(await getBackupDownloadUrl(decoded), 302);
+    const url = await getBackupDownloadUrl(decoded);
+    await recordAudit({
+      companyId: ALL_COMPANIES, action: 'backup.download', entity: 'backups', entityId: decoded,
+      summary: `Downloaded the backup ${decoded} (a copy of every company's data)`,
+    });
+    return Response.redirect(url, 302);
   } catch (error) {
     console.error(`GET /api/backup/download/${decoded} failed:`, error);
     return Response.json({ error: dbErrorMessage(error, 'Could not prepare that download.') }, { status: 500 });

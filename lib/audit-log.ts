@@ -1,5 +1,7 @@
+import { headers } from 'next/headers';
 import { getCurrentUser } from '@/lib/auth/dal';
-import { insertAuditRow, listAuditRows } from '@/lib/db';
+import { insertAuditRow } from '@/lib/db';
+import { deviceLabel } from '@/lib/device-label';
 
 /**
  * Who changed what, and when.
@@ -18,7 +20,16 @@ import { insertAuditRow, listAuditRows } from '@/lib/db';
  * Failures are logged to the server console, which is where a gap would be explained.
  */
 
+/** Who did it, when it was not the signed-in person of this request: the ERP's own nightly jobs,
+ *  or a sign-in, which is logged before the new session cookie is readable. */
+export const SYSTEM_ACTOR = { email: 'system', name: 'ERP (automatic)' } as const;
+
+/** Entries about the installation rather than one company (a sign-in), shown in every company's
+ *  Log Book. */
+export const ALL_COMPANIES = '*';
+
 export type AuditEntry = {
+  /** A company's id, or ALL_COMPANIES. */
   companyId: string;
   /** Stable machine key: 'invoice.create', 'supplier.payment', 'part.delete'. */
   action: string;
@@ -31,11 +42,23 @@ export type AuditEntry = {
   /** Anything worth keeping beyond the sentence — most usefully `before` and `after` when a figure
    *  changed. Keep it small; this is evidence, not a copy of the document. */
   details?: Record<string, unknown>;
+  /** Overrides the signed-in person — see SYSTEM_ACTOR. */
+  actor?: { email: string; name: string };
 };
+
+/** The device of the request being served, or '' outside one (a background job). */
+async function requestDevice(): Promise<string> {
+  try {
+    return deviceLabel((await headers()).get('user-agent'));
+  } catch {
+    return '';
+  }
+}
 
 export async function recordAudit(entry: AuditEntry): Promise<void> {
   try {
-    const actor = await getCurrentUser();
+    const actor = entry.actor ?? await getCurrentUser();
+    const device = entry.actor?.email === SYSTEM_ACTOR.email ? '' : await requestDevice();
     await insertAuditRow({
       company_id: entry.companyId,
       // A route that somehow runs without a session still produces an entry, marked as such,
@@ -47,6 +70,7 @@ export async function recordAudit(entry: AuditEntry): Promise<void> {
       entity_id: entry.entityId ?? null,
       summary: entry.summary,
       details: entry.details ?? null,
+      device: device || null,
     });
   } catch (error) {
     console.error('Could not record an audit entry — the action itself already completed:', entry.action, error);
@@ -63,12 +87,8 @@ export type AuditRow = {
   entity_id: string | null;
   summary: string;
   details: Record<string, unknown> | null;
+  device?: string | null;
 };
-
-/** The most recent entries for one company, newest first. */
-export async function recentAudit(companyId: string, limit = 200): Promise<AuditRow[]> {
-  return (await listAuditRows(companyId, limit)) as AuditRow[];
-}
 
 /** Names a record the way the owner would name it, so an entry reads as a sentence about a part
  *  or a customer rather than about a row id. Falls back to the id when a row has no useful name —

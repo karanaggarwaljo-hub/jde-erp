@@ -1,6 +1,8 @@
 import { dbErrorMessage, isBusinessRuleError, savePurchase } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { money, recordAudit } from '@/lib/audit-log';
+import { after } from 'next/server';
+import { attachBillToPurchase, isFileHash, sendBillToDriveQuietly } from '@/lib/purchase-bills';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +39,18 @@ export async function POST(request: Request) {
       summary: `Recorded purchase ${String(po.id ?? '')} from ${String(supplierName ?? '')} at ${money(Number(po.total ?? 0))}`,
       details: { total: po.total, paid: po.paid, status: po.status, lines: Array.isArray(items) ? items.length : 0 },
     });
+    // Entered from a scanned bill: that bill, kept when it was read, now belongs to this purchase
+    // and goes to Google Drive under its name. After the answer, so saving is never slowed by it.
+    const purchaseId = String(po.id ?? '');
+    if (purchaseId && isFileHash(sourceFileHash)) {
+      after(async () => {
+        try {
+          if (await attachBillToPurchase(companyId, sourceFileHash, purchaseId)) await sendBillToDriveQuietly(companyId, purchaseId);
+        } catch (error) {
+          console.error(`Attaching the scanned bill to ${purchaseId} failed:`, error);
+        }
+      });
+    }
     return Response.json(po, { status: 201 });
   } catch (error) {
     console.error('POST /api/purchases/save failed:', error);

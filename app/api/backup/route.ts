@@ -1,5 +1,6 @@
 import { listBackups, backupDatabase } from '@/lib/db/backup';
 import { dbErrorMessage } from '@/lib/db';
+import { ALL_COMPANIES, recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 // Same reasoning as the cron route: reading every table and uploading the result is well inside
@@ -20,7 +21,12 @@ export async function GET() {
 
 export async function POST() {
   try {
-    return Response.json(await backupDatabase(), { status: 201 });
+    const created = await backupDatabase();
+    await recordAudit({
+      companyId: ALL_COMPANIES, action: 'backup.create', entity: 'backups', entityId: created?.filename ?? null,
+      summary: `Took a backup now${created?.filename ? ` (${created.filename})` : ''}`,
+    });
+    return Response.json(created, { status: 201 });
   } catch (error) {
     console.error('POST /api/backup failed:', error);
     return Response.json({ error: dbErrorMessage(error, 'Backup failed.') }, { status: 500 });

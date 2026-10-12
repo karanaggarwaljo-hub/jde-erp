@@ -2,6 +2,9 @@ import { timingSafeEqual } from 'node:crypto';
 import { backupIfNeededToday, pruneOldBackups } from '@/lib/db/backup';
 import { dbErrorMessage } from '@/lib/db';
 import { syncInvoicePdfs } from '@/lib/invoice-archive';
+import { connectedCompanyIds, syncInvoicePdfsToDrive } from '@/lib/invoice-drive';
+import { clearUnusedBills, syncBillsToDrive } from '@/lib/purchase-bills';
+import { ALL_COMPANIES, recordAudit, SYSTEM_ACTOR } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 // Nineteen tables, each paged, then a multi-megabyte upload. Nowhere near a minute in practice
@@ -35,6 +38,9 @@ export async function GET(request: Request) {
   }
 
   try {
+    // Everything after the backup shares what is left of the 60 seconds, with a margin.
+    const started = Date.now();
+    const timeLeft = () => 50_000 - (Date.now() - started);
     const created = await backupIfNeededToday();
     const pruned = await pruneOldBackups();
     console.log(
@@ -45,12 +51,38 @@ export async function GET(request: Request) {
     // Invoice PDFs ride on the same nightly job: a payment or settlement changes what an invoice
     // prints, and this catches every such change the save itself did not. Never allowed to fail
     // the backup, and given only what is left of the time limit.
-    const invoicePdfs = await syncInvoicePdfs({ budgetMs: 25_000 }).catch((error) => {
+    if (created) {
+      await recordAudit({
+        companyId: ALL_COMPANIES, action: 'backup.auto', entity: 'backups', entityId: created.filename,
+        summary: `Nightly backup taken (${created.filename})${pruned.length ? `; ${pruned.length} older one(s) past 7 days removed` : ''}`,
+        actor: SYSTEM_ACTOR,
+      });
+    }
+    const invoicePdfs = await syncInvoicePdfs({ budgetMs: Math.min(15_000, timeLeft()) }).catch((error) => {
       console.error('[invoice-pdfs] nightly sync failed:', error);
       return null;
     });
     if (invoicePdfs) console.log(`[invoice-pdfs] saved ${invoicePdfs.saved}, unchanged ${invoicePdfs.unchanged}, removed ${invoicePdfs.removed}, failed ${invoicePdfs.failed}, left for tomorrow ${invoicePdfs.remaining}`);
-    return Response.json({ created: created?.filename ?? null, pruned, invoicePdfs });
+
+    // Google Drive: link any scanned bill whose purchase was saved, clear week-old scans that never
+    // became a purchase, then send every company's waiting bills and invoice PDFs to its Drive.
+    const drive: Record<string, unknown> = {};
+    try {
+      drive.unusedBillsCleared = await clearUnusedBills();
+      const companies = await connectedCompanyIds();
+      for (const companyId of companies) {
+        const share = Math.max(0, timeLeft()) / (2 * companies.length);
+        if (share < 1_000) break;
+        drive[companyId] = {
+          bills: await syncBillsToDrive(companyId, share),
+          invoices: await syncInvoicePdfsToDrive(companyId, share),
+        };
+      }
+      console.log('[drive] nightly sync:', JSON.stringify(drive));
+    } catch (error) {
+      console.error('[drive] nightly sync failed:', error);
+    }
+    return Response.json({ created: created?.filename ?? null, pruned, invoicePdfs, drive });
   } catch (error) {
     console.error('[backup] scheduled backup failed:', error);
     return Response.json({ error: dbErrorMessage(error, 'Backup failed.') }, { status: 500 });

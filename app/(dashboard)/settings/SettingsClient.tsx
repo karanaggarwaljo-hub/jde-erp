@@ -11,7 +11,8 @@ import {
   Trash2,
   UserPlus,
 } from 'lucide-react';
-import AuditLogPanel from '@/components/AuditLogPanel';
+import Link from 'next/link';
+import DrivePanel from '@/components/settings/DrivePanel';
 import BackupsPanel from '@/components/BackupsPanel';
 import StartFreshCard from '@/components/settings/StartFreshCard';
 import { useCompany, type Company } from '@/components/CompanyProvider';
@@ -19,7 +20,7 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 import { inviteUser as sendInvite } from '@/lib/client-auth';
 import { ROLE_LABELS, isRole } from '@/lib/authTypes';
 
-type SettingsTab = 'users' | 'company' | 'audit' | 'backups';
+export type SettingsTab = 'users' | 'company' | 'drive' | 'backups';
 type UserAccount = { email: string; company_id: string; name: string; role: string; status: string };
 
 // Which people the table is showing. Purely a view filter over rows already loaded — it changes
@@ -59,8 +60,12 @@ const initialsOf = (name: string, email: string) => {
 const roleLabel = (role: string) => (isRole(role) ? ROLE_LABELS[role] : role);
 const sentenceCase = (value: string) => (value ? value.charAt(0).toUpperCase() + value.slice(1) : '');
 
-export default function SettingsClient() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('users');
+export default function SettingsClient({ initialTab = 'users', driveOutcome = null }: {
+  initialTab?: SettingsTab;
+  /** Set when Google has just sent the owner back here from connecting Google Drive. */
+  driveOutcome?: { ok: boolean; message: string } | null;
+}) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const { rows: users, loading: usersLoading, update: updateUser, reload: reloadUsers } = useCompanyTable<UserAccount>('users');
   const [feedback, setFeedback] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -226,7 +231,7 @@ export default function SettingsClient() {
       <div>
         <div className="eyebrow">Administration</div>
         <h1 className="page-title">System Settings &amp; Administration</h1>
-        <p className="page-subtitle">Configure company details, role permissions, invoice formats and audit logs{companySummary}</p>
+        <p className="page-subtitle">Configure company details, role permissions, Google Drive and backups{companySummary}</p>
       </div>
     </div>
 
@@ -244,9 +249,11 @@ export default function SettingsClient() {
         <button type="button" aria-pressed={activeTab === 'backups'} className={`tab ${activeTab === 'backups' ? 'active' : ''}`} onClick={() => setActiveTab('backups')}>
           Data Backups
         </button>
-        <button type="button" aria-pressed={activeTab === 'audit'} className={`tab ${activeTab === 'audit' ? 'active' : ''}`} onClick={() => setActiveTab('audit')}>
-          Audit Logs
+        <button type="button" aria-pressed={activeTab === 'drive'} className={`tab ${activeTab === 'drive' ? 'active' : ''}`} onClick={() => setActiveTab('drive')}>
+          Google Drive
         </button>
+        {/* The audit log grew into the Log Book, a page of its own in the menu. */}
+        <Link href="/logbook" className="tab">Log Book</Link>
       </div>
       {/* True of this whole route, not decoration: /settings is gated by requireOwner(). */}
       <span className="text-muted flex items-center gap-2" style={{ fontSize: '12px' }}>
@@ -438,7 +445,7 @@ export default function SettingsClient() {
       </div>
     )}
 
-    {activeTab === 'audit' && <AuditLogPanel />}
+    {activeTab === 'drive' && <DrivePanel outcome={driveOutcome} />}
 
     {activeTab === 'backups' && <><BackupsPanel /><StartFreshCard /></>}
 

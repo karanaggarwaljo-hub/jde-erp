@@ -497,18 +497,6 @@ export async function insertAuditRow(row: Record<string, unknown>): Promise<void
   if (error) throw error;
 }
 
-/** The most recent audit entries for one company, newest first. */
-export async function listAuditRows(companyId: string, limit: number): Promise<Array<Record<string, unknown>>> {
-  const { data, error } = await getClient()
-    .from('jde_audit_log')
-    .select('*')
-    .eq('company_id', companyId)
-    .order('at', { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return (data as Array<Record<string, unknown>>) ?? [];
-}
-
 export type PaySupplierInput = {
   companyId: string;
   supplierId: string;
@@ -1458,6 +1446,10 @@ export type InvoiceFileRecord = {
   fingerprint: string;
   size_bytes: number;
   saved_at: string;
+  /** Where the same PDF sits in the company's Google Drive, and which version of it is there. */
+  drive_file_id?: string | null;
+  drive_fingerprint?: string | null;
+  drive_saved_at?: string | null;
 };
 
 /** One file per invoice, replaced in place, so the archive never holds more than one copy. */
@@ -1554,4 +1546,247 @@ export async function listInvoicePdfSyncState(): Promise<{
   // Newest first, so a night that runs out of time has saved the invoices most likely to be opened.
   invoices.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
   return { invoices, orphans };
+}
+
+// ── The Log Book ────────────────────────────────────────────────────────────────────────────────
+
+export type AuditPageQuery = {
+  companyId: string;
+  /** Instants, inclusive. */
+  start?: string | null;
+  end?: string | null;
+  /** Only entries strictly older than this instant — the "Show older" cursor. */
+  before?: string | null;
+  /** action LIKE '<subject>.%' for any of these. */
+  subjects?: string[] | null;
+  actorEmail?: string | null;
+  /** Already made safe by searchTerm() in lib/logbook.ts. */
+  search?: string | null;
+  limit: number;
+};
+
+/** One page of a company's Log Book, newest first, with the installation-wide entries (sign-ins)
+ *  that belong in every company's book. */
+export async function listAuditPage(query: AuditPageQuery): Promise<Array<Record<string, unknown>>> {
+  let request = getClient()
+    .from('jde_audit_log')
+    .select('*')
+    .in('company_id', [query.companyId, '*']);
+  if (query.start) request = request.gte('at', query.start);
+  if (query.end) request = request.lte('at', query.end);
+  if (query.before) request = request.lt('at', query.before);
+  if (query.actorEmail) request = request.eq('actor_email', query.actorEmail);
+  if (query.subjects?.length) request = request.or(query.subjects.map((subject) => `action.like.${subject}.*`).join(','));
+  if (query.search) {
+    const term = `*${query.search}*`;
+    request = request.or([`summary.ilike.${term}`, `actor_name.ilike.${term}`, `actor_email.ilike.${term}`, `entity_id.ilike.${term}`].join(','));
+  }
+  const { data, error } = await request.order('at', { ascending: false }).limit(query.limit);
+  if (error) throw error;
+  return (data as Array<Record<string, unknown>>) ?? [];
+}
+
+/** Everyone who appears in a company's Log Book, for its "Who" filter: the staff list, plus anyone
+ *  in recent entries who is no longer on it. Names come from the staff list where there is one. */
+export async function listAuditPeople(companyId: string): Promise<Array<{ email: string; name: string }>> {
+  const client = getClient();
+  const [users, recent] = await Promise.all([
+    client.from('jde_users').select('email, name'),
+    client.from('jde_audit_log').select('actor_email, actor_name').in('company_id', [companyId, '*']).order('at', { ascending: false }).limit(1000),
+  ]);
+  if (users.error) throw users.error;
+  if (recent.error) throw recent.error;
+  const people = new Map<string, string>();
+  for (const row of (recent.data as Array<{ actor_email: string; actor_name: string }>) ?? []) {
+    if (!people.has(row.actor_email)) people.set(row.actor_email, row.actor_name ?? '');
+  }
+  for (const user of (users.data as Array<{ email: string; name: string }>) ?? []) {
+    people.set(user.email, user.name || people.get(user.email) || '');
+  }
+  return [...people.entries()]
+    .map(([email, name]) => ({ email, name }))
+    .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+}
+
+// ── Google Drive ────────────────────────────────────────────────────────────────────────────────
+
+export type DriveAppRow = { client_id: string; client_secret_enc: string; updated_at: string; updated_by: string };
+export type DriveConnectionRow = {
+  company_id: string;
+  google_email: string;
+  refresh_token_enc: string;
+  root_folder_id: string | null;
+  folders: Record<string, string>;
+  connected_at: string;
+  connected_by: string;
+  last_error: string | null;
+  last_error_at: string | null;
+};
+
+export async function getDriveAppRow(): Promise<DriveAppRow | null> {
+  const { data, error } = await getClient().from('jde_drive_app').select('*').eq('id', 'default').maybeSingle();
+  if (error) throw error;
+  return (data as DriveAppRow | null) ?? null;
+}
+
+export async function saveDriveAppRow(row: { client_id: string; client_secret_enc: string; updated_by: string }): Promise<void> {
+  const { error } = await getClient().from('jde_drive_app').upsert({ id: 'default', ...row, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+  if (error) throw error;
+}
+
+export async function getDriveConnectionRow(companyId: string): Promise<DriveConnectionRow | null> {
+  const { data, error } = await getClient().from('jde_drive_connections').select('*').eq('company_id', companyId).maybeSingle();
+  if (error) throw error;
+  return (data as DriveConnectionRow | null) ?? null;
+}
+
+export async function listDriveConnectionRows(): Promise<DriveConnectionRow[]> {
+  const { data, error } = await getClient().from('jde_drive_connections').select('*');
+  if (error) throw error;
+  return (data as DriveConnectionRow[]) ?? [];
+}
+
+export async function saveDriveConnectionRow(row: Omit<DriveConnectionRow, 'last_error' | 'last_error_at'>): Promise<void> {
+  const { error } = await getClient().from('jde_drive_connections').upsert({ ...row, last_error: null, last_error_at: null }, { onConflict: 'company_id' });
+  if (error) throw error;
+}
+
+export async function updateDriveConnectionRow(companyId: string, patch: Partial<DriveConnectionRow>): Promise<void> {
+  const { error } = await getClient().from('jde_drive_connections').update(patch).eq('company_id', companyId);
+  if (error) throw error;
+}
+
+export async function deleteDriveConnectionRow(companyId: string): Promise<void> {
+  const { error } = await getClient().from('jde_drive_connections').delete().eq('company_id', companyId);
+  if (error) throw error;
+}
+
+export async function getCompanyName(companyId: string): Promise<string> {
+  const { data, error } = await getClient().from('jde_companies').select('name').eq('id', companyId).maybeSingle();
+  if (error) throw error;
+  return String((data as { name?: string } | null)?.name ?? '');
+}
+
+export async function updateInvoiceFileDrive(invoiceId: string, patch: { drive_file_id: string; drive_fingerprint: string; drive_saved_at: string }): Promise<void> {
+  const { error } = await getClient().from('jde_invoice_files').update(patch).eq('invoice_id', invoiceId);
+  if (error) throw error;
+}
+
+/** Saved invoice PDFs whose newest version is not yet in the company's Google Drive, newest first. */
+export async function listInvoiceFilesBehindDrive(companyId: string): Promise<InvoiceFileRecord[]> {
+  const { data, error } = await getClient().from('jde_invoice_files').select('*').eq('company_id', companyId).order('invoice_id', { ascending: false });
+  if (error) throw error;
+  return ((data as InvoiceFileRecord[]) ?? []).filter((row) => row.drive_fingerprint !== row.fingerprint);
+}
+
+export async function countInvoiceFiles(companyId: string): Promise<{ saved: number; inDrive: number }> {
+  const { data, error } = await getClient().from('jde_invoice_files').select('fingerprint, drive_fingerprint').eq('company_id', companyId);
+  if (error) throw error;
+  const rows = (data as Array<{ fingerprint: string; drive_fingerprint: string | null }>) ?? [];
+  return { saved: rows.length, inDrive: rows.filter((row) => row.drive_fingerprint === row.fingerprint).length };
+}
+
+// ── Supplier bills ──────────────────────────────────────────────────────────────────────────────
+
+/** Private: where an uploaded supplier bill waits until it is in Google Drive. */
+const BILL_INBOX_BUCKET = 'jde-bill-inbox';
+
+export type PurchaseBillRow = {
+  id: string;
+  company_id: string;
+  file_hash: string;
+  purchase_id: string | null;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  inbox_path: string | null;
+  drive_file_id: string | null;
+  drive_link: string | null;
+  uploaded_at: string;
+  uploaded_by: string;
+  drive_saved_at: string | null;
+  last_error: string | null;
+};
+
+export async function getPurchaseBillByHash(companyId: string, fileHash: string): Promise<PurchaseBillRow | null> {
+  const { data, error } = await getClient().from('jde_purchase_bills').select('*').eq('company_id', companyId).eq('file_hash', fileHash).maybeSingle();
+  if (error) throw error;
+  return (data as PurchaseBillRow | null) ?? null;
+}
+
+export async function getPurchaseBillForPurchase(companyId: string, purchaseId: string): Promise<PurchaseBillRow | null> {
+  const { data, error } = await getClient().from('jde_purchase_bills').select('*').eq('company_id', companyId).eq('purchase_id', purchaseId)
+    .order('uploaded_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  return (data as PurchaseBillRow | null) ?? null;
+}
+
+export async function listPurchaseBillRows(companyId: string): Promise<PurchaseBillRow[]> {
+  const { data, error } = await getClient().from('jde_purchase_bills').select('*').eq('company_id', companyId).not('purchase_id', 'is', null);
+  if (error) throw error;
+  return (data as PurchaseBillRow[]) ?? [];
+}
+
+/** Bills attached to a purchase and still waiting to go to Google Drive, oldest first. */
+export async function listBillsAwaitingDrive(companyId: string): Promise<PurchaseBillRow[]> {
+  const { data, error } = await getClient().from('jde_purchase_bills').select('*')
+    .eq('company_id', companyId).not('purchase_id', 'is', null).is('drive_file_id', null).not('inbox_path', 'is', null)
+    .order('uploaded_at', { ascending: true });
+  if (error) throw error;
+  return (data as PurchaseBillRow[]) ?? [];
+}
+
+/** Bills read by the AI but never recorded as a purchase, uploaded before the given instant. */
+export async function listUnusedInboxBills(olderThan: string): Promise<PurchaseBillRow[]> {
+  const { data, error } = await getClient().from('jde_purchase_bills').select('*').is('purchase_id', null).lt('uploaded_at', olderThan);
+  if (error) throw error;
+  return (data as PurchaseBillRow[]) ?? [];
+}
+
+export async function insertPurchaseBillRow(row: Pick<PurchaseBillRow, 'company_id' | 'file_hash' | 'purchase_id' | 'file_name' | 'mime_type' | 'size_bytes' | 'inbox_path' | 'uploaded_by'>): Promise<PurchaseBillRow> {
+  const { data, error } = await getClient().from('jde_purchase_bills').insert(row).select('*').single();
+  if (error) throw error;
+  return data as PurchaseBillRow;
+}
+
+export async function updatePurchaseBillRow(id: string, patch: Partial<PurchaseBillRow>): Promise<void> {
+  const { error } = await getClient().from('jde_purchase_bills').update(patch).eq('id', id);
+  if (error) throw error;
+}
+
+/** Attaches a bill to its purchase, only if it is not attached to one already. True when it did. */
+export async function linkPurchaseBillRow(companyId: string, fileHash: string, purchaseId: string): Promise<boolean> {
+  const { data, error } = await getClient().from('jde_purchase_bills').update({ purchase_id: purchaseId })
+    .eq('company_id', companyId).eq('file_hash', fileHash).is('purchase_id', null).select('id');
+  if (error) throw error;
+  return ((data as unknown[]) ?? []).length > 0;
+}
+
+export async function deletePurchaseBillRow(id: string): Promise<void> {
+  const { error } = await getClient().from('jde_purchase_bills').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function putInboxFile(path: string, bytes: Uint8Array, mimeType: string): Promise<void> {
+  const { error } = await getClient().storage.from(BILL_INBOX_BUCKET).upload(path, Buffer.from(bytes), { contentType: mimeType, upsert: true });
+  if (error) throw error;
+}
+
+export async function readInboxFile(path: string): Promise<Uint8Array | null> {
+  const { data, error } = await getClient().storage.from(BILL_INBOX_BUCKET).download(path);
+  if (error || !data) return null;
+  return new Uint8Array(await data.arrayBuffer());
+}
+
+export async function removeInboxFile(path: string): Promise<void> {
+  const { error } = await getClient().storage.from(BILL_INBOX_BUCKET).remove([path]);
+  if (error) throw error;
+}
+
+/** What a supplier bill's file name in Drive is made from. */
+export async function getPurchaseForBill(companyId: string, purchaseId: string): Promise<{ id: string; supplier: string; date: string; supplier_invoice_no: string | null } | null> {
+  const { data, error } = await getClient().from(supaTable('purchase_orders')).select('id, supplier, date, supplier_invoice_no')
+    .eq('company_id', companyId).eq('id', purchaseId).maybeSingle();
+  if (error) throw error;
+  return (data as { id: string; supplier: string; date: string; supplier_invoice_no: string | null } | null) ?? null;
 }
