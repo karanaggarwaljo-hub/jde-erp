@@ -3,6 +3,7 @@ import { checkCompanyAccess } from '@/lib/auth/dal';
 import { recordAudit } from '@/lib/audit-log';
 import { after } from 'next/server';
 import { removeInvoicePdf } from '@/lib/invoice-archive';
+import { binInvoicePdfInDrive } from '@/lib/invoice-drive';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,8 @@ export async function POST(request: Request) {
     });
     after(async () => {
       try {
+        // The Drive copy first: it is found through the record the next line removes.
+        await binInvoicePdfInDrive(companyId, invoiceId).catch((error) => console.error('Moving the Drive PDF of ' + invoiceId + ' to the Bin failed:', error));
         await removeInvoicePdf(companyId, invoiceId);
       } catch (error) {
         console.error('Removing the PDF of deleted invoice ' + invoiceId + ' failed:', error);

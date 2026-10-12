@@ -1,4 +1,5 @@
 import { isSupportedCatalogImageType, updateRow, uploadCatalogImage } from '@/lib/db';
+import { recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,13 @@ export async function POST(request: Request) {
       image_status: 'ready',
       generation_error: null,
     });
+    const listing = row as Record<string, unknown>;
+    if (typeof listing.company_id === 'string') {
+      await recordAudit({
+        companyId: listing.company_id, action: 'catalog.photo', entity: 'catalog_products', entityId: catalogId,
+        summary: `Uploaded a new website photo for ${String(listing.title ?? listing.part_number ?? catalogId)}`,
+      });
+    }
     return Response.json(row);
   } catch (error) {
     console.error('catalog-image-upload route failed:', error);

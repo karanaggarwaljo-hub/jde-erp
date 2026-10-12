@@ -1,4 +1,8 @@
+import { after } from 'next/server';
 import { findPurchaseByFileHash } from '@/lib/db';
+import { checkCompanyAccess } from '@/lib/auth/dal';
+import { recordAudit } from '@/lib/audit-log';
+import { isBillMimeType, isFileHash, keepBill } from '@/lib/purchase-bills';
 import { generateJson } from '@/lib/ai/generate';
 import { aiScanErrorResponse } from '@/lib/ai/scan-error';
 
@@ -91,6 +95,28 @@ export async function POST(request: Request) {
       schemaName: 'purchase_document',
       attachments: [{ base64, mimeType }],
     });
+
+    // The bill itself is kept, so it can be opened from the purchase later on any device and go
+    // to Google Drive. Done after the answer: reading the bill is already the slow part. A scan
+    // that never becomes a purchase is cleared a week later (lib/purchase-bills.ts).
+    if (typeof companyId === 'string' && companyId && isFileHash(fileHash) && isBillMimeType(mimeType)) {
+      const access = await checkCompanyAccess(companyId);
+      if (access.ok) {
+        const fileName = typeof body.fileName === 'string' ? body.fileName : '';
+        const lines = Array.isArray((data as { items?: unknown[] })?.items) ? (data as { items: unknown[] }).items.length : 0;
+        after(async () => {
+          try {
+            await keepBill({ companyId, fileHash, bytes: new Uint8Array(Buffer.from(base64, 'base64')), mimeType, fileName, by: access.user.email });
+          } catch (error) {
+            console.error('Keeping a scanned supplier bill failed:', error);
+          }
+          await recordAudit({
+            companyId, action: 'bill.scan', entity: 'purchase_bills', entityId: null,
+            summary: `Read a supplier bill with AI${fileName ? ` ("${fileName}")` : ''}: ${lines} line${lines === 1 ? '' : 's'} found`,
+          });
+        });
+      }
+    }
 
     return Response.json(data);
   } catch (error) {

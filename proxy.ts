@@ -57,7 +57,8 @@ export function isServiceAuthenticatedPath(pathname: string): boolean {
 function isOwnerOnlyPath(pathname: string): boolean {
   if (pathname === '/api/companies/active') return false;
   if (pathname.startsWith('/api/companies/')) return true;
-  return matchesAny(pathname, new Set(), ['/settings', '/api/auth/invite', '/api/local/users', '/api/local/companies', '/api/backup']);
+  // The Log Book records what every member of staff did; Google Drive holds the owner's own Google key.
+  return matchesAny(pathname, new Set(), ['/settings', '/api/auth/invite', '/api/local/users', '/api/local/companies', '/api/backup', '/logbook', '/api/audit-log', '/api/drive']);
 }
 
 

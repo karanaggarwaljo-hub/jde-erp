@@ -81,6 +81,10 @@ export const BACKUP_ONLY_TABLES: Record<string, TableSchema> = {
   // The highest number each kind of document has reached (scripts/start-fresh.sql). Without it a
   // restore after a fresh start would let numbers already given to customers be issued again.
   number_floors: { primaryKey: 'prefix' },
+  // Which purchase each kept supplier bill belongs to, and where it is in Google Drive. The files
+  // themselves are in the Drive (or the jde-bill-inbox bucket); without these rows a restore would
+  // leave every bill in the Drive unreachable from its purchase.
+  purchase_bills: { primaryKey: 'id', companyScoped: true },
 };
 
 /**
@@ -88,8 +92,13 @@ export const BACKUP_ONLY_TABLES: Record<string, TableSchema> = {
  * be indistinguishable from "nobody noticed it". Both rebuild themselves from scratch:
  * ai_cache is stored AI answers, and adaptive_platform_outbox is a queue of events already sent.
  * Restoring either would be restoring stale work, not data.
+ *
+ * invoice_files is derived the same way: every invoice PDF is drawn again from its invoice. The two
+ * Google Drive tables hold the owner's Google client secret and each company's Drive key; a backup
+ * is a downloadable file, and those must never be in one. After a restore, Drive is connected again
+ * from Settings.
  */
-export const NOT_BACKED_UP = ['ai_cache', 'adaptive_platform_outbox'] as const;
+export const NOT_BACKED_UP = ['ai_cache', 'adaptive_platform_outbox', 'invoice_files', 'drive_app', 'drive_connections'] as const;
 
 /** Every table a restore has to put back. The superset the backup job walks. */
 export const BACKUP_TABLES: Record<string, TableSchema> = { ...TABLES, ...BACKUP_ONLY_TABLES };

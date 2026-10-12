@@ -8,6 +8,7 @@ import {
   Globe,
   LayoutDashboard,
   Package,
+  ScrollText,
   Settings,
   ShoppingCart,
   Truck,
@@ -81,6 +82,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { name: 'Reports', href: '/reports', icon: FileText },
       { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+      { name: 'Log Book', href: '/logbook', icon: ScrollText },
     ],
   },
   {

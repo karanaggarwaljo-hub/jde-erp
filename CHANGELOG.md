@@ -2,6 +2,52 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-12 — Supplier bills and invoices kept in your Google Drive, and a Log Book of everything
+
+**Supplier bills are kept now.** Before this, a bill you uploaded on the Purchases page was read
+by the AI and then thrown away: the ERP kept the purchase but not the bill. Now:
+
+- **Bills are kept.** A bill you scan is kept, and once you record the purchase it is attached to
+  that purchase.
+- **Bill / Attach bill buttons.** On the Purchases list, a purchase with a bill has a **Bill**
+  button, which opens it on any phone or computer signed in to the ERP. Any purchase without one
+  has **Attach bill**: pick a photo or a PDF. Phone photos are made smaller first.
+- **Unused scans are cleared.** A bill read by the AI but never recorded as a purchase is cleared
+  after a week.
+
+**Everything goes to your Google Drive.** In **Settings → Google Drive** you connect the ERP to
+your Google account once. After that:
+
+- **Where files go:** every supplier bill and every sales invoice PDF is saved to a folder called
+  **JDE ERP - (company name)**, sorted by year and month:
+  - "Supplier bills / 2026 / 10 October / PO-1023 - Sharma Traders - Bill 4471 - 2026-10-12.jpg"
+  - "Sales invoices / 2026 / 10 October / INV-1018 - Walk-in Customer - 2026-10-12.pdf"
+- **Opening them:** from the Google Drive app on your phone, or from the ERP as before.
+- **What the ERP can see:** only the files it made itself, nothing else in your Drive. Your Google
+  key is stored sealed and never shown.
+- **Invoice changes:** when an invoice changes (a payment, an edit), its PDF in Drive is replaced,
+  not copied. A deleted invoice's PDF goes to Drive's Bin, where you can bring it back for 30 days.
+- **If something goes wrong:** with no internet, Google busy or Drive disconnected, files wait in the
+  ERP and go across on their own that night. There is also a **Send waiting files now** button.
+- **One-time setup:** Google only lets an account's owner allow an app into its Drive. Settings
+  shows the steps (about five minutes, in the same Google project as your Gemini key).
+
+**The Log Book** (in the menu, under Money & reports) lists everything done in the ERP, with:
+
+- **What each entry shows:** the exact time (India time), who did it and which device it came from
+  ("Chrome on Windows", "Chrome on Android phone").
+- **Finding things:** filter by day or date range, by kind (sales, purchases, parts, expenses,
+  bills and Drive, website, sign-ins, backups) and by person, or search for a bill number, part or
+  name. **Download (Excel)** saves exactly what you filtered.
+- **New things it records:** sign-ins and sign-outs, wrong passwords for your staff's accounts,
+  staff invites, quotations, bills read by the AI, supplier bills attached and opened, invoice PDFs
+  opened, files saved to Google Drive, backups taken and downloaded, website photos, and which
+  company the website shows. Everything recorded before (sales, purchases, payments, stock, parts)
+  is still there.
+- **Nobody can change it:** it is written by the server as things happen, and no screen can edit
+  or delete it.
+- **Where it moved:** it replaces the old Audit Logs tab in Settings.
+
 ## 2026-10-12 — Every invoice saved as a small PDF you can open from any device
 
 **Every sales invoice is now saved as a PDF automatically**, the moment you save the bill, in the

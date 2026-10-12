@@ -2,7 +2,7 @@ import { dbErrorMessage, getRow, saveSalesInvoice } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { money, recordAudit } from '@/lib/audit-log';
 import { after } from 'next/server';
-import { ensureInvoicePdf } from '@/lib/invoice-archive';
+import { keepInvoicePdf } from '@/lib/invoice-drive';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,13 +73,8 @@ export async function POST(request: Request) {
     });
     // Saved after the response, so a sale is never slowed down by it. If it fails, opening the
     // PDF or the nightly job draws it instead.
-    after(async () => {
-      try {
-        await ensureInvoicePdf(companyId, savedId, { needBytes: false });
-      } catch (error) {
-        console.error('Saving the PDF of ' + savedId + ' failed:', error);
-      }
-    });
+    // Its PDF, then a copy in Google Drive when one is connected. Never throws.
+    after(() => keepInvoicePdf(companyId, savedId));
     return Response.json(invoice, { status: 201 });
   } catch (error) {
     console.error('POST /api/sales/save-invoice failed:', error);

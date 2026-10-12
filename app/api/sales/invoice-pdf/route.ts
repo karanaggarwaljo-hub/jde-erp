@@ -1,6 +1,7 @@
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { dbErrorMessage } from '@/lib/db';
 import { ensureInvoicePdf } from '@/lib/invoice-archive';
+import { recordAudit } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,10 @@ export async function GET(request: Request) {
     const pdf = await ensureInvoicePdf(companyId, invoiceId, { needBytes: !infoOnly });
     if (!pdf) return Response.json({ error: 'That invoice is not in this company.' }, { status: 404 });
     if (infoOnly) return Response.json({ size_bytes: pdf.sizeBytes, saved_at: pdf.savedAt });
+    await recordAudit({
+      companyId, action: 'invoice_pdf.open', entity: 'invoices', entityId: invoiceId,
+      summary: `Opened the PDF of ${invoiceId}`,
+    });
 
     const bytes = pdf.bytes ?? new Uint8Array();
     const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
