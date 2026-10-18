@@ -88,7 +88,18 @@ export function useCompanyTable<T extends Record<string, unknown>>(table: string
       setLoading(false);
       return;
     }
-    setLoading(true);
+    // Rows this browser already read, past their 15 seconds, are shown at once while the fresh
+    // read runs, instead of an empty screen. Going back to a screen used to blank it and show
+    // "Loading…" for as long as the server took; now it is there immediately and quietly brought
+    // up to date a moment later. Only on an ordinary visit: after a save (force) the screen waits
+    // for the new rows, so nothing out of date is shown as though it were already saved.
+    const seen = tableCache.get(key);
+    if (!force && seen && seen.expiresAt > 0) {
+      setRows(seen.rows as T[]);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
       setRows((await loadTableRows(table, activeCompany.id, force)) as T[]);
       setError(null);
