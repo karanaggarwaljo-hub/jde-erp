@@ -86,6 +86,9 @@ export const BACKUP_ONLY_TABLES: Record<string, TableSchema> = {
   // entries. Without them a restore loses where every rupee went.
   money_accounts: { primaryKey: 'id', companyScoped: true },
   money_entries: { primaryKey: 'id', companyScoped: true },
+  // The cheque register and cheque books (scripts/cheques.sql).
+  cheques: { primaryKey: 'id', companyScoped: true },
+  cheque_books: { primaryKey: 'id', companyScoped: true },
   // Which purchase each kept supplier bill belongs to, and where it is in Google Drive. The files
   // themselves are in the Drive (or the jde-bill-inbox bucket); without these rows a restore would
   // leave every bill in the Drive unreachable from its purchase.

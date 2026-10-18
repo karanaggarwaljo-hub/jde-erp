@@ -38,7 +38,7 @@ export async function POST(request: Request) {
       reference: reference.slice(0, 100),
     });
     // Out of the drawer or the bank account chosen, and the cheque if it was one.
-    await placeMoney(companyId, 'supplier_payments', String(result.payment_id), body?.money);
+    await placeMoney(companyId, 'supplier_payments', String(result.payment_id), body?.money, access.user.email);
     await recordAudit({
       companyId, action: 'supplier.payment', entity: 'supplier_payments', entityId: result.payment_id,
       summary: `Paid ${money(result.applied_total)} to a supplier across ${result.orders_paid} purchase order${result.orders_paid === 1 ? '' : 's'}`,

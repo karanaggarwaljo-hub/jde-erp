@@ -1,5 +1,5 @@
 import { checkCompanyAccess } from '@/lib/auth/dal';
-import { dbErrorMessage, deleteAllMoneyEntries, getStartFreshCounts, isBusinessRuleError, resetCompanyData } from '@/lib/db';
+import { dbErrorMessage, deleteAllCheques, deleteAllMoneyEntries, getStartFreshCounts, isBusinessRuleError, resetCompanyData } from '@/lib/db';
 import { backupDatabase } from '@/lib/db/backup';
 import { recordAudit } from '@/lib/audit-log';
 import { describeReset } from '@/lib/start-fresh';
@@ -64,6 +64,8 @@ export async function POST(request: Request) {
     // The cash book goes with the bills, payments and purchases it was made of. The accounts stay;
     // their opening balances are set again on the Cash & Bank page for the new start.
     await deleteAllMoneyEntries(companyId).catch((error) => console.error('Start fresh: clearing the cash book failed:', error));
+    // The cheque register goes with the payments it recorded; the cheque books stay.
+    await deleteAllCheques(companyId).catch((error) => console.error('Start fresh: clearing the cheque register failed:', error));
     const summary = describeReset(result);
     await recordAudit({
       companyId, action: 'company.start_fresh', entity: 'companies', entityId: companyId,

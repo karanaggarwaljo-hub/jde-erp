@@ -1,4 +1,4 @@
-import { dbErrorMessage, getRow, isCompanyScoped, isKnownTable, updateRow, deleteRow, deleteCompany } from '@/lib/db';
+import { dbErrorMessage, getRow, isCompanyScoped, isKnownTable, updateRow, deleteRow, deleteCompany, retireChequesFor } from '@/lib/db';
 import { requireOwnCompanyRow } from '@/lib/auth/dal';
 import { refuseGenericWrite } from '@/lib/generic-write-guard';
 import { resolveRequestCompanyId } from '@/lib/company-context';
@@ -75,6 +75,10 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
     const before = await getRow(table, decodedId);
     await deleteRow(table, decodedId);
+    // An expense paid by a cheque still waiting to clear: the cheque no longer pays anything.
+    if (table === 'expenses' && before?.company_id) {
+      await retireChequesFor(String(before.company_id), 'expenses', [decodedId], `Expense ${decodedId} was deleted`).catch((error) => console.error('Cancelling the cheque of a deleted expense failed:', error));
+    }
     await recordAudit({
       companyId: String(before?.company_id ?? ''), action: `${table}.delete`, entity: table, entityId: decodedId,
       summary: `Deleted ${before ? describeRow(table, before) : `a record from ${table}`}`,

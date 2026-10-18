@@ -2,6 +2,52 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-18 — Cheques: every cheque given and received, cheque books, and bounces done properly
+
+A new **Cheques** page (in the menu, under Money & reports, next to Cash & Bank).
+
+**Every cheque is in one register.** When you choose **Cheque** on Pay supplier, on a purchase, on
+an expense, on Receive payment or at billing, the cheque is entered here by itself. The **Given**
+and **Received** tabs show for each cheque:
+
+- the number and bank;
+- the date written on it, with how many days until it's due (or how many days overdue);
+- who it went to or came from, what it paid, the amount and its status.
+
+**What needs your attention:**
+
+- **Not yet cleared, Due this week, Post-dated and Bounced** totals at the top.
+- **A red warning when a bank account won't cover the cheques due this week.** It names the
+  account and how much you're short, so you can put money in before a cheque is presented.
+- Filter by status, and search by number, name or payment.
+
+**Bounced or stopped cheques now undo the payment.**
+
+- **Before:** a bounced cheque to a supplier still counted as paid, so the ERP showed you owing
+  less than you did.
+- **Now:** marking a cheque **Bounced** (or **Stop** for one you gave) undoes the payment it
+  made, so the supplier is owed again, or the customer's bills are owed again.
+- **What stays:** the cheque stays in the register marked "Payment undone".
+- **Cash & Bank:** its Bounced button does the same.
+
+**Cheque books.** Add each book with its first and last leaf number. Then:
+
+- **Next number filled in:** paying by cheque from that bank fills in the next unused number for
+  you.
+- **The book's page** shows every leaf: used, cancelled or still free.
+- **Cancel a spoiled leaf** (written wrongly or torn) so the numbers move on and the book shows
+  why.
+
+**Security cheques.** You can record a cheque you've given or taken as a guarantee. It doesn't
+change any balance; mark it **Returned** when you get it back.
+
+**Clean-up:**
+
+- Deleting a payment, expense or bill marks any of its cheques still waiting to clear as
+  cancelled, with the reason.
+- Start fresh clears the register; your cheque books stay.
+- Every change is in the Log Book under "Cash, bank & cheques".
+
 ## 2026-10-18 — Stock Planning: what to reorder, and what isn't selling
 
 A new **Stock Planning** page (in the menu, under Money & reports) has two lists.

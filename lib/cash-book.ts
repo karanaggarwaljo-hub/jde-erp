@@ -20,6 +20,7 @@ import {
   type MoneySourceTable,
 } from './db';
 import { shopDay } from './logbook';
+import { registerChequeFor } from './cheque-register';
 import { accountKindFor, isMoneyMethod, type MoneyEntryKind, type MoneyMethod } from './money-book';
 
 export const CASH_DRAWER = 'Cash drawer';
@@ -86,10 +87,12 @@ async function noteFailure(companyId: string, what: string, error: unknown): Pro
 
 /** Places a payment received, a supplier payment or an expense — rows that already exist — in an
  *  account. */
-export async function placeMoney(companyId: string, table: Exclude<MoneySourceTable, 'money_entries'>, id: string, raw: unknown): Promise<void> {
+export async function placeMoney(companyId: string, table: Exclude<MoneySourceTable, 'money_entries'>, id: string, raw: unknown, by = ''): Promise<void> {
   try {
     const money = await resolveMoney(companyId, raw);
     await setMoneyFields(companyId, table, id, moneyColumns(money));
+    // Paid by cheque: into the cheque register too (lib/cheque-register.ts).
+    await registerChequeFor(companyId, by, table, id, money, table === 'payments_received' ? 'in' : 'out');
   } catch (error) {
     await noteFailure(companyId, `placing ${table.replace(/_/g, ' ')} ${id}`, error);
   }
@@ -111,7 +114,7 @@ export async function recordMoney(companyId: string, by: string, entry: {
   if (!amount) return;
   try {
     const money = await resolveMoney(companyId, entry.raw);
-    await insertMoneyEntry({
+    const created = await insertMoneyEntry({
       company_id: companyId,
       date: /^\d{4}-\d{2}-\d{2}$/.test(entry.date) ? entry.date : shopDay(new Date()),
       kind: entry.kind,
@@ -123,6 +126,7 @@ export async function recordMoney(companyId: string, by: string, entry: {
       note: entry.note ?? null,
       created_by: by,
     });
+    await registerChequeFor(companyId, by, 'money_entries', created.id, money, amount > 0 ? 'in' : 'out');
   } catch (error) {
     await noteFailure(companyId, `${entry.kind.replace(/_/g, ' ')} of ₹${Math.abs(amount)} on ${entry.sourceId}`, error);
   }

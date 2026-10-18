@@ -1984,7 +1984,25 @@ export async function deleteMoneyEntriesFor(companyId: string, sourceType: strin
   const { data, error } = await getClient().from('jde_money_entries').delete()
     .eq('company_id', companyId).eq('source_type', sourceType).eq('source_id', sourceId).select('id');
   if (error) throw error;
-  return ((data as unknown[]) ?? []).length;
+  const ids = ((data as Array<{ id: string }>) ?? []).map((row) => row.id);
+  // A cheque that paid one of them is no longer paying anything.
+  await retireChequesFor(companyId, 'money_entries', ids, `${sourceId} was deleted`);
+  return ids.length;
+}
+
+/** Marks cheques still waiting to clear as cancelled when the payment, expense or entry they paid
+ *  is deleted, so the register never shows a cheque paying something that no longer exists. */
+export async function retireChequesFor(companyId: string, sourceTable: string, sourceIds: string[], why: string): Promise<void> {
+  if (sourceIds.length === 0) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const { error } = await getClient().from('jde_cheques').update({ status: 'cancelled', status_on: today, note: why })
+    .eq('company_id', companyId).eq('source_table', sourceTable).in('source_id', sourceIds).eq('status', 'pending');
+  if (error) throw error;
+}
+
+export async function deleteAllCheques(companyId: string): Promise<void> {
+  const { error } = await getClient().from('jde_cheques').delete().eq('company_id', companyId);
+  if (error) throw error;
 }
 
 export async function deleteMoneyEntry(companyId: string, id: string): Promise<boolean> {
@@ -2056,4 +2074,116 @@ export async function getPurchaseParty(companyId: string, poId: string): Promise
   const { data, error } = await getClient().from(supaTable('purchase_orders')).select('supplier').eq('company_id', companyId).eq('id', poId).maybeSingle();
   if (error) throw error;
   return String((data as { supplier?: unknown } | null)?.supplier ?? '');
+}
+
+// ── Cheques ────────────────────────────────────────────────────────────────────────────────────
+
+export type ChequeInsert = {
+  company_id: string;
+  direction: 'out' | 'in';
+  account_id: string | null;
+  bank_name?: string | null;
+  cheque_no: string | null;
+  cheque_date?: string | null;
+  issued_on: string;
+  party: string;
+  party_type?: 'supplier' | 'customer' | 'other' | null;
+  amount: number;
+  purpose?: 'payment' | 'security' | 'advance' | 'other';
+  status?: 'pending' | 'cleared' | 'bounced' | 'cancelled' | 'returned';
+  status_on?: string | null;
+  source_table?: string | null;
+  source_id?: string | null;
+  note?: string | null;
+  created_by?: string;
+};
+
+export async function listCheques(companyId: string): Promise<import('../cheques').ChequeRow[]> {
+  return allPages<import('../cheques').ChequeRow>((from, to) => getClient().from('jde_cheques').select('*')
+    .eq('company_id', companyId).order('id', { ascending: true }).range(from, to) as unknown as PromiseLike<Page<import('../cheques').ChequeRow>>);
+}
+
+export async function listChequeBooks(companyId: string): Promise<import('../cheques').ChequeBook[]> {
+  const { data, error } = await getClient().from('jde_cheque_books').select('*').eq('company_id', companyId).order('received_on', { ascending: true });
+  if (error) throw error;
+  return (data as import('../cheques').ChequeBook[]) ?? [];
+}
+
+export async function insertCheque(row: ChequeInsert): Promise<import('../cheques').ChequeRow> {
+  const { data, error } = await getClient().from('jde_cheques').insert(row).select('*').single();
+  if (error) throw error;
+  return data as import('../cheques').ChequeRow;
+}
+
+export async function getCheque(companyId: string, id: string): Promise<import('../cheques').ChequeRow | null> {
+  const { data, error } = await getClient().from('jde_cheques').select('*').eq('company_id', companyId).eq('id', id).maybeSingle();
+  if (error) throw error;
+  return (data as import('../cheques').ChequeRow | null) ?? null;
+}
+
+export async function getChequeForSource(companyId: string, sourceTable: string, sourceId: string): Promise<import('../cheques').ChequeRow | null> {
+  const { data, error } = await getClient().from('jde_cheques').select('*').eq('company_id', companyId)
+    .eq('source_table', sourceTable).eq('source_id', sourceId).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  return (data as import('../cheques').ChequeRow | null) ?? null;
+}
+
+export async function updateCheque(companyId: string, id: string, patch: Partial<Omit<ChequeInsert, 'company_id'>> & { reversed?: boolean }): Promise<void> {
+  const { error } = await getClient().from('jde_cheques').update(patch).eq('company_id', companyId).eq('id', id);
+  if (error) throw error;
+}
+
+export async function insertChequeBook(row: { company_id: string; account_id: string; first_no: string; last_no: string; received_on: string; note?: string | null }): Promise<import('../cheques').ChequeBook> {
+  const { data, error } = await getClient().from('jde_cheque_books').insert(row).select('*').single();
+  if (error) throw error;
+  return data as import('../cheques').ChequeBook;
+}
+
+export async function deleteChequeBook(companyId: string, id: string): Promise<boolean> {
+  const { data, error } = await getClient().from('jde_cheque_books').delete().eq('company_id', companyId).eq('id', id).select('id');
+  if (error) throw error;
+  return ((data as unknown[]) ?? []).length > 0;
+}
+
+/** What a cheque was written for, read from the payment, expense or entry it paid. */
+export async function getMoneySourceRow(companyId: string, table: MoneySourceTable, id: string): Promise<{ date: string; amount: number; party: string; partyType: 'supplier' | 'customer' | 'other' } | null> {
+  const columns: Record<MoneySourceTable, string> = {
+    payments_received: 'date, amount, customer',
+    supplier_payments: 'date, amount, supplier',
+    expenses: 'date, amount, category, description',
+    money_entries: 'date, amount, party, kind',
+  };
+  const { data, error } = await getClient().from(MONEY_SOURCE_TABLE[table]).select(columns[table]).eq('company_id', companyId).eq('id', id).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as unknown as Record<string, unknown>;
+  const party = table === 'payments_received' ? row.customer : table === 'supplier_payments' ? row.supplier : table === 'expenses' ? (row.description || row.category) : row.party;
+  const partyType = table === 'payments_received' ? 'customer' : table === 'supplier_payments' ? 'supplier'
+    : table === 'money_entries' && String(row.kind ?? '').startsWith('purchase') ? 'supplier'
+      : table === 'money_entries' && String(row.kind ?? '').startsWith('sale') ? 'customer' : 'other';
+  return { date: String(row.date ?? ''), amount: Math.abs(Number(row.amount) || 0), party: String(party ?? ''), partyType };
+}
+
+export async function reverseSupplierPayment(companyId: string, paymentId: string): Promise<{ reversed_amount: number; orders_touched: number }> {
+  const { data, error } = await getClient().rpc('jde_reverse_supplier_payment', { p_company_id: companyId, p_payment_id: paymentId }).single();
+  if (error) throw error;
+  return data as { reversed_amount: number; orders_touched: number };
+}
+
+export async function unpayPurchase(companyId: string, poId: string, amount: number): Promise<number> {
+  const { data, error } = await getClient().rpc('jde_unpay_purchase', { p_company_id: companyId, p_po_id: poId, p_amount: amount });
+  if (error) throw error;
+  return Number(data) || 0;
+}
+
+export async function unpayInvoice(companyId: string, invoiceId: string, amount: number): Promise<number> {
+  const { data, error } = await getClient().rpc('jde_unpay_invoice', { p_company_id: companyId, p_invoice_id: invoiceId, p_amount: amount });
+  if (error) throw error;
+  return Number(data) || 0;
+}
+
+export async function getMoneyEntry(companyId: string, id: string): Promise<import('../money-book').MoneyEntryRow | null> {
+  const { data, error } = await getClient().from('jde_money_entries').select('*').eq('company_id', companyId).eq('id', id).maybeSingle();
+  if (error) throw error;
+  return (data as import('../money-book').MoneyEntryRow | null) ?? null;
 }

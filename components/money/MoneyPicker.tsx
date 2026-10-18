@@ -86,6 +86,27 @@ export default function MoneyPicker({ companyId, direction, value, onChange, dis
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, direction]);
 
+  // A cheque you give: suggest the next unused leaf of that bank account's cheque books (Cheques
+  // page), unless a number is already typed. Only a suggestion — it can be changed.
+  const needsLeaf = direction === 'out' && value?.method === 'cheque' && Boolean(value.accountId) && !value.chequeNo;
+  const leafAccount = needsLeaf ? value!.accountId : '';
+  useEffect(() => {
+    if (!leafAccount || !companyId) return;
+    let active = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/cheques/next?companyId=${encodeURIComponent(companyId)}&accountId=${encodeURIComponent(leafAccount)}`);
+        const body = (await parseJsonOrThrow(res, '')) as { next: string | null };
+        if (active && body.next && value && !value.chequeNo && value.accountId === leafAccount) onChange({ ...value, chequeNo: body.next });
+      } catch {
+        // No suggestion; the number is typed by hand as before.
+      }
+    })();
+    return () => { active = false; };
+    // Asked once per account chosen for a cheque.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leafAccount, companyId]);
+
   const set = (patch: Partial<MoneyChoice>) => {
     const base: MoneyChoice = value ?? { method: 'cash', accountId: '', chequeNo: '', chequeDate: '' };
     const next = { ...base, ...patch };

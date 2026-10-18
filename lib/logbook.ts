@@ -17,7 +17,7 @@ export const LOG_KINDS: Array<{ key: LogKind; label: string; subjects: string[] 
   { key: 'website', label: 'Website', subjects: ['catalog_products', 'catalog', 'catalog_leads'] },
   { key: 'access', label: 'Sign-ins & staff', subjects: ['auth', 'users'] },
   { key: 'data', label: 'Company & backups', subjects: ['company', 'companies', 'backup'] },
-  { key: 'money', label: 'Cash & bank', subjects: ['money'] },
+  { key: 'money', label: 'Cash, bank & cheques', subjects: ['money', 'cheque'] },
 ];
 
 export function isLogKind(value: unknown): value is LogKind {
@@ -37,7 +37,7 @@ const SUBJECT_NAMES: Record<string, string> = {
   suppliers: 'Supplier', products: 'Part', stock_layers: 'Stock', inventory: 'Inventory', expense: 'Expense',
   expenses: 'Expense', bill: 'Supplier bill', invoice_pdf: 'Bill PDF', drive: 'Google Drive',
   catalog_products: 'Website listing', catalog: 'Website', catalog_leads: 'Website enquiry', auth: 'Sign-in',
-  users: 'Staff', company: 'Company', companies: 'Company', backup: 'Backup', money: 'Cash & bank',
+  users: 'Staff', company: 'Company', companies: 'Company', backup: 'Backup', money: 'Cash & bank', cheque: 'Cheque',
 };
 
 const VERB_NAMES: Record<string, string> = {
@@ -49,6 +49,7 @@ const VERB_NAMES: Record<string, string> = {
   setup: 'set up', sync: 'sync', storefront: 'website company', download: 'downloaded', auto: 'nightly backup',
   convert: 'turned into a bill', inbox_cleared: 'unused scans cleared', fitment: 'fitment',
   account: 'account', entry: 'entry', count: 'drawer counted', place: 'placed', cheque: 'cheque', entry_delete: 'entry deleted', failed: 'not recorded',
+  pending: 'not yet cleared', cleared: 'cleared', bounced: 'bounced', cancelled: 'cancelled', returned: 'returned', book: 'book added', add: 'entered', edit_cheque: 'changed',
 };
 
 /** "invoice.create" -> "Bill added". Unknown pairs fall back to the words themselves. */

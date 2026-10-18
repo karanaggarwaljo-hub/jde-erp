@@ -1,6 +1,7 @@
 import { requireOwner, checkCompanyAccess } from '@/lib/auth/dal';
 import { money as rupees, recordAudit } from '@/lib/audit-log';
 import { ensureMoneyAccounts } from '@/lib/cash-book';
+import { chequeForSource, setChequeStatus } from '@/lib/cheque-register';
 import {
   dbErrorMessage,
   deleteMoneyEntry,
@@ -180,6 +181,13 @@ export async function POST(request: Request) {
       const status = body?.status === 'cleared' || body?.status === 'bounced' || body?.status === 'pending' ? body.status : null;
       if (!status) return bad('Say whether the cheque cleared or bounced.');
       const clearedOn = status === 'cleared' ? (DAY.test(String(body?.clearedOn ?? '')) ? String(body.clearedOn) : shopDay(new Date())) : null;
+      // A cheque in the register moves through it, so a bounce also undoes what it paid
+      // (lib/cheque-register.ts). Only a cheque from before the register is updated in place.
+      const registered = await chequeForSource(companyId, table, String(body?.id ?? ''));
+      if (registered) {
+        const result = await setChequeStatus(companyId, owner.email, registered.id, status, clearedOn);
+        return Response.json({ ok: true, undone: result.undone });
+      }
       const ok = await setMoneyFields(companyId, table, String(body?.id ?? ''), { cheque_status: status, cleared_on: clearedOn });
       if (!ok) return bad('That record is not in this company.');
       await recordAudit({

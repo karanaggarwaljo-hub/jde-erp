@@ -16,6 +16,8 @@ test('the menu still reaches every screen it reached before', () => {
     '/cash-bank',
     // Added October 2026: reorder list and dead stock.
     '/stock-planning',
+    // Added October 2026: every cheque given and received.
+    '/cheques',
   ];
   assert.deepEqual(everyScreen.map((item) => item.href).sort(), [...before].sort());
 });
