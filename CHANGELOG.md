@@ -2,6 +2,33 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-18 — Stock Planning: what to reorder, and what isn't selling
+
+A new **Stock Planning** page (in the menu, under Money & reports) has two lists.
+
+**Reorder.** Parts that need ordering, worked out from how fast each one **actually sells**:
+
+- **What each row shows:** pieces billed over the last 90 days, how many days the stock on the
+  shelf lasts at that pace, and how many to order.
+- **When a part appears:** when its stock won't last the supplier's lead time, or it falls to its
+  own "reorder at" level.
+- **How much to order:** enough for the lead time plus the days you want covered (7 and 30 days
+  to start; change them at the top of the page and they're remembered).
+- **Most urgent first:** out of stock, then fewest days left.
+- **Grouped by supplier:** parts are grouped by who you last bought each from, with the last
+  price paid. **Draft purchase** opens the Purchases form already filled in with that supplier
+  and every part and quantity. Check it, adjust it, and save.
+
+**Dead stock.** Parts in stock that haven't sold in 90 days (or never sold since they came in):
+
+- **What each row shows:** the stock, what it cost you, when it last sold, and how long it's
+  been idle.
+- **At the top:** the total money tied up.
+- **To act on it:** offer them at a discount, return them, or stop reordering them.
+
+Drafts aren't counted as sales. Stock with no record of when it came in and no sale is left off
+the dead-stock list rather than guessed at.
+
 ## 2026-10-18 — Credit limits, and payment reminders on WhatsApp in one tap
 
 **Set how much each customer may owe.** On the Customers page, the gauge button on a customer

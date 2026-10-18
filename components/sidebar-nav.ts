@@ -3,6 +3,7 @@ import {
   ArrowLeftRight,
   BarChart3,
   BookOpen,
+  ClipboardList,
   Building2,
   FileText,
   Globe,
@@ -83,6 +84,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { name: 'Cash & Bank', href: '/cash-bank', icon: Landmark },
       { name: 'Reports', href: '/reports', icon: FileText },
+      { name: 'Stock Planning', href: '/stock-planning', icon: ClipboardList },
       { name: 'Analytics', href: '/analytics', icon: BarChart3 },
       { name: 'Log Book', href: '/logbook', icon: ScrollText },
     ],
