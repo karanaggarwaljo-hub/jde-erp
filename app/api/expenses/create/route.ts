@@ -1,6 +1,8 @@
 import { dbErrorMessage, createExpense } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { money, recordAudit } from '@/lib/audit-log';
+import { placeMoney } from '@/lib/cash-book';
+import { methodFromText } from '@/lib/money-book';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +31,11 @@ export async function POST(request: Request) {
       paidBy: String(paidBy ?? ''),
       mode: String(mode ?? ''),
     });
+    // Out of the drawer or the bank account chosen. A screen that still sends only the older free-text
+    // mode ("cheque", "UPI") has it read as the method.
+    if (typeof expense.id === 'string') {
+      await placeMoney(companyId, 'expenses', expense.id, body?.money ?? { method: methodFromText(String(mode ?? '')) ?? 'cash' });
+    }
     await recordAudit({
       companyId, action: 'expense.create', entity: 'expenses', entityId: typeof expense.id === 'string' ? expense.id : null,
       summary: `Logged an expense of ${money(numericAmount)}${category ? ` for ${String(category)}` : ''}`,

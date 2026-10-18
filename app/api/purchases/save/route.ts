@@ -1,6 +1,7 @@
 import { dbErrorMessage, isBusinessRuleError, savePurchase } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { money, recordAudit } from '@/lib/audit-log';
+import { recordMoney } from '@/lib/cash-book';
 import { after } from 'next/server';
 import { attachBillToPurchase, isFileHash, sendBillToDriveQuietly } from '@/lib/purchase-bills';
 
@@ -38,6 +39,11 @@ export async function POST(request: Request) {
       companyId, action: 'purchase.create', entity: 'purchase_orders', entityId: String(po.id ?? ''),
       summary: `Recorded purchase ${String(po.id ?? '')} from ${String(supplierName ?? '')} at ${money(Number(po.total ?? 0))}`,
       details: { total: po.total, paid: po.paid, status: po.status, lines: Array.isArray(items) ? items.length : 0 },
+    });
+    // Paid when it was recorded: out of the drawer or the bank account chosen (lib/cash-book.ts).
+    await recordMoney(companyId, access.user.email, {
+      kind: 'purchase_paid', date: String(po.date ?? date ?? ''), amount: -(Number(po.paid ?? 0)), raw: body?.money,
+      sourceType: 'purchase', sourceId: String(po.id ?? ''), party: String(supplierName ?? ''),
     });
     // Entered from a scanned bill: that bill, kept when it was read, now belongs to this purchase
     // and goes to Google Drive under its name. After the answer, so saving is never slowed by it.

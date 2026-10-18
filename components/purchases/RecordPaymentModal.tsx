@@ -12,7 +12,7 @@
  * the dialog reads from the page, and it is the map for later moving that state in here.
  */
 
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { money } from '@/lib/money';
 import type { PurchaseOrder } from '@/lib/purchase-types';
 
@@ -24,11 +24,13 @@ export type RecordPaymentModalProps = {
   savingPayment: boolean;
   setPayingOrder: (order: PurchaseOrder | null) => void;
   submitPayment: (event: FormEvent) => void;
+  /** "Paid by / from which account" (components/money/MoneyPicker.tsx), shown with the payment. */
+  moneySlot?: ReactNode;
 };
 
 export default function RecordPaymentModal(props: RecordPaymentModalProps) {
   const {
-    payingOrder, payAmount, setPayAmount, payError, savingPayment, setPayingOrder, submitPayment,
+    payingOrder, payAmount, setPayAmount, payError, savingPayment, setPayingOrder, submitPayment, moneySlot,
   } = props;
 
   return (
@@ -53,6 +55,7 @@ export default function RecordPaymentModal(props: RecordPaymentModalProps) {
           className="form-input" value={payAmount} disabled={savingPayment}
           onChange={(event) => setPayAmount(Number(event.target.value))} autoFocus />
       </div>
+      {moneySlot}
       <p className="text-muted" style={{ fontSize: '12px' }}>
         This reduces what you owe {payingOrder.supplier} by the same amount. Nothing about the stock
         already received changes.

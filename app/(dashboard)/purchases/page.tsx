@@ -3,6 +3,8 @@ import { currentIdentity, indexProductsById } from '@/lib/trade-history';
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import BillButton, { type PurchaseBillSummary } from '@/components/purchases/BillButton';
+import MoneyPicker from '@/components/money/MoneyPicker';
+import type { MoneyChoice } from '@/lib/money-book';
 import { useEntryIntent } from '@/lib/use-entry-intent';
 import {
   Plus,
@@ -243,6 +245,10 @@ export default function PurchasesPage() {
   // there was no way to say "this invoice is settled".
   const [payingOrder, setPayingOrder] = useState<PurchaseOrder | null>(null);
   const [payAmount, setPayAmount] = useState(0);
+  // How a purchase was paid and from which account (Cash & Bank) — one choice per payment screen.
+  const [purchaseMoney, setPurchaseMoney] = useState<MoneyChoice | null>(null);
+  const [importMoney, setImportMoney] = useState<MoneyChoice | null>(null);
+  const [payMoney, setPayMoney] = useState<MoneyChoice | null>(null);
   const [payError, setPayError] = useState('');
   const [savingPayment, setSavingPayment] = useState(false);
   const [returningOrder, setReturningOrder] = useState<PurchaseOrder | null>(null);
@@ -495,6 +501,7 @@ export default function PurchasesPage() {
         paid,
         status: 'received',
         supplierInvoiceNo,
+        money: purchaseMoney,
       });
 
       await Promise.all([reloadPurchaseOrders(), reloadPoItems(), reloadGrns(), reloadSuppliers(), reloadProducts()]);
@@ -557,7 +564,7 @@ export default function PurchasesPage() {
       // The order's paid amount and the supplier's balance move together inside one database
       // transaction, and how much is still owing is decided there — this figure is only a
       // request. An over-payment or a double submit comes back as a message, not a wrong balance.
-      await recordPurchasePayment({ companyId: activeCompany.id, poId: payingOrder.id, amount: payAmount });
+      await recordPurchasePayment({ companyId: activeCompany.id, poId: payingOrder.id, amount: payAmount, money: payMoney });
       await Promise.all([reloadPurchaseOrders(), reloadSuppliers()]);
       setFeedback(`₹${money(payAmount)} payment recorded against ${payingOrder.id}.`);
       setPayingOrder(null);
@@ -709,6 +716,7 @@ export default function PurchasesPage() {
         status: 'received',
         sourceFileHash: importPreview.fileHash,
         supplierInvoiceNo: importPreview.supplierInvoiceNo,
+        money: importMoney,
       });
 
       // The purchase is now safely recorded, so fill in what this document taught us about parts
@@ -1110,6 +1118,7 @@ export default function PurchasesPage() {
           payingOrder={payingOrder} payAmount={payAmount} setPayAmount={setPayAmount}
           payError={payError} savingPayment={savingPayment} setPayingOrder={setPayingOrder}
           submitPayment={submitPayment}
+          moneySlot={activeCompany ? <MoneyPicker companyId={activeCompany.id} direction="out" value={payMoney} onChange={setPayMoney} disabled={savingPayment} /> : null}
         />
       )}
 
@@ -1123,6 +1132,7 @@ export default function PurchasesPage() {
           importWarningCount={importWarningCount} importUndecidedCount={importUndecidedCount}
           importFillCount={importFillCount} importHasInvalidLine={importHasInvalidLine}
           importPaymentStatus={importPaymentStatus} setImportPaymentStatus={setImportPaymentStatus}
+          moneySlot={activeCompany ? <MoneyPicker companyId={activeCompany.id} direction="out" value={importMoney} onChange={setImportMoney} disabled={confirmingImport} /> : null}
           importAmountPaid={importAmountPaid} setImportAmountPaid={setImportAmountPaid}
           importPaidAmount={importPaidAmount}
           partOptions={partOptions} supplierOptions={supplierOptions} suppliers={suppliers}
@@ -1139,6 +1149,7 @@ export default function PurchasesPage() {
           supplierInvoiceNo={supplierInvoiceNo} setSupplierInvoiceNo={setSupplierInvoiceNo}
           partOptions={partOptions} lines={lines} setLines={setLines} updateLine={updateLine} lastPaid={lastPaid}
           paymentStatus={paymentStatus} setPaymentStatus={setPaymentStatus}
+          moneySlot={activeCompany ? <MoneyPicker companyId={activeCompany.id} direction="out" value={purchaseMoney} onChange={setPurchaseMoney} disabled={savingPurchase} /> : null}
           amountPaid={amountPaid} setAmountPaid={setAmountPaid}
           total={total} paidAmount={paidAmount}
           purchaseError={purchaseError} savingPurchase={savingPurchase}

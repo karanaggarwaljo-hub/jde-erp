@@ -1,4 +1,4 @@
-import { dbErrorMessage, isBusinessRuleError, deleteSalesInvoice } from '@/lib/db';
+import { dbErrorMessage, isBusinessRuleError, deleteSalesInvoice, deleteMoneyEntriesFor } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { recordAudit } from '@/lib/audit-log';
 import { after } from 'next/server';
@@ -22,6 +22,8 @@ export async function POST(request: Request) {
 
   try {
     await deleteSalesInvoice(companyId, invoiceId, customerId ?? null);
+    // The money paid at the counter on it leaves the cash book with it.
+    await deleteMoneyEntriesFor(companyId, 'invoice', invoiceId).catch((error) => console.error(`Removing the cash-book entries of deleted ${invoiceId} failed:`, error));
     await recordAudit({
       companyId, action: 'invoice.delete', entity: 'invoices', entityId: invoiceId,
       summary: `Deleted invoice ${invoiceId}`,

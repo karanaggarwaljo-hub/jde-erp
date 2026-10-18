@@ -6,6 +6,7 @@ import {
   Building2,
   FileText,
   Globe,
+  Landmark,
   LayoutDashboard,
   Package,
   ScrollText,
@@ -80,6 +81,7 @@ export const navGroups: NavGroup[] = [
   {
     label: 'Money & reports',
     items: [
+      { name: 'Cash & Bank', href: '/cash-bank', icon: Landmark },
       { name: 'Reports', href: '/reports', icon: FileText },
       { name: 'Analytics', href: '/analytics', icon: BarChart3 },
       { name: 'Log Book', href: '/logbook', icon: ScrollText },

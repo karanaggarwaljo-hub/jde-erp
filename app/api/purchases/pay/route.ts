@@ -1,6 +1,8 @@
 import { dbErrorMessage, isBusinessRuleError, recordPurchasePayment } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { money, recordAudit } from '@/lib/audit-log';
+import { recordMoney } from '@/lib/cash-book';
+import { shopDay } from '@/lib/logbook';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +34,11 @@ export async function POST(request: Request) {
 
   try {
     const po = await recordPurchasePayment({ companyId, poId, amount });
+    // Out of the drawer or the bank account chosen (lib/cash-book.ts).
+    await recordMoney(companyId, access.user.email, {
+      kind: 'purchase_payment', date: shopDay(new Date()), amount: -amount, raw: body?.money,
+      sourceType: 'purchase', sourceId: poId, party: String(po.supplier ?? ''),
+    });
     await recordAudit({
       companyId, action: 'purchase.payment', entity: 'purchase_orders', entityId: poId,
       summary: `Paid ${money(amount)} against purchase ${poId}`,

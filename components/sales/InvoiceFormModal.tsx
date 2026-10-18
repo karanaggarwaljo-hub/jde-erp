@@ -21,6 +21,8 @@
  */
 
 import { useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
+import MoneyPicker from '@/components/money/MoneyPicker';
+import type { MoneyChoice } from '@/lib/money-book';
 import { Plus, Minus, X, AlertTriangle, Keyboard } from 'lucide-react';
 import { money, paise } from '@/lib/money';
 import { lineDiscountPercent, lineGross, lineNet, type Totals } from '@/lib/invoice-totals';
@@ -46,6 +48,9 @@ export type InvoiceFormModalProps = {
   setCustomer: (value: string) => void;
   paymentStatus: PaymentStatus;
   setPaymentStatus: (value: PaymentStatus) => void;
+  companyId: string;
+  moneyChoice: MoneyChoice | null;
+  setMoneyChoice: (value: MoneyChoice) => void;
   amountPaid: number;
   setAmountPaid: (value: number) => void;
   discountPercent: number;
@@ -81,7 +86,7 @@ export type InvoiceFormModalProps = {
 export default function InvoiceFormModal(props: InvoiceFormModalProps) {
   const {
     lines, setLines, updateLine, invoiceDate, setInvoiceDate, customer, setCustomer,
-    paymentStatus, setPaymentStatus, amountPaid, setAmountPaid,
+    paymentStatus, setPaymentStatus, amountPaid, setAmountPaid, companyId, moneyChoice, setMoneyChoice,
     discountPercent, setDiscountPercent, gstPercent, setGstPercent, gstInclusive, setGstInclusive,
     totals, paidAmount, newOutstanding,
     editingInvoice, setEditingInvoice, editingDraft, invoiceError, savingInvoice, savingDraft,
@@ -405,6 +410,9 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                   <div className="form-group"><label className="form-label">Amount Received (₹)</label><input type="number" min="0" max={total} className="form-input" value={amountPaid} onChange={(event) => setAmountPaid(Number(event.target.value))} /></div>
                 )}
               </div>
+              {paymentStatus !== 'unpaid' && companyId && (
+                <MoneyPicker companyId={companyId} direction="in" value={moneyChoice} onChange={setMoneyChoice} />
+              )}
             </div>
 
             {/* Every figure below is read straight from the totals computed above — nothing

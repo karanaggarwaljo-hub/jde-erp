@@ -10,6 +10,8 @@ export type SalesInvoiceItemInput = {
 };
 
 export type SaveSalesInvoiceInput = {
+  /** How it was paid and through which drawer or bank account (Cash & Bank). */
+  money?: import('./money-book').MoneyChoice | null;
   companyId: string;
   /** Only meaningful (and required) when isEdit is true — omit/pass null on create, since the
    *  database generates the real id itself (globally unique across every company, not something
@@ -81,6 +83,8 @@ export function deleteSalesInvoice(companyId: string, invoiceId: string, custome
 export type PaymentAllocationInput = { invoiceId: string; amount: number };
 
 export type ReceiveCustomerPaymentInput = {
+  /** How it was paid and through which drawer or bank account (Cash & Bank). */
+  money?: import('./money-book').MoneyChoice | null;
   companyId: string;
   customerId: string;
   date: string;

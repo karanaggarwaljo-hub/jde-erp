@@ -13,6 +13,8 @@ export type ReturnableInvoiceItem = {
 };
 
 export type SalesReturnInput = {
+  /** How it was paid and through which drawer or bank account (Cash & Bank). */
+  money?: import('./money-book').MoneyChoice | null;
   companyId: string;
   invoiceId: string;
   customerId: string | null;

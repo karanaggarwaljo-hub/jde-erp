@@ -1,7 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
-import { requireOwner } from '@/lib/auth/dal';
-import { deleteSalesReturn, isBusinessRuleError } from '@/lib/db';
+import { getCurrentUser, requireOwner } from '@/lib/auth/dal';
+import { deleteMoneyEntriesFor, deleteSalesReturn, getInvoiceMoneyState, isBusinessRuleError } from '@/lib/db';
 import { money, recordAudit } from '@/lib/audit-log';
+import { recordMoney } from '@/lib/cash-book';
+import { shopDay } from '@/lib/logbook';
 import { damagedUnits, parseReturnLines } from '@/lib/sales-return-lines';
 
 export const dynamic = 'force-dynamic';
@@ -65,6 +67,8 @@ export async function POST(request: Request) {
   const items = parsed.lines;
 
   try {
+    // What the customer had paid before, to see whether this return hands money back.
+    const paidBefore = (await getInvoiceMoneyState(companyId, invoiceId))?.paid ?? 0;
     const { data, error } = await getDatabase().rpc('jde_create_sales_return', {
       p_company_id: companyId,
       p_invoice_id: invoiceId,
@@ -74,6 +78,16 @@ export async function POST(request: Request) {
     }).single();
     if (error) throw error;
     const created = data as { id?: string; credit_total?: number };
+    // The return lowers what the bill says was paid when the customer had paid more than the bill
+    // now comes to: that difference is cash handed back, so it leaves the drawer (or the account
+    // chosen). A return against an unpaid bill only reduces what is owed and moves no money.
+    const after = await getInvoiceMoneyState(companyId, invoiceId);
+    if (after && created.id) {
+      await recordMoney(companyId, (await getCurrentUser())?.email ?? '', {
+        kind: 'sale_refund', date: shopDay(new Date()), amount: -(paidBefore - after.paid), raw: value.money,
+        sourceType: 'sales_return', sourceId: String(created.id), party: after.customer, note: `Refund on ${invoiceId}`,
+      });
+    }
     const units = items.reduce((total, line) => total + line.qty, 0);
     await recordAudit({
       companyId, action: 'sales.return', entity: 'sales_returns', entityId: created.id ?? null,
@@ -117,7 +131,10 @@ export async function DELETE(request: Request) {
   await requireOwner();
 
   try {
-    return Response.json(await deleteSalesReturn(companyId, returnId));
+    const undone = await deleteSalesReturn(companyId, returnId);
+    // Its refund, if there was one, leaves the cash book with it.
+    await deleteMoneyEntriesFor(companyId, 'sales_return', returnId).catch((error) => console.error(`Removing the cash-book refund of ${returnId} failed:`, error));
+    return Response.json(undone);
   } catch (error) {
     console.error('DELETE /api/sales (credit note) failed:', error);
     if (isBusinessRuleError(error)) {
