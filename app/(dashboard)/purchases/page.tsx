@@ -4,6 +4,7 @@ import { currentIdentity, indexProductsById } from '@/lib/trade-history';
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import BillButton, { type PurchaseBillSummary } from '@/components/purchases/BillButton';
 import MoneyPicker from '@/components/money/MoneyPicker';
+import { PURCHASE_DRAFT_KEY, type PurchaseDraft } from '@/components/StockPlanning';
 import type { MoneyChoice } from '@/lib/money-book';
 import { useEntryIntent } from '@/lib/use-entry-intent';
 import {
@@ -292,7 +293,21 @@ export default function PurchasesPage() {
 
   // Arriving from the Day Book's Record tiles opens the purchase form straight away, and saving
   // brings the owner back to the Day Book, where the new purchase is already listed.
-  const { finishEntry } = useEntryIntent(PURCHASE_ENTRY_KINDS, () => openPurchaseModal());
+  const { finishEntry } = useEntryIntent(PURCHASE_ENTRY_KINDS, () => {
+    openPurchaseModal();
+    // Arrived from Stock Planning's "Draft purchase": fill in the supplier and the parts to order.
+    try {
+      const saved = sessionStorage.getItem(PURCHASE_DRAFT_KEY);
+      sessionStorage.removeItem(PURCHASE_DRAFT_KEY);
+      const draft = saved ? (JSON.parse(saved) as PurchaseDraft) : null;
+      if (draft && draft.companyId === activeCompany?.id && Array.isArray(draft.lines)) {
+        setSupplierName(draft.supplier);
+        setLines(draft.lines.map((line) => ({ description: String(line.description), quantity: Number(line.quantity) || 1, unit_price: Number(line.unit_price) || 0 })));
+      }
+    } catch {
+      // Nothing to fill in: the purchase opens empty, as it always did.
+    }
+  });
 
   const openReturnModal = async (order: PurchaseOrder) => {
     const originalLines = poItems.filter((item) => item.po_id === order.id);
