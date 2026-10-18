@@ -1,4 +1,4 @@
-import { dbErrorMessage, isBusinessRuleError, receiveCustomerPayment, deleteCustomerPayment, type PaymentAllocationInput } from '@/lib/db';
+import { dbErrorMessage, isBusinessRuleError, receiveCustomerPayment, deleteCustomerPayment, retireChequesFor, type PaymentAllocationInput } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { money, recordAudit } from '@/lib/audit-log';
 import { placeMoney } from '@/lib/cash-book';
@@ -45,7 +45,7 @@ export async function POST(request: Request) {
       allocations,
     });
     // Which drawer or bank it went into, and the cheque if it was one (lib/cash-book.ts).
-    await placeMoney(companyId, 'payments_received', String(result.payment_id), body?.money);
+    await placeMoney(companyId, 'payments_received', String(result.payment_id), body?.money, access.user.email);
     await recordAudit({
       companyId, action: 'payment.receive', entity: 'payments_received', entityId: result.payment_id,
       summary: `Received ${money(result.applied_total)} from a customer across ${allocations.length} invoice${allocations.length === 1 ? '' : 's'}`,
@@ -77,6 +77,7 @@ export async function DELETE(request: Request) {
 
   try {
     await deleteCustomerPayment(companyId, paymentId);
+    await retireChequesFor(companyId, 'payments_received', [paymentId], `Payment ${paymentId} was deleted`).catch((error) => console.error('Cancelling the cheque of a deleted payment failed:', error));
     await recordAudit({
       companyId, action: 'payment.delete', entity: 'payments_received', entityId: paymentId,
       summary: `Reversed customer payment ${paymentId}, putting its invoices back as they were`,

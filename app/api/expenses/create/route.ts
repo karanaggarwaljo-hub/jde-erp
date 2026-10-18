@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     // Out of the drawer or the bank account chosen. A screen that still sends only the older free-text
     // mode ("cheque", "UPI") has it read as the method.
     if (typeof expense.id === 'string') {
-      await placeMoney(companyId, 'expenses', expense.id, body?.money ?? { method: methodFromText(String(mode ?? '')) ?? 'cash' });
+      await placeMoney(companyId, 'expenses', expense.id, body?.money ?? { method: methodFromText(String(mode ?? '')) ?? 'cash' }, access.user.email);
     }
     await recordAudit({
       companyId, action: 'expense.create', entity: 'expenses', entityId: typeof expense.id === 'string' ? expense.id : null,

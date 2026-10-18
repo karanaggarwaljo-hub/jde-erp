@@ -202,7 +202,7 @@ export default function CashBank() {
                       <button type="button" className="btn btn-secondary btn-sm" disabled={busy}
                         onClick={() => act({ action: 'cheque', table: TABLE_OF[row.source], id: row.sourceId, status: 'cleared', clearedOn: today }, 'Cheque marked cleared — it now counts in the account.', 'Could not update the cheque.')}>Cleared</button>{' '}
                       <button type="button" className="btn btn-ghost btn-sm" disabled={busy}
-                        onClick={() => { if (window.confirm('Mark this cheque as bounced? It will not count in any balance. If it was a customer payment, delete that payment so the bills show as owed again.')) void act({ action: 'cheque', table: TABLE_OF[row.source], id: row.sourceId, status: 'bounced' }, 'Cheque marked bounced.', 'Could not update the cheque.'); }}>Bounced</button>
+                        onClick={() => { if (window.confirm('Mark this cheque as bounced? The payment it made is undone: what it paid is owed again, and it never counts in any balance.')) void act({ action: 'cheque', table: TABLE_OF[row.source], id: row.sourceId, status: 'bounced' }, 'Cheque marked bounced, and the payment it made was undone.', 'Could not update the cheque.'); }}>Bounced</button>
                     </td>
                   </tr>
                 ))}
