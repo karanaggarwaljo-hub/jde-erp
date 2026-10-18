@@ -1,13 +1,14 @@
 'use client';
 
 import { Fragment, useMemo, useState } from 'react';
-import { Plus, Phone, Mail, MapPin, Sparkles, Tag, IndianRupee, Users, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Phone, Mail, MapPin, Sparkles, Tag, IndianRupee, Users, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight, MessageCircle, Gauge } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
 import SegmentOfferModal from '@/components/SegmentOfferModal';
 import AddCustomerModal from '@/components/AddCustomerModal';
 import ReceivePaymentModal from '@/components/ReceivePaymentModal';
-import { isInvoiceOpen } from '@/lib/invoice-balance';
+import { invoiceBalanceDue, isInvoiceOpen } from '@/lib/invoice-balance';
+import { creditState, reminderText, whatsappLink } from '@/lib/credit';
 import {
   buildCustomerInsights,
   TIER_LABELS,
@@ -30,6 +31,8 @@ type Customer = {
   address: string;
   type: string;
   balance: number;
+  /** What this customer may owe at most; 0 or blank means no limit (lib/credit.ts). */
+  credit_limit?: number | string | null;
 };
 
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; discount_amount: number; settlement_write_off: number };
@@ -66,7 +69,12 @@ type CollectionQueueItem = {
 };
 
 export default function CustomersPage() {
-  const { rows: customers, loading, create } = useCompanyTable<Customer>('customers');
+  const { rows: customers, loading, create, update: updateCustomer, activeCompany } = useCompanyTable<Customer>('customers');
+  // Setting a customer's credit limit.
+  const [limitCustomer, setLimitCustomer] = useState<Customer | null>(null);
+  const [limitValue, setLimitValue] = useState('');
+  const [limitSaving, setLimitSaving] = useState(false);
+  const [limitError, setLimitError] = useState('');
   const { rows: invoices, loading: invoicesLoading } = useCompanyTable<Invoice>('invoices');
   // Needed to work out what each sale actually earned: line totals against the real FIFO cost
   // drawn for them. Without these two, the tiers could only rank revenue, which on this app's own
@@ -150,6 +158,17 @@ export default function CustomersPage() {
   }, [invoices]);
 
   const balanceOf = (customer: Customer) => Number(customer.balance) || 0;
+
+  /** A ready-to-send WhatsApp reminder with the customer's open bills, oldest first, or null when
+   *  their phone number cannot take WhatsApp. Nothing is sent until the owner presses send. */
+  const whatsappReminder = (customer: Customer): string | null => {
+    const bills = invoices
+      .filter((invoice) => invoice.customer === customer.name && isInvoiceOpen(invoice))
+      .map((invoice) => ({ id: invoice.id, date: invoice.date, due: invoiceBalanceDue(invoice) }));
+    return whatsappLink(customer.phone, reminderText({
+      shopName: activeCompany?.name ?? '', customerName: customer.name, bills, total: balanceOf(customer), shopPhone: activeCompany?.contact_phone,
+    }));
+  };
 
   // Every figure below is a straight roll-up of the customer rows on screen.
   const owing = customers.filter((customer) => balanceOf(customer) > 0);
@@ -250,8 +269,8 @@ export default function CustomersPage() {
                   <td><div className="font-semibold">{customer.name}</div><div className="text-muted text-sm">{customer.phone || customer.email || 'No contact details'}</div></td>
                   <td>{oldestInvoice ? <><span className="text-brand font-semibold">{oldestInvoice.id}</span><div className="text-muted text-sm">{openCount} open invoice{openCount === 1 ? '' : 's'} · {oldestInvoice.date}</div></> : <span className="text-muted">No linked open invoice</span>}</td>
                   <td>{oldestInvoice ? <span className={daysOutstanding > 30 ? 'badge badge-danger' : daysOutstanding > 0 ? 'badge badge-warning' : 'badge badge-info'}>{daysOutstanding === 0 ? 'Due today' : `${daysOutstanding} days`}</span> : <span className="text-muted">—</span>}</td>
-                  <td className="text-right"><strong className="text-danger">₹{Number(customer.balance).toLocaleString('en-IN')}</strong></td>
-                  <td className="text-center"><div className="flex gap-1 justify-center"><button className="btn btn-secondary btn-sm" onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /> Draft reminder</button><button className="btn btn-ghost btn-sm" onClick={() => openPayment(customer)}>Record received</button></div></td>
+                  <td className="text-right"><strong className="text-danger">₹{Number(customer.balance).toLocaleString('en-IN')}</strong>{creditState(customer.balance, customer.credit_limit).over && <div><span className="badge badge-danger">Over limit</span></div>}</td>
+                  <td className="text-center"><div className="flex gap-1 justify-center">{whatsappReminder(customer) ? <a className="btn btn-secondary btn-sm" href={whatsappReminder(customer)!} target="_blank" rel="noopener noreferrer" title="Opens WhatsApp with the reminder and the open bills typed in"><MessageCircle size={14} /> WhatsApp</a> : null}<button className="btn btn-secondary btn-sm" onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /> Draft reminder</button><button className="btn btn-ghost btn-sm" onClick={() => openPayment(customer)}>Record received</button></div></td>
                 </tr>
               ))}
               {collectionQueue.length === 0 && <tr><td colSpan={5}><div className="empty-state"><p className="empty-state-title">{loading || invoicesLoading ? 'Loading collections…' : 'No customer payments need follow-up'}</p><p className="empty-state-desc">{loading || invoicesLoading ? 'Checking customer balances and open invoices.' : 'All customer balances are cleared. New outstanding invoices will appear here.'}</p></div></td></tr>}
@@ -414,9 +433,14 @@ export default function CustomersPage() {
                           )}
                         </td>
                         <td>
-                          {balance > 0
-                            ? <span className="badge badge-warning">Outstanding</span>
-                            : <span className="badge badge-success">Settled</span>}
+                          {creditState(balance, customer.credit_limit).over
+                            ? <span className="badge badge-danger">Over limit</span>
+                            : balance > 0
+                              ? <span className="badge badge-warning">Outstanding</span>
+                              : <span className="badge badge-success">Settled</span>}
+                          {creditState(balance, customer.credit_limit).limit !== null && (
+                            <div className="text-muted text-sm">Limit ₹{Number(customer.credit_limit).toLocaleString('en-IN')} · {creditState(balance, customer.credit_limit).usedPercent?.toFixed(0)}% used</div>
+                          )}
                         </td>
                         <td>
                           <div className="flex items-center gap-2">
@@ -424,6 +448,7 @@ export default function CustomersPage() {
                             <button className="btn btn-ghost btn-sm" aria-label={`Draft payment reminder for ${customer.name}`} title="Draft a payment reminder" disabled={!customer.balance} onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /></button>
                             {/* Available whatever the grade — a New customer is often exactly who
                                 you want to make an opening offer to. */}
+                            <button className="btn btn-ghost btn-sm" aria-label={`Set the credit limit of ${customer.name}`} title="Credit limit" onClick={() => { setLimitCustomer(customer); setLimitValue(Number(customer.credit_limit) > 0 ? String(Number(customer.credit_limit)) : ''); setLimitError(''); }}><Gauge size={14} /></button>
                             <button className="btn btn-ghost btn-sm" aria-label={`Draft an offer for ${customer.name}`} title="Draft an offer" disabled={!insight} onClick={() => setOfferCustomerId(customer.id)}><Tag size={14} /></button>
                           </div>
                         </td>
@@ -503,10 +528,40 @@ export default function CustomersPage() {
         <PaymentReminderModal
           direction="receivable"
           name={reminderCustomer.name}
+          phone={reminderCustomer.phone}
           balance={reminderCustomer.balance}
           context={overdueContext(reminderCustomer.name)}
           onClose={() => setReminderCustomer(null)}
         />
+      )}
+
+      {limitCustomer && (
+        <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '420px' }} role="dialog" aria-modal="true" aria-labelledby="limit-title">
+          <form onSubmit={async (event) => {
+            event.preventDefault();
+            setLimitSaving(true);
+            setLimitError('');
+            try {
+              const value = Number(limitValue);
+              await updateCustomer(limitCustomer.id, { credit_limit: value > 0 ? value : null });
+              setFeedback(value > 0 ? `${limitCustomer.name} can now owe up to ₹${value.toLocaleString('en-IN')}.` : `${limitCustomer.name} has no credit limit.`);
+              setLimitCustomer(null);
+            } catch (error) {
+              setLimitError(error instanceof Error ? error.message : 'The limit was not saved.');
+            } finally {
+              setLimitSaving(false);
+            }
+          }}>
+            <div className="modal-header"><h3 id="limit-title" className="modal-title">Credit limit — {limitCustomer.name}</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setLimitCustomer(null)}>✕</button></div>
+            <div className="modal-body flex flex-col gap-3">
+              {limitError && <p className="form-error">{limitError}</p>}
+              <p className="text-muted" style={{ fontSize: 13 }}>Owes ₹{balanceOf(limitCustomer).toLocaleString('en-IN')} now. A bill that would take them past the limit asks before it is saved.</p>
+              <div className="form-group"><label className="form-label" htmlFor="limit-value">Most they may owe (₹)</label>
+                <input id="limit-value" type="number" min="0" step="1" className="form-input" autoFocus placeholder="Blank or 0 for no limit" value={limitValue} onChange={(event) => setLimitValue(event.target.value)} /></div>
+            </div>
+            <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setLimitCustomer(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={limitSaving}>{limitSaving ? 'Saving…' : 'Save limit'}</button></div>
+          </form>
+        </div></div>
       )}
 
       {/* Reads the insight live rather than capturing it when the button was clicked, so the

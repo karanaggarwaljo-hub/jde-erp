@@ -23,6 +23,7 @@
 import { useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import MoneyPicker from '@/components/money/MoneyPicker';
 import type { MoneyChoice } from '@/lib/money-book';
+import type { BillCreditCheck } from '@/lib/credit';
 import { Plus, Minus, X, AlertTriangle, Keyboard } from 'lucide-react';
 import { money, paise } from '@/lib/money';
 import { lineDiscountPercent, lineGross, lineNet, type Totals } from '@/lib/invoice-totals';
@@ -49,6 +50,8 @@ export type InvoiceFormModalProps = {
   paymentStatus: PaymentStatus;
   setPaymentStatus: (value: PaymentStatus) => void;
   companyId: string;
+  /** The customer's credit limit against this bill (lib/credit.ts), when they have one. */
+  creditCheck?: BillCreditCheck | null;
   moneyChoice: MoneyChoice | null;
   setMoneyChoice: (value: MoneyChoice) => void;
   amountPaid: number;
@@ -86,7 +89,7 @@ export type InvoiceFormModalProps = {
 export default function InvoiceFormModal(props: InvoiceFormModalProps) {
   const {
     lines, setLines, updateLine, invoiceDate, setInvoiceDate, customer, setCustomer,
-    paymentStatus, setPaymentStatus, amountPaid, setAmountPaid, companyId, moneyChoice, setMoneyChoice,
+    paymentStatus, setPaymentStatus, amountPaid, setAmountPaid, companyId, moneyChoice, setMoneyChoice, creditCheck,
     discountPercent, setDiscountPercent, gstPercent, setGstPercent, gstInclusive, setGstInclusive,
     totals, paidAmount, newOutstanding,
     editingInvoice, setEditingInvoice, editingDraft, invoiceError, savingInvoice, savingDraft,
@@ -472,6 +475,13 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
             </div>
           </div>
         </div>
+        {creditCheck?.limit != null && (creditCheck.over || (creditCheck.usedPercent ?? 0) >= 80) && (
+          <div className={`alert ${creditCheck.over ? 'alert-danger' : 'alert-warning'}`} role="status" style={{ margin: '0 20px 12px' }}>
+            {creditCheck.over
+              ? <>After this bill <strong>{customer}</strong> will owe <strong>₹{paise(creditCheck.after)}</strong> — <strong>₹{paise(creditCheck.overBy)} over</strong> their ₹{paise(creditCheck.limit)} credit limit.</>
+              : <>After this bill <strong>{customer}</strong> will owe ₹{paise(creditCheck.after)} — {creditCheck.usedPercent?.toFixed(0)}% of their ₹{paise(creditCheck.limit)} credit limit.</>}
+          </div>
+        )}
         <div className="modal-footer">
           <div className="text-muted text-sm" style={{ marginRight: 'auto', maxWidth: '340px' }}>
             {total <= 0

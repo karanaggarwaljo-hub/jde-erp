@@ -3,7 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 
-const emptyForm = { name: '', phone: '', email: '', gstin: '', address: '', type: 'retail' };
+const emptyForm = { name: '', phone: '', email: '', gstin: '', address: '', type: 'retail', credit_limit: '' };
 
 type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
 
@@ -23,7 +23,7 @@ export default function AddCustomerModal({ onClose, onSave, onCreated }: AddCust
     setError('');
     setSaving(true);
     try {
-      const created = await onSave({ ...form, balance: 0 });
+      const created = await onSave({ ...form, credit_limit: Number(form.credit_limit) > 0 ? Number(form.credit_limit) : null, balance: 0 });
       onCreated(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save this customer — please try again.');
@@ -46,6 +46,7 @@ export default function AddCustomerModal({ onClose, onSave, onCreated }: AddCust
           <div className="form-group"><label className="form-label">GSTIN</label><input className="form-input" placeholder="GST Number" value={form.gstin} onChange={(event) => setForm({ ...form, gstin: event.target.value })} /></div>
           <div className="form-group"><label className="form-label">Customer Type</label><select className="form-input form-select" value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}><option value="retail">Retail</option><option value="wholesale">Wholesale</option><option value="dealer">Dealer</option></select></div>
         </div>
+        <div className="form-group"><label className="form-label">Credit limit (₹)</label><input type="number" min="0" step="1" className="form-input" placeholder="Leave blank for no limit" value={form.credit_limit} onChange={(event) => setForm({ ...form, credit_limit: event.target.value })} /><span className="text-muted" style={{ fontSize: 12 }}>The most this customer may owe. Billing warns you before going over it.</span></div>
         <div className="form-group"><label className="form-label">Billing Address</label><textarea className="form-input" rows={2} placeholder="Full postal address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></div>
       </div>
       <div className="modal-footer"><span className="text-muted text-sm" style={{ marginRight: 'auto' }}>{SAVE_SHORTCUT_HINT}</span><button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Customer'}</button></div>

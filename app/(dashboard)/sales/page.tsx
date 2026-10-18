@@ -1,6 +1,7 @@
 'use client';
 import { currentIdentity, indexProductsById, savedLineLabel } from '@/lib/trade-history';
 import type { MoneyChoice } from '@/lib/money-book';
+import { checkBillCredit } from '@/lib/credit';
 import MoneyPicker from '@/components/money/MoneyPicker';
 
 import { FormEvent, useMemo, useState } from 'react';
@@ -305,6 +306,11 @@ export default function SalesPage() {
   const editingDraft = Boolean(editingInvoice && editingInvoice.status === DRAFT_STATUS);
   const editingOldOutstanding = editingInvoice && !editingDraft ? invoiceBalanceDue(editingInvoice) : 0;
   const newOutstanding = total - paidAmount;
+  // The customer's credit limit against what they will owe once this bill is saved. Drafts put
+  // nothing on an account, so they are never checked.
+  const creditCheck = selectedCustomer && !editingDraft
+    ? checkBillCredit({ balance: selectedCustomer.balance, limit: selectedCustomer.credit_limit, oldBillDue: editingOldOutstanding, newBillDue: Math.max(0, newOutstanding) })
+    : null;
   /** Anything left owing has to be owed by someone nameable — see the check in saveInvoice. */
   const creditSaleNeedsCustomer = total > 0 && paidAmount < total && !selectedCustomer;
 
@@ -780,6 +786,13 @@ export default function SalesPage() {
 
     const items = invoiceItemPayload(lines);
     const status = paidAmount >= total && total > 0 ? 'paid' : paidAmount > 0 ? 'partial' : 'unpaid';
+
+    // Over the customer's credit limit: allowed, but only on purpose.
+    if (creditCheck?.blocksQuietSave && !window.confirm(
+      `This bill takes ${selectedCustomer?.name} to ₹${paise(creditCheck.after)} owed — ₹${paise(creditCheck.overBy)} over their ₹${paise(creditCheck.limit ?? 0)} credit limit.
+
+Save it anyway?`,
+    )) return;
 
     // A sale that isn't fully paid is money owed — and money owed by "Walk-in Customer" can never
     // be chased, shows against no ledger, and lands in no customer's history. A cash sale that
@@ -1954,6 +1967,7 @@ ${stockLine}`)) return;
           customer={customer} setCustomer={setCustomer}
           paymentStatus={paymentStatus} setPaymentStatus={setPaymentStatus}
           companyId={activeCompany?.id ?? ''} moneyChoice={moneyChoice} setMoneyChoice={setMoneyChoice}
+          creditCheck={creditCheck}
           amountPaid={amountPaid} setAmountPaid={setAmountPaid}
           discountPercent={discountPercent} setDiscountPercent={setDiscountPercent}
           gstPercent={gstPercent} setGstPercent={setGstPercent}
