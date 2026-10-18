@@ -6,6 +6,7 @@ import { CalendarRange, Download, Printer, TrendingUp, TrendingDown, ShoppingBag
 import { printCurrentPage } from '@/lib/client-export';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import AIReportSummary from '@/components/AIReportSummary';
+import ProfitReport from '@/components/reports/ProfitReport';
 import { AGE_BUCKETS, agingFrom, type AgeBucket } from '@/lib/aging';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
 import { stockValueLookup, type StockLayerLike } from '@/lib/stock-value';
@@ -15,7 +16,7 @@ import {
 } from '@/lib/report-period';
 import { costOfSales, grossProfit, gstPosition, type GstPosition, type PeriodConsumption, type PeriodInvoiceItem } from '@/lib/period-accounts';
 
-type ReportType = 'pnl' | 'sales' | 'stock' | 'gst' | 'aging';
+type ReportType = 'pnl' | 'profit' | 'sales' | 'stock' | 'gst' | 'aging';
 
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; gst_amount: number | null; };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string; gst_amount: number | null };
@@ -165,7 +166,9 @@ export default function ReportsPage() {
   // to be sales less everything bought in the same window, which made buying stock look like a
   // loss and selling old stock look like pure profit. See lib/period-accounts.ts.
   const cost = costOfSales(periodInvoices, invoiceItems, consumptions);
-  const profit = grossProfit(invoices, cost);
+  // This period's sales against this period's cost. It used to be handed every invoice ever made,
+  // so any period but "All time" set all-time sales against one period's cost.
+  const profit = grossProfit(periodInvoices, cost);
   // Null when any line has no recorded cost: no figure at all beats a flattering one.
   const grossMargin = profit?.grossProfit ?? null;
   const netResult = grossMargin === null ? null : grossMargin - totalExpenses;
@@ -271,7 +274,8 @@ export default function ReportsPage() {
     figures_are_as_of_today_not_for_the_period: true,
   };
 
-  const summaryData: Record<ReportType, unknown> = {
+  // The Profit tab loads and summarises its own figures (components/reports/ProfitReport.tsx).
+  const summaryData: Record<Exclude<ReportType, 'profit'>, unknown> = {
     // The AI is handed exactly what is on screen, including what is NOT known. It used to be told a
     // gross margin derived from purchases and described it back as healthy trading.
     pnl: {
@@ -302,7 +306,7 @@ export default function ReportsPage() {
         <h1 className="page-title">Reports</h1>
         <p className="page-subtitle">{periodLine}</p>
       </div>
-      <div className="flex gap-2"><button className="btn btn-secondary" onClick={printCurrentPage}><Printer size={16} /> Print Report</button><a className="btn btn-primary" href={`/api/export?type=${reportType}${period.start ? `&from=${period.start}` : ''}${period.end ? `&to=${period.end}` : ''}`} download onClick={() => setFeedback('Report export started.')}><Download size={16} /> Export CSV</a></div>
+      <div className="flex gap-2"><button className="btn btn-secondary" onClick={printCurrentPage}><Printer size={16} /> Print Report</button>{reportType !== 'profit' && <a className="btn btn-primary" href={`/api/export?type=${reportType}${period.start ? `&from=${period.start}` : ''}${period.end ? `&to=${period.end}` : ''}`} download onClick={() => setFeedback('Report export started.')}><Download size={16} /> Export CSV</a>}</div>
     </div>
     {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
     {dataError && (
@@ -366,11 +370,15 @@ export default function ReportsPage() {
     )}
 
     <div className="flex items-center justify-between gap-4 mb-6" style={{ flexWrap: 'wrap' }}>
-      <div className="tabs report-tabs"><button className={`tab ${reportType === 'pnl' ? 'active' : ''}`} onClick={() => setReportType('pnl')}>Profit & Loss</button><button className={`tab ${reportType === 'sales' ? 'active' : ''}`} onClick={() => setReportType('sales')}>Sales Summary</button><button className={`tab ${reportType === 'stock' ? 'active' : ''}`} onClick={() => setReportType('stock')}>Stock Valuation</button><button className={`tab ${reportType === 'gst' ? 'active' : ''}`} onClick={() => setReportType('gst')}>GST Summary</button><button className={`tab ${reportType === 'aging' ? 'active' : ''}`} onClick={() => setReportType('aging')}>Aging</button></div>
+      <div className="tabs report-tabs"><button className={`tab ${reportType === 'pnl' ? 'active' : ''}`} onClick={() => setReportType('pnl')}>Profit & Loss</button><button className={`tab ${reportType === 'profit' ? 'active' : ''}`} onClick={() => setReportType('profit')}>Profit by Part</button><button className={`tab ${reportType === 'sales' ? 'active' : ''}`} onClick={() => setReportType('sales')}>Sales Summary</button><button className={`tab ${reportType === 'stock' ? 'active' : ''}`} onClick={() => setReportType('stock')}>Stock Valuation</button><button className={`tab ${reportType === 'gst' ? 'active' : ''}`} onClick={() => setReportType('gst')}>GST Summary</button><button className={`tab ${reportType === 'aging' ? 'active' : ''}`} onClick={() => setReportType('aging')}>Aging</button></div>
       <span className="text-muted text-sm">All figures in ₹, as billed — invoice and purchase totals as entered, not cash received</span>
     </div>
 
-    <AIReportSummary reportType={reportType} data={summaryData[reportType]} />
+    {reportType !== 'profit' && <AIReportSummary reportType={reportType} data={summaryData[reportType]} />}
+
+    {reportType === 'profit' && activeCompany && (
+      <ProfitReport companyId={activeCompany.id} companyName={activeCompany.name} period={period} periodLabel={periodRange} />
+    )}
 
     {reportType === 'pnl' && <>
       {receivablesAging.totals['90+'] > 0 && <div className="alert alert-warning mb-4">

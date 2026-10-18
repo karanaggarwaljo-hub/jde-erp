@@ -2,6 +2,47 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-18 — See what every part really earns and what it has cost you
+
+**Reports → Profit by Part** shows what each part earned in the period you pick:
+
+- **What each row shows:** how many were sold, the sales, what those pieces cost you, the profit
+  and the margin.
+- **Grouping:** switch between **by part**, **by category**, **by brand**, **by customer** and
+  **by supplier**. By supplier, a sale of stock bought from two suppliers counts toward each in
+  proportion.
+- **Sorting and finding:** sort by most profit, most sales, most sold, lowest margin or highest
+  margin; search; and **Download (Excel)**.
+- **Colours:** a margin under 10% is marked amber and a loss red.
+
+The figures are real, not estimates:
+
+- **Sales** are what customers were charged **before GST**, after line and bill discounts, less
+  returns.
+- **Cost** is what you actually paid for the pieces that were sold, from the purchase batches
+  they came out of.
+- **Returned goods:** goods returned in good condition go back on the shelf and stop counting. A
+  damaged return keeps its cost, because you paid for a part you can no longer sell.
+- **Lines with no recorded cost** (for example a line typed in by hand) are counted in sales but
+  never treated as pure profit, and the report says how many there are.
+
+**Each part's window** now shows **what it has earned** (last 90 days and all time, with profit
+and margin, and who buys it most) and **what it has cost you**:
+
+- every batch you bought, with the date, supplier, supplier bill number, quantity, how much is
+  still in stock, and the price;
+- the last price and how it compares with the time before, with a warning when the price has gone
+  up 5% or more;
+- the average you've paid, and what the stock on the shelf cost;
+- when more than one supplier has sold it to you, each supplier's latest price side by side, with
+  the cheapest marked.
+
+**Fixed: the P&L's gross profit for a chosen period.** It was setting every sale ever made
+against just that period's costs. It now uses only the period's own sales.
+
+Since the fresh start, Jai Durga Enterprises has no purchases or bills yet, so these screens
+will fill in as you record purchases (with what you paid) and make bills.
+
 ## 2026-10-12 — Supplier bills and invoices kept in your Google Drive, and a Log Book of everything
 
 **Supplier bills are kept now.** Before this, a bill you uploaded on the Purchases page was read

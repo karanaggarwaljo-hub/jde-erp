@@ -20,6 +20,7 @@ import { fetchPartDetail, type PartDetail } from '@/lib/client-part-overview';
 import { removePartPhoto, savePartPhoto } from '@/lib/client-part-photo';
 import type { PartPhotoRef } from '@/lib/part-photos';
 import PartPhoto from '@/components/PartPhoto';
+import PartCostPanel from '@/components/inventory/PartCostPanel';
 
 export type PartDetailModalProps = {
   companyId: string;
@@ -300,6 +301,8 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
                 <Fact label="Bought so far">{totals.boughtQty} for &#8377;{money(totals.boughtValue)}</Fact>
                 {totals.returnedQty > 0 && <Fact label="Came back">{totals.returnedQty}</Fact>}
               </section>
+
+              <PartCostPanel companyId={companyId} productId={productId} />
 
               <section style={{ marginBottom: 20 }}>
                 <h4 style={{ marginBottom: 8 }}>Other parts you could use instead</h4>

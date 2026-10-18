@@ -1790,3 +1790,144 @@ export async function getPurchaseForBill(companyId: string, purchaseId: string):
   if (error) throw error;
   return (data as { id: string; supplier: string; date: string; supplier_invoice_no: string | null } | null) ?? null;
 }
+
+// ── Profit and part cost history ──────────────────────────────────────────────────────────────────
+
+type Page<T> = { data: T[] | null; error: unknown };
+
+/** Every row of a filtered query, page by page (PostgREST hands back at most 1,000 at a time). The
+ *  query must be ordered on something unique so pages do not overlap. */
+async function allPages<T>(page: (from: number, to: number) => PromiseLike<Page<T>>): Promise<T[]> {
+  const rows: T[] = [];
+  for (let offset = 0; ; ) {
+    const { data, error } = await page(offset, offset + 999);
+    if (error) throw error;
+    const got = data ?? [];
+    if (got.length === 0) return rows;
+    rows.push(...got);
+    offset += got.length;
+  }
+}
+
+/** `column IN (...)` over any number of values, a slice at a time so the URL stays short. */
+async function inChunks<T>(values: string[], fetchChunk: (chunk: string[]) => Promise<T[]>): Promise<T[]> {
+  const out: T[] = [];
+  const unique = [...new Set(values.filter(Boolean))];
+  for (let index = 0; index < unique.length; index += 150) out.push(...await fetchChunk(unique.slice(index, index + 150)));
+  return out;
+}
+
+/** Which supplier each stock batch came from, through the purchase that created it. */
+async function batchSuppliersFor(companyId: string, layerIds: string[]): Promise<Record<string, string>> {
+  const client = getClient();
+  const layers = await inChunks(layerIds, async (chunk) => {
+    const { data, error } = await client.from('jde_stock_layers').select('id, source_po_id').eq('company_id', companyId).in('id', chunk);
+    if (error) throw error;
+    return (data as Array<{ id: string; source_po_id: string | null }>) ?? [];
+  });
+  const purchases = await inChunks(layers.map((layer) => layer.source_po_id ?? ''), async (chunk) => {
+    const { data, error } = await client.from(supaTable('purchase_orders')).select('id, supplier').eq('company_id', companyId).in('id', chunk);
+    if (error) throw error;
+    return (data as Array<{ id: string; supplier: string }>) ?? [];
+  });
+  const supplierOf = new Map(purchases.map((purchase) => [purchase.id, purchase.supplier]));
+  const out: Record<string, string> = {};
+  for (const layer of layers) {
+    const supplier = layer.source_po_id ? supplierOf.get(layer.source_po_id) : undefined;
+    if (supplier) out[layer.id] = supplier;
+  }
+  return out;
+}
+
+/** The lines of a set of invoices, what came back against them, and the batches they drew on. */
+async function salesDetailFor(companyId: string, invoiceIds: string[], productId?: string) {
+  const client = getClient();
+  const items = await inChunks(invoiceIds, async (chunk) => {
+    let query = client.from('jde_invoice_items')
+      .select('id, invoice_id, product_id, part_number, name, qty, line_total, discount_percent, discount_amount')
+      .eq('company_id', companyId).in('invoice_id', chunk);
+    if (productId) query = query.eq('product_id', productId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data as import('../part-profit').ProfitItem[]) ?? [];
+  });
+  // The bill's other lines are needed too when a single part is asked for: a whole-bill discount is
+  // shared across every line, so this part's share depends on the rest of the bill.
+  const allItems = productId
+    ? await inChunks([...new Set(items.map((item) => item.invoice_id))], async (chunk) => {
+      const { data, error } = await client.from('jde_invoice_items')
+        .select('id, invoice_id, product_id, part_number, name, qty, line_total, discount_percent, discount_amount')
+        .eq('company_id', companyId).in('invoice_id', chunk);
+      if (error) throw error;
+      return (data as import('../part-profit').ProfitItem[]) ?? [];
+    })
+    : items;
+  const itemIds = items.map((item) => item.id);
+  const [returnItems, consumptions] = await Promise.all([
+    inChunks(itemIds, async (chunk) => {
+      const { data, error } = await client.from('jde_sales_return_items').select('invoice_item_id, qty').eq('company_id', companyId).in('invoice_item_id', chunk);
+      if (error) throw error;
+      return (data as import('../part-profit').ProfitReturnItem[]) ?? [];
+    }),
+    inChunks(itemIds, async (chunk) => {
+      const { data, error } = await client.from('jde_stock_consumptions').select('invoice_item_id, layer_id, qty, unit_cost').eq('company_id', companyId).in('invoice_item_id', chunk);
+      if (error) throw error;
+      return (data as import('../part-profit').ProfitConsumption[]) ?? [];
+    }),
+  ]);
+  return { items: allItems, returnItems, consumptions };
+}
+
+/** Everything the Profit report needs for one company and period (inclusive YYYY-MM-DD days;
+ *  null means open-ended). */
+export async function getProfitSource(companyId: string, period: { start: string | null; end: string | null }) {
+  const client = getClient();
+  const invoices = await allPages<import('../part-profit').ProfitInvoice>((from, to) => {
+    let query = client.from(supaTable('invoices')).select('id, date, customer, total, discount_amount, gst_amount, gst_mode').eq('company_id', companyId);
+    if (period.start) query = query.gte('date', period.start);
+    if (period.end) query = query.lte('date', period.end);
+    return query.order('id', { ascending: true }).range(from, to);
+  });
+  const { items, returnItems, consumptions } = await salesDetailFor(companyId, invoices.map((invoice) => invoice.id));
+  const [parts, batchSuppliers] = await Promise.all([
+    allPages<import('../part-profit').ProfitPart>((from, to) => client.from(supaTable('products'))
+      .select('id, part_number, name, category, brand').eq('company_id', companyId).order('id', { ascending: true }).range(from, to)),
+    batchSuppliersFor(companyId, consumptions.map((draw) => draw.layer_id ?? '')),
+  ]);
+  return { invoices, items, returnItems, consumptions, parts, batchSuppliers };
+}
+
+/** One part's batches and the purchases behind them, and every sale of it — for the part window. */
+export async function getPartCostSource(companyId: string, productId: string) {
+  const client = getClient();
+  const { data: part, error: partError } = await client.from(supaTable('products'))
+    .select('id, part_number, name, category, brand').eq('company_id', companyId).eq('id', productId).maybeSingle();
+  if (partError) throw partError;
+  if (!part) return null;
+
+  const batches = await allPages<import('../part-cost-history').CostBatch>((from, to) => client.from('jde_stock_layers')
+    .select('id, unit_cost, qty_original, qty_remaining, created_at, source_po_id')
+    .eq('company_id', companyId).eq('product_id', productId).order('id', { ascending: true }).range(from, to));
+  const purchases = await inChunks(batches.map((batch) => batch.source_po_id ?? ''), async (chunk) => {
+    const { data, error } = await client.from(supaTable('purchase_orders')).select('id, supplier, date, supplier_invoice_no').eq('company_id', companyId).in('id', chunk);
+    if (error) throw error;
+    return (data as import('../part-cost-history').CostPurchase[]) ?? [];
+  });
+
+  // Every bill this part is on, then those bills in full (see salesDetailFor).
+  const soldOn = await allPages<{ id: string; invoice_id: string }>((from, to) => client.from('jde_invoice_items')
+    .select('id, invoice_id').eq('company_id', companyId).eq('product_id', productId).order('id', { ascending: true }).range(from, to));
+  const invoices = await inChunks(soldOn.map((line) => line.invoice_id), async (chunk) => {
+    const { data, error } = await client.from(supaTable('invoices')).select('id, date, customer, total, discount_amount, gst_amount, gst_mode').eq('company_id', companyId).in('id', chunk);
+    if (error) throw error;
+    return (data as import('../part-profit').ProfitInvoice[]) ?? [];
+  });
+  const { items, returnItems, consumptions } = await salesDetailFor(companyId, invoices.map((invoice) => invoice.id), productId);
+  const batchSuppliers = await batchSuppliersFor(companyId, consumptions.map((draw) => draw.layer_id ?? ''));
+  return {
+    part: part as import('../part-profit').ProfitPart,
+    batches,
+    purchases,
+    sales: { invoices, items, returnItems, consumptions, batchSuppliers },
+  };
+}
