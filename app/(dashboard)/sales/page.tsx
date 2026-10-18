@@ -1,5 +1,7 @@
 'use client';
 import { currentIdentity, indexProductsById, savedLineLabel } from '@/lib/trade-history';
+import type { MoneyChoice } from '@/lib/money-book';
+import MoneyPicker from '@/components/money/MoneyPicker';
 
 import { FormEvent, useMemo, useState } from 'react';
 import {
@@ -178,6 +180,8 @@ export default function SalesPage() {
   const [returnableItems, setReturnableItems] = useState<ReturnableInvoiceItem[]>([]);
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
   const [returnReason, setReturnReason] = useState('');
+  // Where a cash refund on the return comes out of, when the customer had already paid.
+  const [refundChoice, setRefundChoice] = useState<MoneyChoice | null>(null);
   // What condition each returned line came back in. Absent means resellable, which is what the
   // great majority of returns are and what the database assumes when a caller says nothing.
   const [returnConditions, setReturnConditions] = useState<Record<string, 'resellable' | 'damaged'>>({});
@@ -218,6 +222,8 @@ export default function SalesPage() {
   // (tax carved out of them). Only ever changes how the same typed numbers are read.
   const [gstInclusive, setGstInclusive] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('unpaid');
+  // How the money taken at the counter was paid and into which account (Cash & Bank).
+  const [moneyChoice, setMoneyChoice] = useState<MoneyChoice | null>(null);
   const [amountPaid, setAmountPaid] = useState(0);
   // Presentation-only view state: which payment slice of the list is on screen, and which page
   // of it. Neither touches what is loaded or what is saved.
@@ -802,6 +808,7 @@ export default function SalesPage() {
         // stock effect, draws fresh FIFO batches for the new lines, and adjusts the customer
         // balance, all as one transaction — a failure partway through leaves nothing half-done.
         await saveSalesInvoice({
+          money: moneyChoice,
           companyId: activeCompany.id,
           invoiceId: editingInvoice.id,
           isEdit: true,
@@ -839,6 +846,7 @@ export default function SalesPage() {
       // not guessed client-side — since id is globally unique across every company, not just the
       // ones this browser has loaded.
       const invoice = await saveSalesInvoice({
+        money: moneyChoice,
         companyId: activeCompany.id,
         invoiceId: null,
         isEdit: false,
@@ -1079,6 +1087,7 @@ ${stockLine}`)) return;
         customerId,
         reason: returnReason.trim(),
         items: selectedReturnItems,
+        money: refundChoice,
       });
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
       setFeedback(
@@ -1927,6 +1936,12 @@ ${stockLine}`)) return;
             </tr>)}</tbody>
           </table></div>
           <div className="form-group"><label className="form-label" htmlFor="sales-return-reason">Reason for return</label><input id="sales-return-reason" className="form-input" maxLength={500} placeholder="For example: damaged, wrong part, customer changed mind" value={returnReason} disabled={savingReturn} onChange={(event) => setReturnReason(event.target.value)} /></div>
+          {Number(returnCandidate?.paid ?? 0) > 0 && activeCompany && (
+            <div>
+              <p className="text-muted" style={{ fontSize: 12, marginBottom: 4 }}>This bill has been paid, so money may be handed back. If it is, it comes out of:</p>
+              <MoneyPicker companyId={activeCompany.id} direction="out" value={refundChoice} onChange={setRefundChoice} disabled={savingReturn} />
+            </div>
+          )}
           <div className="alert alert-warning" role="status">The selected items were charged ₹{returnItemValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}, after any discount on those lines. The credit note then applies this invoice&apos;s own discount and GST exactly as they were charged{returnCandidate.gst_mode === 'inclusive' ? ', with GST taken out of that amount rather than added to it' : ''}. Stock and customer balance will change only after confirmation.</div>
         </div>
         <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingReturn} onClick={() => setReturnCandidate(null)}>Cancel</button><button type="button" className="btn btn-danger" disabled={savingReturn || selectedReturnItems.length === 0 || !returnReason.trim()} onClick={saveSalesReturn}>{savingReturn ? 'Creating credit note…' : 'Confirm Return & Credit'}</button></div>
@@ -1938,6 +1953,7 @@ ${stockLine}`)) return;
           invoiceDate={invoiceDate} setInvoiceDate={setInvoiceDate}
           customer={customer} setCustomer={setCustomer}
           paymentStatus={paymentStatus} setPaymentStatus={setPaymentStatus}
+          companyId={activeCompany?.id ?? ''} moneyChoice={moneyChoice} setMoneyChoice={setMoneyChoice}
           amountPaid={amountPaid} setAmountPaid={setAmountPaid}
           discountPercent={discountPercent} setDiscountPercent={setDiscountPercent}
           gstPercent={gstPercent} setGstPercent={setGstPercent}

@@ -1,6 +1,7 @@
 import { dbErrorMessage, isBusinessRuleError, receiveCustomerPayment, deleteCustomerPayment, type PaymentAllocationInput } from '@/lib/db';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { money, recordAudit } from '@/lib/audit-log';
+import { placeMoney } from '@/lib/cash-book';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,6 +44,8 @@ export async function POST(request: Request) {
       note: typeof note === 'string' ? note.trim().slice(0, 500) : '',
       allocations,
     });
+    // Which drawer or bank it went into, and the cheque if it was one (lib/cash-book.ts).
+    await placeMoney(companyId, 'payments_received', String(result.payment_id), body?.money);
     await recordAudit({
       companyId, action: 'payment.receive', entity: 'payments_received', entityId: result.payment_id,
       summary: `Received ${money(result.applied_total)} from a customer across ${allocations.length} invoice${allocations.length === 1 ? '' : 's'}`,

@@ -14,7 +14,7 @@
  * what the dialog reads from the page, and it is the map for later moving that state in here.
  */
 
-import type { Dispatch, SetStateAction } from 'react';
+import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import type { ImportedLine } from '@/lib/client-import';
 import { FileText } from 'lucide-react';
 import { money } from '@/lib/money';
@@ -53,6 +53,8 @@ export type ImportReviewModalProps = {
   importHasInvalidLine: boolean;
   importPaymentStatus: PaymentStatus;
   setImportPaymentStatus: (value: PaymentStatus) => void;
+  /** "Paid by / from which account" (components/money/MoneyPicker.tsx), shown with the payment. */
+  moneySlot?: ReactNode;
   importAmountPaid: number;
   setImportAmountPaid: (value: number) => void;
   importPaidAmount: number;
@@ -70,7 +72,7 @@ export default function ImportReviewModal(props: ImportReviewModalProps) {
     importLinks, setImportLinks,
     importNewPartCount, importPriceChangeCount, importWarningCount, importUndecidedCount,
     importFillCount, importHasInvalidLine,
-    importPaymentStatus, setImportPaymentStatus, importAmountPaid, setImportAmountPaid,
+    importPaymentStatus, setImportPaymentStatus, moneySlot, importAmountPaid, setImportAmountPaid,
     importPaidAmount,
     partOptions, supplierOptions, suppliers,
     importError, confirmingImport, confirmImportedPO,
@@ -255,6 +257,7 @@ export default function ImportReviewModal(props: ImportReviewModalProps) {
           </div>
         )}
       </div>
+      {importPaymentStatus !== 'unpaid' && moneySlot}
 
       <div className="flex justify-between items-center invoice-summary">
         <div><span className="text-muted">Paid: </span><strong className="text-success">₹{money(importPaidAmount)}</strong></div>

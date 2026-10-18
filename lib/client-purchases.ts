@@ -8,6 +8,8 @@ export type PurchaseItemInput = {
 };
 
 export type SavePurchaseInput = {
+  /** How it was paid and through which drawer or bank account (Cash & Bank). */
+  money?: import('./money-book').MoneyChoice | null;
   companyId: string;
   supplierId: string | null;
   supplierName: string;
@@ -65,7 +67,7 @@ export function savePurchase(input: SavePurchaseInput) {
 /** Records a payment against one purchase order. The order's paid amount and the supplier's
  *  outstanding balance are updated together in a single database transaction; how much is still
  *  owing is decided there, not here. */
-export function recordPurchasePayment(input: { companyId: string; poId: string; amount: number }) {
+export function recordPurchasePayment(input: { companyId: string; poId: string; amount: number; money?: import('./money-book').MoneyChoice | null }) {
   return postJson<Record<string, unknown>>('/api/purchases/pay', input);
 }
 

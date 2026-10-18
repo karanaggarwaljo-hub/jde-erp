@@ -20,7 +20,7 @@
  * as a prop and the page owns them. The only state here belongs to the act of typing.
  */
 
-import { useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
+import { useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from 'react';
 import { Plus, Minus, X, AlertTriangle, Keyboard } from 'lucide-react';
 import { money } from '@/lib/money';
 import PartPicker from '@/components/PartPicker';
@@ -51,6 +51,8 @@ export type PurchaseFormModalProps = {
   setPaymentStatus: (value: PaymentStatus) => void;
   amountPaid: number;
   setAmountPaid: (value: number) => void;
+  /** "Paid by / from which account" (components/money/MoneyPicker.tsx), shown with the payment. */
+  moneySlot?: ReactNode;
   total: number;
   paidAmount: number;
   /** What this supplier last charged per part, keyed by part label. Empty for a new supplier. */
@@ -66,7 +68,7 @@ export default function PurchaseFormModal(props: PurchaseFormModalProps) {
     supplierName, setSupplierName, supplierOptions, purchaseDate, setPurchaseDate,
     supplierInvoiceNo, setSupplierInvoiceNo,
     partOptions, lines, setLines, updateLine,
-    paymentStatus, setPaymentStatus, amountPaid, setAmountPaid, total, paidAmount, lastPaid,
+    paymentStatus, setPaymentStatus, amountPaid, setAmountPaid, moneySlot, total, paidAmount, lastPaid,
     purchaseError, savingPurchase, setShowPurchaseModal, recordPurchase,
   } = props;
 
@@ -283,6 +285,7 @@ export default function PurchaseFormModal(props: PurchaseFormModalProps) {
               <div className="form-group"><label className="form-label">Amount Paid (₹)</label><input type="number" min="0" max={total} className="form-input" value={amountPaid} onChange={(event) => setAmountPaid(Number(event.target.value))} /></div>
             )}
           </div>
+          {paymentStatus !== 'unpaid' && moneySlot}
 
           <div className="flex justify-between items-center invoice-summary">
             <div><span className="text-muted">Line Items: </span><strong>{lines.length}</strong></div>

@@ -26,6 +26,7 @@ const KIND_COLOR: Record<LogKind, string> = {
   website: 'var(--chart-teal)',
   access: 'var(--ink-2)',
   data: 'var(--ink-2)',
+  money: 'var(--color-success)',
 };
 
 const PAGE = 100;

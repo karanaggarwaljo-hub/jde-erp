@@ -81,6 +81,11 @@ export const BACKUP_ONLY_TABLES: Record<string, TableSchema> = {
   // The highest number each kind of document has reached (scripts/start-fresh.sql). Without it a
   // restore after a fresh start would let numbers already given to customers be issued again.
   number_floors: { primaryKey: 'prefix' },
+  // Cash & Bank (scripts/cash-bank.sql): the drawer and bank accounts with their opening
+  // balances, and the money that moved inside bills, purchases and returns plus the owner's own
+  // entries. Without them a restore loses where every rupee went.
+  money_accounts: { primaryKey: 'id', companyScoped: true },
+  money_entries: { primaryKey: 'id', companyScoped: true },
   // Which purchase each kept supplier bill belongs to, and where it is in Google Drive. The files
   // themselves are in the Drive (or the jde-bill-inbox bucket); without these rows a restore would
   // leave every bill in the Drive unreachable from its purchase.

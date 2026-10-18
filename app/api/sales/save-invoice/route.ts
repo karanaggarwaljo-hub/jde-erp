@@ -3,6 +3,7 @@ import { checkCompanyAccess } from '@/lib/auth/dal';
 import { money, recordAudit } from '@/lib/audit-log';
 import { after } from 'next/server';
 import { keepInvoicePdf } from '@/lib/invoice-drive';
+import { recordMoney } from '@/lib/cash-book';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,9 +72,17 @@ export async function POST(request: Request) {
         after: { total: invoice.total, paid: invoice.paid, status: invoice.status, items: invoice.items },
       },
     });
-    // Saved after the response, so a sale is never slowed down by it. If it fails, opening the
-    // PDF or the nightly job draws it instead.
-    // Its PDF, then a copy in Google Drive when one is connected. Never throws.
+    // The money that changed hands at the counter with this save, into the cash book: all of it on
+    // a new bill; on an edit only the difference. Payments received later are their own records
+    // and are not part of this figure changing. Never throws (lib/cash-book.ts).
+    const counterMoney = Number(invoice.paid ?? 0) - (before ? Number(before.paid ?? 0) : 0);
+    await recordMoney(companyId, access.user.email, {
+      kind: 'sale_counter', date: String(invoice.date ?? date ?? ''), amount: counterMoney, raw: body?.money,
+      sourceType: 'invoice', sourceId: savedId, party: String(customerLabel ?? ''),
+      note: isEdit ? 'Changed when the bill was edited' : null,
+    });
+    // Its PDF, then a copy in Google Drive when one is connected — after the response, so a sale
+    // is never slowed down by it. Never throws.
     after(() => keepInvoicePdf(companyId, savedId));
     return Response.json(invoice, { status: 201 });
   } catch (error) {

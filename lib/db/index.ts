@@ -1931,3 +1931,129 @@ export async function getPartCostSource(companyId: string, productId: string) {
     sales: { invoices, items, returnItems, consumptions, batchSuppliers },
   };
 }
+
+// ── Cash & Bank ───────────────────────────────────────────────────────────────────────────────
+
+export type MoneyAccountRow = import('../money-book').MoneyAccount & { company_id: string; created_at: string };
+
+export async function listMoneyAccounts(companyId: string): Promise<MoneyAccountRow[]> {
+  const { data, error } = await getClient().from('jde_money_accounts').select('*').eq('company_id', companyId).order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data as MoneyAccountRow[]) ?? [];
+}
+
+export async function insertMoneyAccount(row: { company_id: string; name: string; kind: 'cash' | 'bank'; opening_balance: number; opening_date: string }): Promise<MoneyAccountRow> {
+  const { data, error } = await getClient().from('jde_money_accounts').insert(row).select('*').single();
+  if (error) throw error;
+  return data as MoneyAccountRow;
+}
+
+export async function updateMoneyAccount(companyId: string, id: string, patch: Partial<Pick<MoneyAccountRow, 'name' | 'opening_balance' | 'opening_date' | 'archived'>>): Promise<MoneyAccountRow | null> {
+  const { data, error } = await getClient().from('jde_money_accounts').update(patch).eq('company_id', companyId).eq('id', id).select('*').maybeSingle();
+  if (error) throw error;
+  return (data as MoneyAccountRow | null) ?? null;
+}
+
+export type MoneyEntryInsert = {
+  company_id: string;
+  date: string;
+  kind: import('../money-book').MoneyEntryKind;
+  account_id: string | null;
+  to_account_id?: string | null;
+  amount: number;
+  method?: string | null;
+  cheque_no?: string | null;
+  cheque_date?: string | null;
+  cheque_status?: 'pending' | 'cleared' | 'bounced' | null;
+  source_type?: string | null;
+  source_id?: string | null;
+  party?: string | null;
+  note?: string | null;
+  created_by?: string;
+};
+
+export async function insertMoneyEntry(row: MoneyEntryInsert): Promise<{ id: string }> {
+  const { data, error } = await getClient().from('jde_money_entries').insert(row).select('id').single();
+  if (error) throw error;
+  return data as { id: string };
+}
+
+/** Removes the money entries a deleted document made (a bill's counter payment, a return's
+ *  refund), so a deleted document leaves nothing behind in the cash book. */
+export async function deleteMoneyEntriesFor(companyId: string, sourceType: string, sourceId: string): Promise<number> {
+  const { data, error } = await getClient().from('jde_money_entries').delete()
+    .eq('company_id', companyId).eq('source_type', sourceType).eq('source_id', sourceId).select('id');
+  if (error) throw error;
+  return ((data as unknown[]) ?? []).length;
+}
+
+export async function deleteMoneyEntry(companyId: string, id: string): Promise<boolean> {
+  const { data, error } = await getClient().from('jde_money_entries').delete().eq('company_id', companyId).eq('id', id).select('id');
+  if (error) throw error;
+  return ((data as unknown[]) ?? []).length > 0;
+}
+
+export async function deleteAllMoneyEntries(companyId: string): Promise<void> {
+  const { error } = await getClient().from('jde_money_entries').delete().eq('company_id', companyId);
+  if (error) throw error;
+}
+
+/** The tables whose own rows carry where their money went. */
+export type MoneySourceTable = 'payments_received' | 'supplier_payments' | 'expenses' | 'money_entries';
+const MONEY_SOURCE_TABLE: Record<MoneySourceTable, string> = {
+  payments_received: 'jde_payments_received',
+  supplier_payments: 'jde_supplier_payments',
+  expenses: 'jde_expenses',
+  money_entries: 'jde_money_entries',
+};
+
+/** Places a payment, expense or entry in an account, or changes its cheque's state. */
+export async function setMoneyFields(companyId: string, table: MoneySourceTable, id: string, patch: {
+  account_id?: string | null;
+  method?: string | null;
+  cheque_no?: string | null;
+  cheque_date?: string | null;
+  cheque_status?: 'pending' | 'cleared' | 'bounced' | null;
+  cleared_on?: string | null;
+}): Promise<boolean> {
+  // Expenses keep their method in the older `mode` column.
+  const row: Record<string, unknown> = { ...patch };
+  if (table === 'expenses' && 'method' in row) {
+    row.mode = row.method;
+    delete row.method;
+  }
+  const { data, error } = await getClient().from(MONEY_SOURCE_TABLE[table]).update(row).eq('company_id', companyId).eq('id', id).select('id');
+  if (error) throw error;
+  return ((data as unknown[]) ?? []).length > 0;
+}
+
+/** Everything the cash book is made from, for one company. */
+export async function getMoneySource(companyId: string) {
+  const client = getClient();
+  const page = <T>(table: string, columns: string) => allPages<T>((from, to) => client.from(table).select(columns)
+    .eq('company_id', companyId).order('id', { ascending: true }).range(from, to) as unknown as PromiseLike<Page<T>>);
+  const cheque = 'cheque_no, cheque_date, cheque_status, cleared_on';
+  const [accounts, payments, supplierPayments, expenses, entries] = await Promise.all([
+    listMoneyAccounts(companyId),
+    page<import('../money-book').PaymentInRow>('jde_payments_received', `id, date, customer, amount, note, account_id, method, ${cheque}`),
+    page<import('../money-book').SupplierPaymentRow>('jde_supplier_payments', `id, date, supplier, amount, note, reference, account_id, method, ${cheque}`),
+    page<import('../money-book').ExpenseRow>('jde_expenses', `id, date, category, description, amount, mode, account_id, ${cheque}`),
+    page<import('../money-book').MoneyEntryRow>('jde_money_entries', `id, date, kind, account_id, to_account_id, amount, method, source_type, source_id, party, note, ${cheque}`),
+  ]);
+  return { accounts, payments, supplierPayments, expenses, entries };
+}
+
+/** A bill's paid figure and customer, for working out what changed hands when it is saved. */
+export async function getInvoiceMoneyState(companyId: string, invoiceId: string): Promise<{ paid: number; total: number; customer: string } | null> {
+  const { data, error } = await getClient().from(supaTable('invoices')).select('paid, total, customer').eq('company_id', companyId).eq('id', invoiceId).maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as { paid: unknown; total: unknown; customer: unknown };
+  return { paid: Number(row.paid) || 0, total: Number(row.total) || 0, customer: String(row.customer ?? '') };
+}
+
+export async function getPurchaseParty(companyId: string, poId: string): Promise<string> {
+  const { data, error } = await getClient().from(supaTable('purchase_orders')).select('supplier').eq('company_id', companyId).eq('id', poId).maybeSingle();
+  if (error) throw error;
+  return String((data as { supplier?: unknown } | null)?.supplier ?? '');
+}

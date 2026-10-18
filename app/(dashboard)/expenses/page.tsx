@@ -7,6 +7,8 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 import { createExpense } from '@/lib/client-expenses';
 import { useEntryIntent } from '@/lib/use-entry-intent';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import MoneyPicker from '@/components/money/MoneyPicker';
+import type { MoneyChoice } from '@/lib/money-book';
 
 type Expense = { id: string; company_id: string; category: string; description: string; amount: number; date: string; paid_by: string; mode: string };
 
@@ -28,6 +30,8 @@ const MODE_LABELS: Record<string, string> = {
   upi: 'UPI',
   cash: 'Cash',
   bank_transfer: 'Bank transfer',
+  bank: 'Bank transfer',
+  card: 'Card',
   cheque: 'Cheque',
 };
 
@@ -51,6 +55,8 @@ export default function ExpensesPage() {
   const [categorizeFailed, setCategorizeFailed] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [page, setPage] = useState(1);
+  // How it was paid and from which drawer or bank account (Cash & Bank).
+  const [expenseMoney, setExpenseMoney] = useState<MoneyChoice | null>(null);
   const [newExp, setNewExp] = useState({
     category: 'transport',
     description: '',
@@ -111,7 +117,8 @@ export default function ExpensesPage() {
         amount: Number(newExp.amount),
         date: new Date().toISOString().split('T')[0],
         paidBy: newExp.paid_by,
-        mode: newExp.mode,
+        mode: expenseMoney?.method ?? newExp.mode,
+        money: expenseMoney,
       });
       await reload();
       setShowModal(false);
@@ -335,15 +342,9 @@ export default function ExpensesPage() {
                     <label className="form-label">Paid By</label>
                     <input className="form-input" value={newExp.paid_by} onChange={e => setNewExp({ ...newExp, paid_by: e.target.value })} />
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Payment Mode</label>
-                    <select className="form-input form-select" value={newExp.mode} onChange={e => setNewExp({ ...newExp, mode: e.target.value })}>
-                      <option value="upi">UPI</option>
-                      <option value="cash">Cash</option>
-                      <option value="bank_transfer">Bank Transfer</option>
-                      <option value="cheque">Cheque</option>
-                    </select>
-                  </div>
+                  {activeCompany && (
+                    <MoneyPicker companyId={activeCompany.id} direction="out" value={expenseMoney} onChange={setExpenseMoney} disabled={savingExpense} />
+                  )}
                 </div>
               </div>
 

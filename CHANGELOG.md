@@ -2,6 +2,48 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-18 — Cash & Bank: know where every rupee is
+
+A new **Cash & Bank** page (in the menu, under Money & reports) shows how much is in the cash
+drawer and in each bank account **right now**, and every rupee in and out.
+
+**Every screen that takes or pays money now asks how.** Choose Cash, UPI, Card, Bank transfer or
+Cheque, and which drawer or bank account it went through. It remembers your last choice, so most
+of the time there's nothing to click. This covers:
+
+- billing when the customer pays at the counter;
+- receiving a payment later;
+- refunds on a customer return;
+- recording a purchase that's paid, and paying against a purchase later;
+- paying a supplier;
+- logging an expense.
+
+**On the Cash & Bank page:**
+
+- **A card for each account** with its balance. Click one to see its statement (Today, Last 7
+  days, This month, All, or dates you pick) with money in, money out and a running balance.
+- **Count the drawer** at the end of the day. Enter the cash you counted and it tells you if
+  you're over or short; it then records a correction so the book matches the drawer.
+- **Move money:** cash taken to the bank, or cash drawn from it.
+- **Put money in / Take money out / Bank charges.**
+- **Cheques waiting to clear**, with **Cleared** and **Bounced** buttons. A cheque only counts in
+  a balance from the day it clears.
+- **Not placed in an account:** payments and expenses recorded before this existed, or a UPI
+  payment taken before you added your bank account. Pick where each went and it joins that
+  account.
+- **Add bank account:** give it a name, its balance, and the day you start counting from.
+
+**To start:** open Cash & Bank, press the ⚙ on **Cash drawer**, and enter the cash in the drawer
+today. Then add your bank account(s) with today's balance.
+
+**What else changes:**
+
+- **Deleting** a bill or undoing a return removes its money from the book too, so nothing is
+  counted twice.
+- **Start fresh** now clears the cash book along with the bills. Your accounts stay.
+- **The Log Book** has a new "Cash & bank" kind for counts, transfers, cheques and the rest.
+- **Only the owner** can see balances. Staff still choose the account when they take a payment.
+
 ## 2026-10-18 — See what every part really earns and what it has cost you
 
 **Reports → Profit by Part** shows what each part earned in the period you pick:

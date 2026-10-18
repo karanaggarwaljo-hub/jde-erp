@@ -7,6 +7,8 @@ import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { useEntryIntent } from '@/lib/use-entry-intent';
 import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
+import MoneyPicker from '@/components/money/MoneyPicker';
+import type { MoneyChoice } from '@/lib/money-book';
 
 type Supplier = { id: string; company_id: string; name: string; category: string; phone: string; email: string; gstin: string; terms: number; balance: number };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string };
@@ -44,6 +46,8 @@ export default function SuppliersPage() {
   const [showModal, setShowModal] = useState(false);
   const [paymentSupplier, setPaymentSupplier] = useState<Supplier | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
+  // How the supplier was paid and from which account (Cash & Bank).
+  const [paymentMoney, setPaymentMoney] = useState<MoneyChoice | null>(null);
   // Fixed when the dialog opens and reused by every retry of that same payment, so a double-click
   // or a re-submit after a timeout lands on the payment already recorded instead of a second one.
   const [paymentReference, setPaymentReference] = useState('');
@@ -126,6 +130,7 @@ export default function SuppliersPage() {
           amount: paid,
           note: '',
           reference: paymentReference,
+          money: paymentMoney,
         }),
       });
       const result = await parseJsonOrThrow(res, 'Failed to record this payment.');
@@ -414,7 +419,7 @@ export default function SuppliersPage() {
 
     {paymentSupplier && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="payment-modal-title"><form onSubmit={recordPayment}>
       <div className="modal-header"><h3 id="payment-modal-title" className="modal-title">Record Vendor Payment</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingPayment} onClick={() => setPaymentSupplier(null)}>✕</button></div>
-      <div className="modal-body flex flex-col gap-4"><p>Outstanding balance for <strong>{paymentSupplier.name}</strong>: ₹{paymentSupplier.balance.toLocaleString()}</p><div className="form-group"><label className="form-label">Payment Amount (₹)</label><input type="number" min="1" max={paymentSupplier.balance} className="form-input" disabled={savingPayment} value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} /></div>
+      <div className="modal-body flex flex-col gap-4"><p>Outstanding balance for <strong>{paymentSupplier.name}</strong>: ₹{paymentSupplier.balance.toLocaleString()}</p><div className="form-group"><label className="form-label">Payment Amount (₹)</label><input type="number" min="1" max={paymentSupplier.balance} className="form-input" disabled={savingPayment} value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} /></div>{activeCompany && <MoneyPicker companyId={activeCompany.id} direction="out" value={paymentMoney} onChange={setPaymentMoney} disabled={savingPayment} />}
         {paymentError && <p className="form-error" role="alert">{paymentError}</p>}
       </div>
       <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingPayment} onClick={() => setPaymentSupplier(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={savingPayment}>{savingPayment ? 'Recording…' : 'Record Payment'}</button></div>

@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useMemo, useState } from 'react';
+import MoneyPicker, { type MoneyChoice } from '@/components/money/MoneyPicker';
 import { IndianRupee, Wand2 } from 'lucide-react';
 import { useCompany } from './CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -52,6 +53,7 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
   const [date, setDate] = useState(todayIso());
   const [amount, setAmount] = useState(0);
   const [note, setNote] = useState('');
+  const [moneyChoice, setMoneyChoice] = useState<MoneyChoice | null>(null);
   const [allocations, setAllocations] = useState<Record<string, number>>({});
   // Invoices the customer is settling by paying less than the balance: whatever is left after
   // this payment is forgiven rather than carried forward.
@@ -133,6 +135,7 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
         date,
         amount,
         note,
+        money: moneyChoice,
         allocations: Object.entries(allocations).map(([invoiceId, value]) => ({ invoiceId, amount: value })),
       });
       const failed: string[] = [];
@@ -210,9 +213,13 @@ export default function ReceivePaymentModal({ customerId, onClose, onRecorded }:
               </div>
               <div className="form-group">
                 <label className="form-label">Note (optional)</label>
-                <input type="text" className="form-input" placeholder="e.g. Cash, UPI, cheque #" disabled={saving} value={note} onChange={(event) => setNote(event.target.value)} />
+                <input type="text" className="form-input" placeholder="e.g. part payment for the March bills" disabled={saving} value={note} onChange={(event) => setNote(event.target.value)} />
               </div>
             </div>
+
+            {activeCompany && (
+              <MoneyPicker companyId={activeCompany.id} direction="in" value={moneyChoice} onChange={setMoneyChoice} disabled={saving} />
+            )}
 
             {selectedCustomer && (
               <div>

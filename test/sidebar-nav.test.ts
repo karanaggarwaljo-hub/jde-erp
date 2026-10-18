@@ -12,6 +12,8 @@ test('the menu still reaches every screen it reached before', () => {
     '/catalog-admin', '/settings',
     // Added October 2026: every activity with its time, who and which device.
     '/logbook',
+    // Added October 2026: cash in the drawer and each bank account.
+    '/cash-bank',
   ];
   assert.deepEqual(everyScreen.map((item) => item.href).sort(), [...before].sort());
 });

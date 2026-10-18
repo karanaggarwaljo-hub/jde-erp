@@ -6,7 +6,7 @@
  * A kind is a set of subjects, which is also how the server filters: `action LIKE 'invoice.%'`.
  */
 
-export type LogKind = 'sales' | 'purchases' | 'stock' | 'expenses' | 'files' | 'website' | 'access' | 'data';
+export type LogKind = 'sales' | 'purchases' | 'stock' | 'expenses' | 'files' | 'website' | 'access' | 'data' | 'money';
 
 export const LOG_KINDS: Array<{ key: LogKind; label: string; subjects: string[] }> = [
   { key: 'sales', label: 'Sales & customers', subjects: ['invoice', 'invoices', 'quotation', 'quotations', 'sales', 'sales_returns', 'payment', 'payments_received', 'invoice_writeoffs', 'customers'] },
@@ -17,6 +17,7 @@ export const LOG_KINDS: Array<{ key: LogKind; label: string; subjects: string[] 
   { key: 'website', label: 'Website', subjects: ['catalog_products', 'catalog', 'catalog_leads'] },
   { key: 'access', label: 'Sign-ins & staff', subjects: ['auth', 'users'] },
   { key: 'data', label: 'Company & backups', subjects: ['company', 'companies', 'backup'] },
+  { key: 'money', label: 'Cash & bank', subjects: ['money'] },
 ];
 
 export function isLogKind(value: unknown): value is LogKind {
@@ -36,7 +37,7 @@ const SUBJECT_NAMES: Record<string, string> = {
   suppliers: 'Supplier', products: 'Part', stock_layers: 'Stock', inventory: 'Inventory', expense: 'Expense',
   expenses: 'Expense', bill: 'Supplier bill', invoice_pdf: 'Bill PDF', drive: 'Google Drive',
   catalog_products: 'Website listing', catalog: 'Website', catalog_leads: 'Website enquiry', auth: 'Sign-in',
-  users: 'Staff', company: 'Company', companies: 'Company', backup: 'Backup',
+  users: 'Staff', company: 'Company', companies: 'Company', backup: 'Backup', money: 'Cash & bank',
 };
 
 const VERB_NAMES: Record<string, string> = {
@@ -47,6 +48,7 @@ const VERB_NAMES: Record<string, string> = {
   attach: 'attached', drive: 'saved to Drive', open: 'opened', connect: 'connected', disconnect: 'disconnected',
   setup: 'set up', sync: 'sync', storefront: 'website company', download: 'downloaded', auto: 'nightly backup',
   convert: 'turned into a bill', inbox_cleared: 'unused scans cleared', fitment: 'fitment',
+  account: 'account', entry: 'entry', count: 'drawer counted', place: 'placed', cheque: 'cheque', entry_delete: 'entry deleted', failed: 'not recorded',
 };
 
 /** "invoice.create" -> "Bill added". Unknown pairs fall back to the words themselves. */
