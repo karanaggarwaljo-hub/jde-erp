@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Sparkles, Copy, Check } from 'lucide-react';
+import { Sparkles, Copy, Check, MessageCircle } from 'lucide-react';
+import { whatsappLink } from '@/lib/credit';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 
 type Props = {
+  /** The customer's or supplier's phone, for sending the draft on WhatsApp. */
+  phone?: string | null;
   direction: 'receivable' | 'payable';
   name: string;
   balance: number;
@@ -12,7 +15,7 @@ type Props = {
   onClose: () => void;
 };
 
-export default function PaymentReminderModal({ direction, name, balance, context, onClose }: Props) {
+export default function PaymentReminderModal({ direction, name, balance, context, onClose, phone }: Props) {
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +87,10 @@ export default function PaymentReminderModal({ direction, name, balance, context
         </div>
         <div className="modal-footer">
           <button type="button" className="btn btn-secondary" onClick={onClose}>Close</button>
+          {/* Opens WhatsApp with this text typed in; nothing is sent until you press send there. */}
+          {whatsappLink(phone, message) && !loading && !error && message && (
+            <a className="btn btn-secondary" href={whatsappLink(phone, message)!} target="_blank" rel="noopener noreferrer"><MessageCircle size={14} /> Open in WhatsApp</a>
+          )}
           <button type="button" className="btn btn-primary" disabled={loading || !!error || !message} onClick={copy}>
             {copied ? <><Check size={14} /> Copied</> : <><Copy size={14} /> Copy message</>}
           </button>

@@ -2,6 +2,24 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-18 — Credit limits, and payment reminders on WhatsApp in one tap
+
+**Set how much each customer may owe.** On the Customers page, the gauge button on a customer
+sets their **credit limit**. You can also set it when adding a new customer. Leave it blank for
+no limit; nothing changes for anyone until you set one.
+
+- **While billing:** once the bill would bring them to 80% of their limit you see a yellow note,
+  and a red warning when it takes them **over**. Saving a bill that goes over asks you first, so
+  it only happens on purpose. Bills that lower what they owe never ask.
+- **In the customer list:** a customer over their limit shows **Over limit**, and every customer
+  with a limit shows how much of it is used.
+
+**Payment reminders on WhatsApp.** In **Collections to review** on the Customers page, each
+customer with a mobile number has a **WhatsApp** button. It opens WhatsApp with a polite reminder
+already written: the total due and every open bill with its date and amount, oldest first.
+Nothing is sent until you press send in WhatsApp. The AI-drafted reminder also has an **Open in
+WhatsApp** button now.
+
 ## 2026-10-18 — Cash & Bank: know where every rupee is
 
 A new **Cash & Bank** page (in the menu, under Money & reports) shows how much is in the cash
