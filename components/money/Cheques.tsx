@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { BookCheck, CalendarClock, CalendarDays, Plus, Search, Trash2, XCircle } from 'lucide-react';
+import { ArrowDownLeft, ArrowUpRight, BookCheck, CalendarDays, Check, List, MoreHorizontal, Plus, Search, ShieldCheck, Trash2, XCircle } from 'lucide-react';
 import { useCompany } from '@/components/CompanyProvider';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -12,10 +12,8 @@ import {
   dueDate,
   leavesOf,
   nextLeaf,
-  PURPOSE_LABEL,
   registerOrder,
   STATUS_LABEL,
-  summarise,
   type ChequeBook,
   type ChequeDirection,
   type ChequeRow,
@@ -26,17 +24,20 @@ type Bank = { id: string; name: string };
 type Data = { cheques: ChequeRow[]; books: ChequeBook[]; banks: Bank[]; collections: CollectionDay[]; today: string };
 /** A bank picked from the company's banks, or named new (which adds it). */
 type BankChoice = { accountId: string; newBank: string };
-type Tab = 'out' | 'in' | 'calendar' | 'books';
-type Filter = 'open' | ChequeStatus | 'all';
-type Dialog = { type: 'security'; direction: ChequeDirection } | { type: 'cancel-leaf' } | { type: 'book' } | { type: 'edit'; cheque: ChequeRow } | null;
+type View = 'upcoming' | 'calendar' | 'past';
+type Side = 'all' | ChequeDirection;
+type Dialog = { type: 'security'; direction: ChequeDirection } | { type: 'cancel-leaf' } | { type: 'book' } | { type: 'books' } | { type: 'edit'; cheque: ChequeRow } | null;
 
 const rupees = (value: number | string) => `₹${Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 const STATUS_BADGE: Record<ChequeStatus, string> = { pending: 'badge-warning', cleared: 'badge-success', bounced: 'badge-danger', cancelled: 'badge-muted', returned: 'badge-info' };
-const SOURCE_TEXT: Record<string, string> = { supplier_payments: 'Supplier payment', payments_received: 'Payment received', expenses: 'Expense', money_entries: 'Bill / purchase' };
+const shortDate = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const isMoney = (cheque: ChequeRow) => cheque.purpose !== 'security';
 
 /**
- * Cheques: every cheque given and received — what is still to clear and when, what bounced,
- * security cheques, and the leaves of each cheque book. lib/cheques.ts works out the figures;
+ * Cheques, kept simple: the cheques still to clear in one list, soonest first, each with one
+ * button for what usually happens next (Cleared, or Returned for a security cheque); a calendar;
+ * and the past. Bounced, Stop and Edit sit in each row's menu; cheque books, spoiled leaves and
+ * security cheques in the page's More menu. lib/cheques.ts works out the figures;
  * lib/cheque-register.ts moves a cheque on (and undoes what a bounced one paid).
  */
 export default function Cheques() {
@@ -46,10 +47,11 @@ export default function Cheques() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
-  const [tab, setTab] = useState<Tab>('out');
-  const [filter, setFilter] = useState<Filter>('open');
+  const [view, setView] = useState<View>('upcoming');
+  const [side, setSide] = useState<Side>('all');
   const [search, setSearch] = useState('');
   const [dialog, setDialog] = useState<Dialog>(null);
+  const [menu, setMenu] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { rows: suppliers } = useCompanyTable<{ id: string; name: string }>('suppliers');
 
@@ -70,9 +72,18 @@ export default function Cheques() {
     return () => { active = false; };
   }, [companyId, reloadKey]);
 
+  // A menu closes when anything outside it is clicked.
+  useEffect(() => {
+    if (!menu) return;
+    const close = (event: MouseEvent) => { if (!(event.target as HTMLElement).closest('[data-menu]')) setMenu(null); };
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [menu]);
+
   const act = async (body: Record<string, unknown>, done: string, fallback: string): Promise<boolean> => {
     setBusy(true);
     setError('');
+    setMenu(null);
     try {
       const res = await fetch('/api/cheques', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ companyId, ...body }) });
       const result = (await parseJsonOrThrow(res, fallback)) as { undone?: string | null };
@@ -90,29 +101,40 @@ export default function Cheques() {
 
   const today = data?.today ?? '';
   const banks = useMemo(() => data?.banks ?? [], [data]);
-  const accountName = (id: string | null) => banks.find((bank) => bank.id === id)?.name ?? '';
-  const direction: ChequeDirection = tab === 'in' ? 'in' : 'out';
+  const bankName = (id: string | null) => banks.find((bank) => bank.id === id)?.name ?? '';
   // Who a planned cheque can be for: suppliers, and anyone you have given a cheque to.
   const parties = useMemo(() => [...new Set([...suppliers.map((row) => row.name), ...(data?.cheques ?? []).filter((cheque) => cheque.direction === 'out').map((cheque) => cheque.party)].map((name) => (name ?? '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [suppliers, data]);
-  const summary = data ? summarise(data.cheques, direction, today) : null;
+
+  const pending = useMemo(() => (data?.cheques ?? []).filter((cheque) => cheque.status === 'pending'), [data]);
+  const toPay = pending.filter((cheque) => cheque.direction === 'out' && isMoney(cheque));
+  const toReceive = pending.filter((cheque) => cheque.direction === 'in' && isMoney(cheque));
+  const sum = (rows: ChequeRow[]) => rows.reduce((total, cheque) => total + (Number(cheque.amount) || 0), 0);
+  const nextOf = (rows: ChequeRow[]) => rows.map(dueDate).sort()[0];
+
   const rows = useMemo(() => {
     if (!data) return [];
     const term = search.trim().toLowerCase();
-    return registerOrder(data.cheques.filter((cheque) => cheque.direction === direction))
-      .filter((cheque) => filter === 'all' || (filter === 'open' ? cheque.status === 'pending' : cheque.status === filter))
-      .filter((cheque) => !term || `${cheque.cheque_no ?? ''} ${cheque.party} ${cheque.source_id ?? ''} ${cheque.bank_name ?? ''} ${cheque.note ?? ''}`.toLowerCase().includes(term));
-  }, [data, direction, filter, search]);
+    const wanted = data.cheques
+      .filter((cheque) => (view === 'past' ? cheque.status !== 'pending' : cheque.status === 'pending'))
+      // A spoiled leaf is not a cheque; it shows in its cheque book.
+      .filter((cheque) => !(cheque.status === 'cancelled' && !Number(cheque.amount) && !cheque.party))
+      .filter((cheque) => side === 'all' || cheque.direction === side)
+      .filter((cheque) => !term || `${cheque.cheque_no ?? ''} ${cheque.party} ${cheque.source_id ?? ''} ${cheque.bank_name ?? ''} ${cheque.note ?? ''} ${cheque.amount}`.toLowerCase().includes(term));
+    return registerOrder(wanted);
+  }, [data, view, side, search]);
 
   const move = (cheque: ChequeRow, status: ChequeStatus) => {
     const what = `cheque ${cheque.cheque_no || '(no number)'} ${cheque.direction === 'out' ? 'to' : 'from'} ${cheque.party || 'someone'} for ${rupees(cheque.amount)}`;
     const pays = cheque.purpose === 'payment' && cheque.source_id && !cheque.reversed;
+    const undo = pays ? `\n\nThe payment it made (${cheque.source_id}) will be undone, so the money is owed again.` : '';
     const ask: Record<ChequeStatus, string> = {
-      cleared: `Mark ${what} as cleared today?`,
-      bounced: `Mark ${what} as bounced?${pays ? `\n\nThe payment it made (${cheque.source_id}) will be undone: the money will be owed again.` : ''}`,
-      cancelled: `Stop / cancel ${what}?${pays ? `\n\nThe payment it made (${cheque.source_id}) will be undone: the money will be owed again.` : ''}`,
+      cleared: `Mark ${what} as cleared?`,
+      bounced: `Mark ${what} as bounced?${undo}`,
+      cancelled: `Stop ${what}?${undo}`,
       returned: `Mark security ${what} as returned?`,
       pending: `Mark ${what} as not yet cleared again?`,
     };
+    setMenu(null);
     if (!window.confirm(ask[status])) return;
     void act({ action: 'status', id: cheque.id, status, date: today }, `Cheque ${STATUS_LABEL[status].toLowerCase()}.`, 'Could not update the cheque.');
   };
@@ -125,162 +147,129 @@ export default function Cheques() {
         <div>
           <div className="eyebrow">Money</div>
           <h1 className="page-title">Cheques</h1>
-          <p className="page-subtitle">Every cheque you have given and received — what is still to clear and when, what bounced, and your cheque books.</p>
+          <p className="page-subtitle">Cheques you have given and received, and when each one is due.</p>
         </div>
-        <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-          {(tab === 'out' || tab === 'in') && (
-            <button type="button" className="btn btn-secondary" onClick={() => setDialog({ type: 'security', direction })}><Plus size={15} /> Security cheque</button>
+        <div style={{ position: 'relative' }} data-menu>
+          <button type="button" className="btn btn-secondary" aria-haspopup="menu" aria-expanded={menu === 'page'} onClick={() => setMenu(menu === 'page' ? null : 'page')}>
+            <MoreHorizontal size={15} /> More
+          </button>
+          {menu === 'page' && (
+            <MenuList align="right">
+              <MenuItem icon={<BookCheck size={14} />} onClick={() => { setMenu(null); setDialog({ type: 'books' }); }}>Cheque books{data?.books.length ? ` (${data.books.length})` : ''}</MenuItem>
+              <MenuItem icon={<XCircle size={14} />} disabled={banks.length === 0} onClick={() => { setMenu(null); setDialog({ type: 'cancel-leaf' }); }}>Cancel a spoiled leaf</MenuItem>
+              <MenuItem icon={<ShieldCheck size={14} />} onClick={() => { setMenu(null); setDialog({ type: 'security', direction: 'out' }); }}>Security cheque given</MenuItem>
+              <MenuItem icon={<ShieldCheck size={14} />} onClick={() => { setMenu(null); setDialog({ type: 'security', direction: 'in' }); }}>Security cheque taken</MenuItem>
+            </MenuList>
           )}
-          {tab === 'out' && <button type="button" className="btn btn-secondary" onClick={() => setDialog({ type: 'cancel-leaf' })} disabled={banks.length === 0}><XCircle size={15} /> Cancel a spoiled leaf</button>}
-          {tab === 'books' && <button type="button" className="btn btn-primary" onClick={() => setDialog({ type: 'book' })}><BookCheck size={15} /> Add cheque book</button>}
         </div>
       </div>
 
       {message && <div className="alert alert-success mb-4" role="status">{message}</div>}
       {error && <div className="alert alert-danger mb-4" role="alert">{error}</div>}
-      {data && banks.length === 0 && (tab === 'out' || tab === 'books') && (
-        <div className="alert alert-info mb-4" role="status">
-          Add your cheque book on the Cheque books tab, with the name of its bank. Cheques you give are then drawn on that bank, and the next leaf number is filled in for you.
+
+      {data && (
+        <div className="form-grid-2 mb-4">
+          <Total icon={<ArrowUpRight size={18} />} color="var(--color-danger)" title="You have to pay" amount={sum(toPay)} count={toPay.length} next={nextOf(toPay)} today={today}
+            onClick={() => { setView('upcoming'); setSide('out'); }} />
+          <Total icon={<ArrowDownLeft size={18} />} color="var(--color-success)" title="You will receive" amount={sum(toReceive)} count={toReceive.length} next={nextOf(toReceive)} today={today}
+            onClick={() => { setView('upcoming'); setSide('in'); }} />
         </div>
       )}
 
-      <div className="tabs mb-4" role="group" aria-label="Cheques view">
-        <button type="button" aria-pressed={tab === 'out'} className={`tab ${tab === 'out' ? 'active' : ''}`} onClick={() => setTab('out')}>Given<span className="tab-count">{data ? summarise(data.cheques, 'out', today).pendingCount : 0}</span></button>
-        <button type="button" aria-pressed={tab === 'in'} className={`tab ${tab === 'in' ? 'active' : ''}`} onClick={() => setTab('in')}>Received<span className="tab-count">{data ? summarise(data.cheques, 'in', today).pendingCount : 0}</span></button>
-        <button type="button" aria-pressed={tab === 'calendar'} className={`tab ${tab === 'calendar' ? 'active' : ''}`} onClick={() => setTab('calendar')}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><CalendarDays size={14} />Calendar</span></button>
-        <button type="button" aria-pressed={tab === 'books'} className={`tab ${tab === 'books' ? 'active' : ''}`} onClick={() => setTab('books')}>Cheque books<span className="tab-count">{data?.books.length ?? 0}</span></button>
+      <div className="flex gap-2 mb-4" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="tabs" role="group" aria-label="Show">
+          <button type="button" aria-pressed={view === 'upcoming'} className={`tab ${view === 'upcoming' ? 'active' : ''}`} onClick={() => setView('upcoming')}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><List size={14} />Upcoming<span className="tab-count">{pending.length}</span></span>
+          </button>
+          <button type="button" aria-pressed={view === 'calendar'} className={`tab ${view === 'calendar' ? 'active' : ''}`} onClick={() => setView('calendar')}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><CalendarDays size={14} />Calendar</span>
+          </button>
+          <button type="button" aria-pressed={view === 'past'} className={`tab ${view === 'past' ? 'active' : ''}`} onClick={() => setView('past')}>Past</button>
+        </div>
+        {view !== 'calendar' && (
+          <>
+            <div className="tabs" role="group" aria-label="Which cheques">
+              {(['all', 'out', 'in'] as Side[]).map((key) => (
+                <button key={key} type="button" aria-pressed={side === key} className={`tab ${side === key ? 'active' : ''}`} onClick={() => setSide(key)}>
+                  {key === 'all' ? 'All' : key === 'out' ? 'Given' : 'Received'}
+                </button>
+              ))}
+            </div>
+            <div style={{ position: 'relative', marginLeft: 'auto' }}>
+              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)' }} />
+              <input className="form-input" style={{ paddingLeft: 30, width: 210 }} placeholder="Search" value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search cheques" />
+            </div>
+          </>
+        )}
       </div>
 
-      {data && tab === 'calendar' && (
+      {data && view === 'calendar' && (
         <ChequeCalendar cheques={data.cheques} collections={data.collections ?? []} today={today} parties={parties} />
       )}
 
-      {data && (tab === 'out' || tab === 'in') && summary && (
-        <>
-          <div className="kpi-grid">
-            <Stat title="Not yet cleared" value={rupees(summary.pendingTotal)} note={`${summary.pendingCount} cheque${summary.pendingCount === 1 ? '' : 's'}`} color="var(--chart-amber)" />
-            <Stat title="Due this week" value={rupees(summary.dueSoonTotal)} note={`${summary.dueSoonCount} dated on or before ${shiftDay(today, 7)}`} color="var(--color-danger)" />
-            <Stat title="Post-dated" value={rupees(summary.postDatedTotal)} note={`${summary.postDatedCount} dated later`} color="var(--chart-blue)" />
-            <Stat title="Bounced" value={rupees(summary.bouncedTotal)} note={`${summary.bouncedCount} in all`} color="var(--chart-pink)" />
-          </div>
-
-          <div className="card">
-            <div className="card-header" style={{ flexWrap: 'wrap', gap: 10 }}>
-              <div className="tabs" role="group" aria-label="Show">
-                {(['open', 'cleared', 'bounced', 'cancelled', 'all'] as Filter[]).map((key) => (
-                  <button key={key} type="button" aria-pressed={filter === key} className={`tab ${filter === key ? 'active' : ''}`} onClick={() => setFilter(key)}>
-                    {key === 'open' ? 'Not yet cleared' : key === 'all' ? 'All' : STATUS_LABEL[key as ChequeStatus]}
-                  </button>
-                ))}
-              </div>
-              <div style={{ position: 'relative' }}>
-                <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)' }} />
-                <input className="form-input" style={{ paddingLeft: 30, width: 230 }} placeholder="Number, name, payment…" value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search cheques" />
-              </div>
+      {data && view !== 'calendar' && (
+        <div className="card" style={{ padding: 0 }}>
+          {rows.length === 0 && (
+            <div className="empty-state">
+              <p className="empty-state-title">{view === 'upcoming' ? 'No cheque is waiting to clear' : 'Nothing here yet'}</p>
+              {view === 'upcoming' && <p className="empty-state-desc">Tick &ldquo;Paid by cheque&rdquo; when you pay a supplier, or &ldquo;Received by cheque&rdquo; when a customer pays, and the cheque shows up here.</p>}
             </div>
-            <div className="table-wrap">
-              <table className="erp-table">
-                <thead><tr><th>Cheque</th><th>Date on cheque</th><th>{direction === 'out' ? 'To' : 'From'}</th><th>For</th><th className="text-right">Amount</th><th>Status</th><th /></tr></thead>
-                <tbody>
-                  {rows.length === 0 && <tr><td colSpan={7} className="text-muted">{filter === 'open' ? `No cheque ${direction === 'out' ? 'given' : 'received'} is waiting to clear.` : 'Nothing here.'}</td></tr>}
-                  {rows.map((cheque) => {
-                    const due = dueDate(cheque);
-                    const days = daysUntil(due, today);
-                    return (
-                      <tr key={cheque.id}>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{cheque.cheque_no ? <span className="pn-chip">{cheque.cheque_no}</span> : <span className="text-muted">No number</span>}</div>
-                          <div className="text-muted text-sm">{cheque.direction === 'out' ? accountName(cheque.account_id) : (cheque.bank_name || accountName(cheque.account_id))}</div>
-                        </td>
-                        <td style={{ whiteSpace: 'nowrap' }}>
-                          {cheque.cheque_date ?? <span className="text-muted">—</span>}
-                          {cheque.status === 'pending' && (
-                            <div><span className={`badge ${days < 0 ? 'badge-danger' : days <= 7 ? 'badge-warning' : 'badge-info'}`}>
-                              {days < 0 ? `${-days} day${days === -1 ? '' : 's'} ago` : days === 0 ? 'Today' : `In ${days} day${days === 1 ? '' : 's'}`}
-                            </span></div>
-                          )}
-                          <div className="text-muted text-sm">{direction === 'out' ? 'Given' : 'Received'} {cheque.issued_on}</div>
-                        </td>
-                        <td>{cheque.party || <span className="text-muted">—</span>}</td>
-                        <td>
-                          {cheque.purpose === 'payment' ? (SOURCE_TEXT[cheque.source_table ?? ''] ?? 'Payment') : PURPOSE_LABEL[cheque.purpose]}
-                          {cheque.source_id && <div className="text-muted text-sm">{cheque.source_id}</div>}
-                          {cheque.note && <div className="text-muted text-sm">{cheque.note}</div>}
-                        </td>
-                        <td className="text-right font-semibold">{Number(cheque.amount) ? rupees(cheque.amount) : <span className="text-muted">—</span>}</td>
-                        <td>
-                          <span className={`badge ${STATUS_BADGE[cheque.status]}`}>{STATUS_LABEL[cheque.status]}</span>
-                          {cheque.status_on && cheque.status !== 'pending' && <div className="text-muted text-sm">{cheque.status_on}</div>}
-                          {cheque.reversed && <div className="text-danger text-sm">Payment undone</div>}
-                        </td>
-                        <td className="text-right" style={{ whiteSpace: 'nowrap' }}>
-                          {cheque.status === 'pending' && cheque.purpose !== 'security' && (
-                            <>
-                              <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => move(cheque, 'cleared')}>Cleared</button>{' '}
-                              <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => move(cheque, 'bounced')}>Bounced</button>{' '}
-                              {cheque.direction === 'out' && <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => move(cheque, 'cancelled')}>Stop</button>}
-                            </>
-                          )}
-                          {cheque.status === 'pending' && cheque.purpose === 'security' && (
-                            <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => move(cheque, 'returned')}>Returned</button>
-                          )}
-                          {' '}<button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setDialog({ type: 'edit', cheque })}>Edit</button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="pager"><span className="pager-info">
-              {direction === 'out'
-                ? 'A cheque you pay a supplier with is entered here by itself when you choose "Cheque" on Pay supplier, a purchase, or an expense. Bounced or stopped undoes that payment, so the money is owed again.'
-                : 'A cheque a customer pays with is entered here by itself when you choose "Cheque" on Receive payment or at billing. Bounced undoes that payment, so the bills are owed again.'}
-            </span></div>
-          </div>
-        </>
-      )}
-
-      {data && tab === 'books' && (
-        data.books.length === 0 ? (
-          <div className="card"><div className="empty-state">
-            <div className="empty-state-icon"><BookCheck size={22} /></div>
-            <p className="empty-state-title">No cheque book recorded</p>
-            <p className="empty-state-desc">Add a book with its first and last leaf numbers. The ERP then fills in the next number when you pay by cheque, and shows which leaves are used or spoiled.</p>
-          </div></div>
-        ) : (
-          data.books.map((book) => {
-            const leaves = leavesOf(book, data.cheques);
-            const used = leaves.filter((leaf) => leaf.cheque && leaf.cheque.status !== 'cancelled').length;
-            const spoiled = leaves.filter((leaf) => leaf.cheque?.status === 'cancelled').length;
-            const next = nextLeaf([book], data.cheques, book.account_id);
+          )}
+          {rows.map((cheque) => {
+            const due = dueDate(cheque);
+            const days = daysUntil(due, today);
+            const out = cheque.direction === 'out';
+            const bank = out ? bankName(cheque.account_id) : (cheque.bank_name || '');
             return (
-              <div key={book.id} className="card mb-4">
-                <div className="card-header" style={{ flexWrap: 'wrap', gap: 8 }}>
-                  <div>
-                    <h3 className="card-title">{accountName(book.account_id)} — {book.first_no} to {book.last_no}</h3>
-                    <p className="text-muted text-sm">Received {book.received_on} · {used} used · {spoiled} cancelled · {leaves.length - used - spoiled} left{next ? ` · next ${next}` : ' · book finished'}</p>
-                  </div>
-                  <button type="button" className="btn btn-ghost btn-sm" aria-label="Remove this cheque book" disabled={busy}
-                    onClick={() => { if (window.confirm('Remove this cheque book? Cheques written from it stay in the register.')) void act({ action: 'delete-book', id: book.id }, 'Cheque book removed.', 'Could not remove the book.'); }}>
-                    <Trash2 size={14} />
-                  </button>
+              <div key={cheque.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--line)', flexWrap: 'wrap' }}>
+                <div style={{ width: 74, flexShrink: 0 }}>
+                  <div style={{ fontWeight: 700 }}>{shortDate(due)}</div>
+                  {cheque.status === 'pending'
+                    ? <div className={`text-sm ${days < 0 ? 'text-danger' : days <= 3 ? 'text-warning' : 'text-muted'}`}>{days < 0 ? `${-days}d late` : days === 0 ? 'Today' : `in ${days}d`}</div>
+                    : <span className={`badge ${STATUS_BADGE[cheque.status]}`} style={{ fontSize: 11 }}>{STATUS_LABEL[cheque.status]}</span>}
                 </div>
-                <div className="flex gap-1" style={{ flexWrap: 'wrap' }}>
-                  {leaves.map((leaf) => (
-                    <span key={leaf.no} title={leaf.cheque ? `${STATUS_LABEL[leaf.cheque.status]}${leaf.cheque.party ? ` · ${leaf.cheque.party}` : ''}${Number(leaf.cheque.amount) ? ` · ${rupees(leaf.cheque.amount)}` : ''}` : 'Unused'}
-                      className={`badge ${leaf.cheque ? STATUS_BADGE[leaf.cheque.status] : ''}`}
-                      style={!leaf.cheque ? { border: '1px dashed var(--line-2)', background: 'transparent', color: 'var(--ink-3)' } : undefined}>
-                      {leaf.no.slice(-3)}
-                    </span>
-                  ))}
+                <div style={{ flex: '1 1 180px', minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: out ? 'var(--color-danger)' : 'var(--color-success)', display: 'inline-flex' }}>{out ? <ArrowUpRight size={15} /> : <ArrowDownLeft size={15} />}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{out ? 'To' : 'From'} {cheque.party || 'someone'}</span>
+                  </div>
+                  <div className="text-muted text-sm">
+                    {[cheque.cheque_no ? `No. ${cheque.cheque_no}` : 'No number', bank, cheque.purpose === 'security' ? 'Security cheque' : cheque.source_id, cheque.reversed ? 'payment undone' : null].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+                {/* A security cheque moves no money: its amount is shown plainly, without + or −. */}
+                <div style={{ fontWeight: 700, fontSize: 16, color: !isMoney(cheque) ? 'var(--ink-3)' : out ? 'var(--color-danger)' : 'var(--color-success)', whiteSpace: 'nowrap' }}>
+                  {Number(cheque.amount) ? `${isMoney(cheque) ? (out ? '−' : '+') : ''}${rupees(cheque.amount)}` : <span className="text-muted">—</span>}
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginLeft: 'auto' }}>
+                  {cheque.status === 'pending' && (cheque.purpose === 'security'
+                    ? <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => move(cheque, 'returned')}>Returned</button>
+                    : <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => move(cheque, 'cleared')}><Check size={14} /> Cleared</button>)}
+                  <div style={{ position: 'relative' }} data-menu>
+                    <button type="button" className="btn btn-ghost btn-sm" aria-label="More for this cheque" aria-haspopup="menu" aria-expanded={menu === cheque.id} onClick={() => setMenu(menu === cheque.id ? null : cheque.id)}>
+                      <MoreHorizontal size={16} />
+                    </button>
+                    {menu === cheque.id && (
+                      <MenuList align="right">
+                        {cheque.status === 'pending' && cheque.purpose !== 'security' && <MenuItem onClick={() => move(cheque, 'bounced')}>Bounced</MenuItem>}
+                        {cheque.status === 'pending' && out && cheque.purpose !== 'security' && <MenuItem onClick={() => move(cheque, 'cancelled')}>Stop payment</MenuItem>}
+                        {cheque.status === 'cleared' && <MenuItem onClick={() => move(cheque, 'pending')}>Not cleared after all</MenuItem>}
+                        <MenuItem onClick={() => { setMenu(null); setDialog({ type: 'edit', cheque }); }}>Edit number, date or note</MenuItem>
+                      </MenuList>
+                    )}
+                  </div>
                 </div>
               </div>
             );
-          })
-        )
+          })}
+        </div>
       )}
 
+      {dialog?.type === 'books' && data && (
+        <BooksDialog books={data.books} cheques={data.cheques} bankName={bankName} busy={busy} onClose={() => setDialog(null)}
+          onAdd={() => setDialog({ type: 'book' })}
+          onDelete={(book) => { if (window.confirm('Remove this cheque book? Cheques written from it stay in the register.')) void act({ action: 'delete-book', id: book.id }, 'Cheque book removed.', 'Could not remove the book.'); }} />
+      )}
       {dialog?.type === 'security' && (
         <SecurityDialog direction={dialog.direction} banks={banks} today={today} busy={busy} onClose={() => setDialog(null)}
           onSave={(body) => act({ action: 'add', direction: dialog.direction, ...body }, 'Security cheque entered.', 'Could not enter the cheque.')} />
@@ -301,18 +290,77 @@ export default function Cheques() {
   );
 }
 
-function shiftDay(day: string, days: number): string {
-  if (!day) return '';
-  return new Date(Date.parse(`${day}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+function Total({ icon, color, title, amount, count, next, today, onClick }: { icon: React.ReactNode; color: string; title: string; amount: number; count: number; next?: string; today: string; onClick: () => void }) {
+  const days = next ? daysUntil(next, today) : null;
+  return (
+    <button type="button" className="card" onClick={onClick} style={{ textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14, font: 'inherit', color: 'inherit' }}>
+      <span style={{ color, background: 'var(--panel-2)', borderRadius: 10, padding: 10, display: 'inline-flex' }}>{icon}</span>
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span className="text-muted text-sm">{title}</span>
+        <span style={{ fontSize: 24, fontWeight: 700, color }}>{rupees(amount)}</span>
+        <span className="text-muted text-sm">
+          {count === 0 ? 'No cheques waiting' : `${count} cheque${count === 1 ? '' : 's'}`}
+          {next && days !== null && <> · next {days < 0 ? <strong className="text-danger">{-days} day{days === -1 ? '' : 's'} late</strong> : days === 0 ? <strong>today</strong> : `on ${shortDate(next)}`}</>}
+        </span>
+      </span>
+    </button>
+  );
 }
 
-function Stat({ title, value, note, color }: { title: string; value: string; note: string; color: string }) {
+function MenuList({ children, align }: { children: React.ReactNode; align: 'left' | 'right' }) {
   return (
-    <div className="kpi-card" style={{ '--kpi-color': color, '--kpi-color-bg': 'var(--panel-2)' } as React.CSSProperties}>
-      <div className="flex justify-between items-center"><span className="kpi-label">{title}</span><div className="kpi-icon-wrap"><CalendarClock size={18} /></div></div>
-      <div className="kpi-value">{value}</div>
-      <div className="kpi-change text-muted" style={{ fontSize: 12 }}>{note}</div>
+    <div role="menu" style={{ position: 'absolute', top: '100%', [align]: 0, marginTop: 4, zIndex: 30, minWidth: 210, background: 'var(--bg-card)', border: '1px solid var(--line)', borderRadius: 10, boxShadow: 'var(--shadow-md)', padding: 4 }}>
+      {children}
     </div>
+  );
+}
+
+function MenuItem({ children, onClick, icon, disabled = false }: { children: React.ReactNode; onClick: () => void; icon?: React.ReactNode; disabled?: boolean }) {
+  return (
+    <button type="button" role="menuitem" disabled={disabled} onClick={onClick} className="btn btn-ghost btn-sm"
+      style={{ width: '100%', justifyContent: 'flex-start', gap: 8, display: 'flex', alignItems: 'center', opacity: disabled ? 0.5 : 1 }}>
+      {icon}{children}
+    </button>
+  );
+}
+
+function BooksDialog({ books, cheques, bankName, busy, onClose, onAdd, onDelete }: { books: ChequeBook[]; cheques: ChequeRow[]; bankName: (id: string | null) => string; busy: boolean; onClose: () => void; onAdd: () => void; onDelete: (book: ChequeBook) => void }) {
+  return (
+    <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: 560 }} role="dialog" aria-modal="true" aria-label="Cheque books">
+      <div className="modal-header"><h3 className="modal-title">Cheque books</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={onClose}>✕</button></div>
+      <div className="modal-body flex flex-col gap-4">
+        {books.length === 0 && (
+          <p className="text-muted" style={{ fontSize: 13 }}>Add your cheque book with its bank and its first and last leaf numbers. Then, when you pay by cheque, the bank and the next number are filled in for you.</p>
+        )}
+        {books.map((book) => {
+          const leaves = leavesOf(book, cheques);
+          const used = leaves.filter((leaf) => leaf.cheque && leaf.cheque.status !== 'cancelled').length;
+          const spoiled = leaves.filter((leaf) => leaf.cheque?.status === 'cancelled').length;
+          const next = nextLeaf([book], cheques, book.account_id);
+          return (
+            <div key={book.id} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 12 }}>
+              <div className="flex justify-between items-center" style={{ gap: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{bankName(book.account_id) || 'Bank'} · {book.first_no} to {book.last_no}</div>
+                  <div className="text-muted text-sm">{leaves.length - used - spoiled} left{next ? `, next ${next}` : ', book finished'} · {used} used{spoiled ? ` · ${spoiled} cancelled` : ''}</div>
+                </div>
+                <button type="button" className="btn btn-ghost btn-sm" aria-label="Remove this cheque book" disabled={busy} onClick={() => onDelete(book)}><Trash2 size={14} /></button>
+              </div>
+              <div className="flex gap-1" style={{ flexWrap: 'wrap', marginTop: 8 }}>
+                {leaves.map((leaf) => (
+                  <span key={leaf.no} title={leaf.cheque ? `${STATUS_LABEL[leaf.cheque.status]}${leaf.cheque.party ? ` · ${leaf.cheque.party}` : ''}${Number(leaf.cheque.amount) ? ` · ${rupees(leaf.cheque.amount)}` : ''}` : 'Unused'}
+                    className={`badge ${leaf.cheque ? STATUS_BADGE[leaf.cheque.status] : ''}`}
+                    style={!leaf.cheque ? { border: '1px dashed var(--line-2)', background: 'transparent', color: 'var(--ink-3)' } : undefined}>
+                    {leaf.no.slice(-3)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={onClose}>Close</button><button type="button" className="btn btn-primary" onClick={onAdd}><Plus size={14} /> Add cheque book</button></div>
+    </div></div>
   );
 }
 

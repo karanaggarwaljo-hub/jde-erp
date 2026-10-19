@@ -2,6 +2,23 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-19 — The Cheques page, made simple
+
+You said the Cheques page felt complicated, so it's been rearranged. Nothing was taken away.
+
+- **Two figures at the top:** **You have to pay** and **You will receive**, each with how many
+  cheques and when the next one is due. Click either to see just those cheques.
+- **One list, soonest first:** every cheque still to clear, given and received together. Each row
+  shows the date and how many days are left, who it's to or from, the number and the amount (red
+  to pay, green to receive).
+- **One button per cheque:** **Cleared** (or **Returned** for a security cheque). Bounced, Stop
+  payment and Edit are in the **⋯** next to it.
+- **Upcoming · Calendar · Past:** Past holds cleared, bounced and cancelled cheques.
+- **The planner asks for less:** just the amount and, optionally, the supplier. The bank figure and
+  earliest date are one click away, and the explanation sits under "How is this worked out?".
+- **Things you rarely use** (cheque books, cancelling a spoiled leaf, security cheques) are in the
+  **More** menu at the top right.
+
 ## 2026-10-19 — Cheque calendar, and "when should I date this cheque?"
 
 A new **Calendar** tab on the Cheques page.
