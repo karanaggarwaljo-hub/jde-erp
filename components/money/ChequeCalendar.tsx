@@ -95,7 +95,7 @@ export default function ChequeCalendar({ cheques, collections, today, parties }:
   return (
     <>
       <div className="card mb-4">
-        <div className="card-header"><h3 className="card-title"><Lightbulb size={16} style={{ verticalAlign: '-3px' }} /> When should I date a cheque?</h3></div>
+        <div className="card-header"><h3 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Lightbulb size={16} /> When should I date a cheque?</h3></div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
           <div className="form-group"><label className="form-label" htmlFor="plan-amount">Amount (₹)</label>
             <input id="plan-amount" type="number" min="0" step="1" inputMode="numeric" className="form-input" placeholder="e.g. 50000" value={amount} onChange={(event) => setAmount(event.target.value)} /></div>

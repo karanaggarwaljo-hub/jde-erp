@@ -147,7 +147,7 @@ export default function Cheques() {
       <div className="tabs mb-4" role="group" aria-label="Cheques view">
         <button type="button" aria-pressed={tab === 'out'} className={`tab ${tab === 'out' ? 'active' : ''}`} onClick={() => setTab('out')}>Given<span className="tab-count">{data ? summarise(data.cheques, 'out', today).pendingCount : 0}</span></button>
         <button type="button" aria-pressed={tab === 'in'} className={`tab ${tab === 'in' ? 'active' : ''}`} onClick={() => setTab('in')}>Received<span className="tab-count">{data ? summarise(data.cheques, 'in', today).pendingCount : 0}</span></button>
-        <button type="button" aria-pressed={tab === 'calendar'} className={`tab ${tab === 'calendar' ? 'active' : ''}`} onClick={() => setTab('calendar')}><CalendarDays size={14} style={{ marginRight: 4, verticalAlign: '-2px' }} />Calendar</button>
+        <button type="button" aria-pressed={tab === 'calendar'} className={`tab ${tab === 'calendar' ? 'active' : ''}`} onClick={() => setTab('calendar')}><span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><CalendarDays size={14} />Calendar</span></button>
         <button type="button" aria-pressed={tab === 'books'} className={`tab ${tab === 'books' ? 'active' : ''}`} onClick={() => setTab('books')}>Cheque books<span className="tab-count">{data?.books.length ?? 0}</span></button>
       </div>
 
