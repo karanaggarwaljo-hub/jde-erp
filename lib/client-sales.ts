@@ -10,7 +10,7 @@ export type SalesInvoiceItemInput = {
 };
 
 export type SaveSalesInvoiceInput = {
-  /** How it was paid and through which drawer or bank account (Cash & Bank). */
+  /** Paid by cheque: its details, for the cheque register. */
   money?: import('./money-book').MoneyChoice | null;
   companyId: string;
   /** Only meaningful (and required) when isEdit is true — omit/pass null on create, since the
@@ -83,7 +83,7 @@ export function deleteSalesInvoice(companyId: string, invoiceId: string, custome
 export type PaymentAllocationInput = { invoiceId: string; amount: number };
 
 export type ReceiveCustomerPaymentInput = {
-  /** How it was paid and through which drawer or bank account (Cash & Bank). */
+  /** Paid by cheque: its details, for the cheque register. */
   money?: import('./money-book').MoneyChoice | null;
   companyId: string;
   customerId: string;

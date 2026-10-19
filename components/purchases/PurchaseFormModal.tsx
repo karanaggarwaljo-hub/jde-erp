@@ -51,7 +51,7 @@ export type PurchaseFormModalProps = {
   setPaymentStatus: (value: PaymentStatus) => void;
   amountPaid: number;
   setAmountPaid: (value: number) => void;
-  /** "Paid by / from which account" (components/money/MoneyPicker.tsx), shown with the payment. */
+  /** "Paid by cheque" (components/money/MoneyPicker.tsx), shown with the payment. */
   moneySlot?: ReactNode;
   total: number;
   paidAmount: number;

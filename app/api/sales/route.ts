@@ -79,8 +79,8 @@ export async function POST(request: Request) {
     if (error) throw error;
     const created = data as { id?: string; credit_total?: number };
     // The return lowers what the bill says was paid when the customer had paid more than the bill
-    // now comes to: that difference is cash handed back, so it leaves the drawer (or the account
-    // chosen). A return against an unpaid bill only reduces what is owed and moves no money.
+    // now comes to: that difference is handed back. Refunded by cheque, it goes into the cheque
+    // register. A return against an unpaid bill only reduces what is owed and moves no money.
     const after = await getInvoiceMoneyState(companyId, invoiceId);
     if (after && created.id) {
       await recordMoney(companyId, (await getCurrentUser())?.email ?? '', {

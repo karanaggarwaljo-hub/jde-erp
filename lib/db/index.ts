@@ -1934,7 +1934,7 @@ export async function getPartCostSource(companyId: string, productId: string) {
   };
 }
 
-// ── Cash & Bank ───────────────────────────────────────────────────────────────────────────────
+// ── Banks & cheque records (Cash & Bank was removed 2026-10-19) ──────────────────────────────
 
 export type MoneyAccountRow = import('../money-book').MoneyAccount & { company_id: string; created_at: string };
 
@@ -1948,12 +1948,6 @@ export async function insertMoneyAccount(row: { company_id: string; name: string
   const { data, error } = await getClient().from('jde_money_accounts').insert(row).select('*').single();
   if (error) throw error;
   return data as MoneyAccountRow;
-}
-
-export async function updateMoneyAccount(companyId: string, id: string, patch: Partial<Pick<MoneyAccountRow, 'name' | 'opening_balance' | 'opening_date' | 'archived'>>): Promise<MoneyAccountRow | null> {
-  const { data, error } = await getClient().from('jde_money_accounts').update(patch).eq('company_id', companyId).eq('id', id).select('*').maybeSingle();
-  if (error) throw error;
-  return (data as MoneyAccountRow | null) ?? null;
 }
 
 export type MoneyEntryInsert = {
@@ -1980,8 +1974,8 @@ export async function insertMoneyEntry(row: MoneyEntryInsert): Promise<{ id: str
   return data as { id: string };
 }
 
-/** Removes the money entries a deleted document made (a bill's counter payment, a return's
- *  refund), so a deleted document leaves nothing behind in the cash book. */
+/** Removes the cheque records a deleted document made (a cheque at the counter, a refund by
+ *  cheque), so a deleted document leaves nothing behind. */
 export async function deleteMoneyEntriesFor(companyId: string, sourceType: string, sourceId: string): Promise<number> {
   const { data, error } = await getClient().from('jde_money_entries').delete()
     .eq('company_id', companyId).eq('source_type', sourceType).eq('source_id', sourceId).select('id');
@@ -2027,7 +2021,7 @@ const MONEY_SOURCE_TABLE: Record<MoneySourceTable, string> = {
   money_entries: 'jde_money_entries',
 };
 
-/** Places a payment, expense or entry in an account, or changes its cheque's state. */
+/** Records a payment, expense or entry's cheque, or changes its state. */
 export async function setMoneyFields(companyId: string, table: MoneySourceTable, id: string, patch: {
   account_id?: string | null;
   method?: string | null;
@@ -2045,22 +2039,6 @@ export async function setMoneyFields(companyId: string, table: MoneySourceTable,
   const { data, error } = await getClient().from(MONEY_SOURCE_TABLE[table]).update(row).eq('company_id', companyId).eq('id', id).select('id');
   if (error) throw error;
   return ((data as unknown[]) ?? []).length > 0;
-}
-
-/** Everything the cash book is made from, for one company. */
-export async function getMoneySource(companyId: string) {
-  const client = getClient();
-  const page = <T>(table: string, columns: string) => allPages<T>((from, to) => client.from(table).select(columns)
-    .eq('company_id', companyId).order('id', { ascending: true }).range(from, to) as unknown as PromiseLike<Page<T>>);
-  const cheque = 'cheque_no, cheque_date, cheque_status, cleared_on';
-  const [accounts, payments, supplierPayments, expenses, entries] = await Promise.all([
-    listMoneyAccounts(companyId),
-    page<import('../money-book').PaymentInRow>('jde_payments_received', `id, date, customer, amount, note, account_id, method, ${cheque}`),
-    page<import('../money-book').SupplierPaymentRow>('jde_supplier_payments', `id, date, supplier, amount, note, reference, account_id, method, ${cheque}`),
-    page<import('../money-book').ExpenseRow>('jde_expenses', `id, date, category, description, amount, mode, account_id, ${cheque}`),
-    page<import('../money-book').MoneyEntryRow>('jde_money_entries', `id, date, kind, account_id, to_account_id, amount, method, source_type, source_id, party, note, ${cheque}`),
-  ]);
-  return { accounts, payments, supplierPayments, expenses, entries };
 }
 
 /** A bill's paid figure and customer, for working out what changed hands when it is saved. */

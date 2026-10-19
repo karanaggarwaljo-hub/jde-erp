@@ -81,9 +81,9 @@ export const BACKUP_ONLY_TABLES: Record<string, TableSchema> = {
   // The highest number each kind of document has reached (scripts/start-fresh.sql). Without it a
   // restore after a fresh start would let numbers already given to customers be issued again.
   number_floors: { primaryKey: 'prefix' },
-  // Cash & Bank (scripts/cash-bank.sql): the drawer and bank accounts with their opening
-  // balances, and the money that moved inside bills, purchases and returns plus the owner's own
-  // entries. Without them a restore loses where every rupee went.
+  // scripts/cash-bank.sql. Cash & Bank was removed (2026-10-19); these now hold the owner's banks
+  // (which cheque books are for) and the records behind cheques taken or paid inside bills and
+  // purchases, which a bounce undoes. Older rows from Cash & Bank stay as history.
   money_accounts: { primaryKey: 'id', companyScoped: true },
   money_entries: { primaryKey: 'id', companyScoped: true },
   // The cheque register and cheque books (scripts/cheques.sql).

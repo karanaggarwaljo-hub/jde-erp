@@ -24,7 +24,7 @@ export type RecordPaymentModalProps = {
   savingPayment: boolean;
   setPayingOrder: (order: PurchaseOrder | null) => void;
   submitPayment: (event: FormEvent) => void;
-  /** "Paid by / from which account" (components/money/MoneyPicker.tsx), shown with the payment. */
+  /** "Paid by cheque" (components/money/MoneyPicker.tsx), shown with the payment. */
   moneySlot?: ReactNode;
 };
 

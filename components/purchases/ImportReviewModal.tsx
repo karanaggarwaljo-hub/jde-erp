@@ -53,7 +53,7 @@ export type ImportReviewModalProps = {
   importHasInvalidLine: boolean;
   importPaymentStatus: PaymentStatus;
   setImportPaymentStatus: (value: PaymentStatus) => void;
-  /** "Paid by / from which account" (components/money/MoneyPicker.tsx), shown with the payment. */
+  /** "Paid by cheque" (components/money/MoneyPicker.tsx), shown with the payment. */
   moneySlot?: ReactNode;
   importAmountPaid: number;
   setImportAmountPaid: (value: number) => void;

@@ -130,30 +130,6 @@ export function summarise(cheques: ChequeRow[], direction: ChequeDirection, toda
   return out;
 }
 
-export type Shortfall = { accountId: string; byDate: string; due: number; balance: number; short: number };
-
-/** For each bank account: will its cleared balance cover the cheques given from it that fall due
- *  in the next `days`? Lists only the accounts that would fall short. */
-export function shortfalls(cheques: ChequeRow[], balances: Record<string, number>, today: string, days = 7): Shortfall[] {
-  const byAccount = new Map<string, { due: number; last: string }>();
-  for (const cheque of cheques) {
-    if (cheque.direction !== 'out' || cheque.status !== 'pending' || cheque.purpose === 'security' || !cheque.account_id) continue;
-    const day = dueDate(cheque);
-    if (daysUntil(day, today) > days) continue;
-    const entry = byAccount.get(cheque.account_id) ?? { due: 0, last: day };
-    entry.due += num(cheque.amount);
-    if (day > entry.last) entry.last = day;
-    byAccount.set(cheque.account_id, entry);
-  }
-  const out: Shortfall[] = [];
-  for (const [accountId, entry] of byAccount) {
-    const balance = round2(balances[accountId] ?? 0);
-    const short = round2(entry.due - balance);
-    if (short > 0) out.push({ accountId, byDate: entry.last, due: round2(entry.due), balance, short });
-  }
-  return out;
-}
-
 /** The order the register lists cheques in: not-yet-cleared first by the date on the cheque, then
  *  everything else newest first. */
 export function registerOrder(cheques: ChequeRow[]): ChequeRow[] {

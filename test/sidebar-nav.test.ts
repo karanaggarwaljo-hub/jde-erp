@@ -12,8 +12,7 @@ test('the menu still reaches every screen it reached before', () => {
     '/catalog-admin', '/settings',
     // Added October 2026: every activity with its time, who and which device.
     '/logbook',
-    // Added October 2026: cash in the drawer and each bank account.
-    '/cash-bank',
+    // '/cash-bank' (Cash & Bank) was added and then removed at the owner's request, October 2026.
     // Added October 2026: reorder list and dead stock.
     '/stock-planning',
     // Added October 2026: every cheque given and received.

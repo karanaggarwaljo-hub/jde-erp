@@ -1,13 +1,12 @@
 import { requireOwner, checkCompanyAccess } from '@/lib/auth/dal';
 import { money as rupees, recordAudit } from '@/lib/audit-log';
-import { ensureMoneyAccounts } from '@/lib/cash-book';
+import { bankNamed, listBanks } from '@/lib/cash-book';
 import { ChequeError, setChequeStatus } from '@/lib/cheque-register';
 import { bookLeaves, normaliseChequeNo, type ChequeStatus } from '@/lib/cheques';
 import {
   dbErrorMessage,
   deleteChequeBook,
   getCheque,
-  getMoneySource,
   insertCheque,
   insertChequeBook,
   listChequeBooks,
@@ -15,7 +14,6 @@ import {
   updateCheque,
 } from '@/lib/db';
 import { shopDay } from '@/lib/logbook';
-import { accountBalances, bookRows } from '@/lib/money-book';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,12 +24,12 @@ const dayOf = (value: unknown, fallback: string | null) => (DAY.test(String(valu
 
 /**
  * Cheques: the register of every cheque given and received, cheque books, and each cheque's life.
- * GET: cheques, books, bank accounts and their cleared balances (for "will this week's cheques
- * clear?"). POST: the owner's actions.
+ * GET: cheques, books and the banks they are drawn on. POST: the owner's actions.
  *
  * Owner-only (proxy.ts too). A cheque that pays something is entered by the payment itself
  * (lib/cash-book.ts); here the owner enters what pays nothing — a security cheque, or a spoiled
- * leaf — and moves cheques through their life (lib/cheque-register.ts).
+ * leaf — and moves cheques through their life (lib/cheque-register.ts). A bank is chosen from the
+ * company's banks or named new (`bankName`), which adds it.
  */
 export async function GET(request: Request) {
   await requireOwner();
@@ -39,12 +37,10 @@ export async function GET(request: Request) {
   const access = await checkCompanyAccess(companyId);
   if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
   try {
-    await ensureMoneyAccounts(companyId);
-    const [cheques, books, money] = await Promise.all([listCheques(companyId), listChequeBooks(companyId), getMoneySource(companyId)]);
-    const balances = Object.fromEntries(Object.entries(accountBalances(money.accounts, bookRows(money))).map(([id, entry]) => [id, entry.balance]));
+    const [cheques, books, banks] = await Promise.all([listCheques(companyId), listChequeBooks(companyId), listBanks(companyId)]);
     return Response.json({
-      cheques, books, balances, today: shopDay(new Date()),
-      accounts: money.accounts.map(({ id, name, kind, archived }) => ({ id, name, kind, archived })),
+      cheques, books, today: shopDay(new Date()),
+      banks: banks.map(({ id, name }) => ({ id, name })),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     console.error('GET /api/cheques failed:', error);
@@ -63,8 +59,14 @@ export async function POST(request: Request) {
   const today = shopDay(new Date());
 
   try {
-    const accounts = await ensureMoneyAccounts(companyId);
-    const bankAccount = (id: unknown) => accounts.find((account) => account.id === id && account.kind === 'bank' && !account.archived);
+    const banks = await listBanks(companyId);
+    // The bank chosen from the list, or one named new, which is added.
+    const bankAccount = async (id: unknown, name: unknown) => {
+      const chosen = banks.find((bank) => bank.id === id);
+      if (chosen) return chosen;
+      const named = textOf(name, 80);
+      return named ? bankNamed(companyId, named) : undefined;
+    };
 
     if (action === 'status') {
       const status = body?.status as ChequeStatus;
@@ -77,8 +79,8 @@ export async function POST(request: Request) {
       // What pays nothing: a security cheque given or taken. A cheque that pays is entered by
       // the payment (Pay a supplier, Receive a payment…), so the accounts move with it.
       const direction = body?.direction === 'in' ? 'in' : 'out';
-      const account = direction === 'out' ? bankAccount(body?.accountId) : undefined;
-      if (direction === 'out' && !account) return bad('Choose the bank account the cheque is drawn on.');
+      const account = direction === 'out' ? await bankAccount(body?.accountId, body?.newBank) : undefined;
+      if (direction === 'out' && !account) return bad('Choose the bank the cheque is drawn on.');
       const party = textOf(body?.party, 120);
       if (!party) return bad(direction === 'out' ? 'Who is the cheque given to?' : 'Who gave the cheque?');
       const amount = Math.round((Number(body?.amount) || 0) * 100) / 100;
@@ -97,8 +99,8 @@ export async function POST(request: Request) {
     }
 
     if (action === 'cancel-leaf') {
-      const account = bankAccount(body?.accountId);
-      if (!account) return bad('Choose the bank account of the cheque book.');
+      const account = await bankAccount(body?.accountId, body?.newBank);
+      if (!account) return bad('Choose the bank of the cheque book.');
       const chequeNo = normaliseChequeNo(textOf(body?.chequeNo, 30));
       if (!chequeNo) return bad('Enter the number of the leaf that was spoiled.');
       const created = await insertCheque({
@@ -126,8 +128,8 @@ export async function POST(request: Request) {
     }
 
     if (action === 'add-book') {
-      const account = bankAccount(body?.accountId);
-      if (!account) return bad('Choose the bank account the book is for.');
+      const account = await bankAccount(body?.accountId, body?.newBank);
+      if (!account) return bad('Choose or name the bank the book is for.');
       const firstNo = normaliseChequeNo(textOf(body?.firstNo, 30));
       const lastNo = normaliseChequeNo(textOf(body?.lastNo, 30));
       if (bookLeaves({ first_no: firstNo, last_no: lastNo }).length === 0) return bad('Enter the first and last cheque numbers of the book (up to 500 leaves).');
@@ -149,7 +151,7 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof ChequeError) return Response.json({ error: error.message }, { status: error.status });
     const duplicate = error && typeof error === 'object' && 'code' in error && (error as { code?: string }).code === '23505';
-    if (duplicate) return bad('That cheque number is already in the register for this bank account.');
+    if (duplicate) return bad('That cheque number is already in the register for this bank.');
     console.error(`POST /api/cheques (${action}) failed:`, error);
     return Response.json({ error: dbErrorMessage(error, 'The cheque register could not be updated.') }, { status: 500 });
   }

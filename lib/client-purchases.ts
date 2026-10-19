@@ -8,7 +8,7 @@ export type PurchaseItemInput = {
 };
 
 export type SavePurchaseInput = {
-  /** How it was paid and through which drawer or bank account (Cash & Bank). */
+  /** Paid by cheque: its details, for the cheque register. */
   money?: import('./money-book').MoneyChoice | null;
   companyId: string;
   supplierId: string | null;
