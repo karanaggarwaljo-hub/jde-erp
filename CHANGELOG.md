@@ -2,6 +2,28 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-19 — Cheque calendar, and "when should I date this cheque?"
+
+A new **Calendar** tab on the Cheques page.
+
+**Every cheque on its date.** Each day shows what you've given (red, −) and received (green, +)
+on the date written on the cheque. Upcoming days also show "~ sales": the money a usual day of
+that weekday brings in. Click a day to see its cheques. Arrows move between months.
+
+**When should I date a cheque?** Type the amount, and optionally who it's for, what's in the bank
+today, and the earliest date you'd like:
+
+- **From your sales:** it suggests the earliest date the cheque will be covered, from that day on,
+  by money coming in. That money is what your sales actually brought in, by weekday, over the last
+  12 weeks, plus cheques you've received that are due. It allows for every cheque you've already
+  given. The suggested day is marked on the calendar. If it's never covered in the next 90 days,
+  it says how much more is needed.
+- **From your earlier cheques:** for a supplier, it shows how many days ahead you usually date their
+  cheques and how often you pay them. It says when the next payment is due, and whether your usual
+  date would be covered.
+- **Based only on real figures:** it says how many days of history it uses. With "in the bank
+  today" left blank, it starts from nothing, which errs on the safe side.
+
 ## 2026-10-19 — Cash & Bank removed; cheques stay
 
 At your request, **Cash & Bank is gone.** The page is gone, and so are the drawer and bank
