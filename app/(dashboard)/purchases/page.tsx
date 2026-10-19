@@ -246,7 +246,7 @@ export default function PurchasesPage() {
   // there was no way to say "this invoice is settled".
   const [payingOrder, setPayingOrder] = useState<PurchaseOrder | null>(null);
   const [payAmount, setPayAmount] = useState(0);
-  // How a purchase was paid and from which account (Cash & Bank) — one choice per payment screen.
+  // Whether a purchase was paid by cheque, and the cheque's details — one choice per payment screen.
   const [purchaseMoney, setPurchaseMoney] = useState<MoneyChoice | null>(null);
   const [importMoney, setImportMoney] = useState<MoneyChoice | null>(null);
   const [payMoney, setPayMoney] = useState<MoneyChoice | null>(null);

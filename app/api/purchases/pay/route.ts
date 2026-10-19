@@ -34,7 +34,7 @@ export async function POST(request: Request) {
 
   try {
     const po = await recordPurchasePayment({ companyId, poId, amount });
-    // Out of the drawer or the bank account chosen (lib/cash-book.ts).
+    // Paid by cheque: into the cheque register (lib/cash-book.ts).
     await recordMoney(companyId, access.user.email, {
       kind: 'purchase_payment', date: shopDay(new Date()), amount: -amount, raw: body?.money,
       sourceType: 'purchase', sourceId: poId, party: String(po.supplier ?? ''),

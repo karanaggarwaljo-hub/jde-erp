@@ -2,6 +2,29 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-19 — Cash & Bank removed; cheques stay
+
+At your request, **Cash & Bank is gone.** The page is gone, and so are the drawer and bank
+balances, statements, drawer count and transfers. The "paid by / which account" choice on every
+payment screen is gone too.
+
+**Cheques work as before, more simply:**
+
+- **On every payment screen** (billing, Receive payment, Pay supplier, purchases, returns) there is
+  now one tick box: **Paid by cheque** (or **Received by cheque**). Tick it to enter the cheque's
+  number and date, and it goes into the cheque register by itself. Leave it unticked and nothing
+  else is recorded.
+- **Cheques you give** are drawn on your bank. Name the bank when you add a cheque book on the
+  Cheques page; no separate setup is needed. With one bank it's picked for you, and the next leaf
+  number is filled in.
+- **Cheques you receive** have a box for the customer's bank (optional).
+- **Expenses** have their Payment Mode list back (UPI, Cash, Bank Transfer, Cheque). Choosing
+  Cheque asks for the cheque's details.
+- **Bounced or stopped** cheques still undo the payment they made.
+- **The "short this week" warning is gone.** It needed the bank balances Cash & Bank kept.
+
+Nothing of yours was lost: Jai Durga Enterprises had no Cash & Bank entries yet.
+
 ## 2026-10-19 — Bills with goods returned now add up
 
 When a customer returns goods, the ERP lowers the bill's discount, GST and total, but keeps the

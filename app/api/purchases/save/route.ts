@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       summary: `Recorded purchase ${String(po.id ?? '')} from ${String(supplierName ?? '')} at ${money(Number(po.total ?? 0))}`,
       details: { total: po.total, paid: po.paid, status: po.status, lines: Array.isArray(items) ? items.length : 0 },
     });
-    // Paid when it was recorded: out of the drawer or the bank account chosen (lib/cash-book.ts).
+    // Paid by cheque when it was recorded: into the cheque register (lib/cash-book.ts).
     await recordMoney(companyId, access.user.email, {
       kind: 'purchase_paid', date: String(po.date ?? date ?? ''), amount: -(Number(po.paid ?? 0)), raw: body?.money,
       sourceType: 'purchase', sourceId: String(po.id ?? ''), party: String(supplierName ?? ''),

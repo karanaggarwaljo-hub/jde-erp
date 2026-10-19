@@ -55,7 +55,7 @@ export default function ExpensesPage() {
   const [categorizeFailed, setCategorizeFailed] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [page, setPage] = useState(1);
-  // How it was paid and from which drawer or bank account (Cash & Bank).
+  // The cheque's details, when an expense is paid by cheque (the cheque register).
   const [expenseMoney, setExpenseMoney] = useState<MoneyChoice | null>(null);
   const [newExp, setNewExp] = useState({
     category: 'transport',
@@ -117,8 +117,9 @@ export default function ExpensesPage() {
         amount: Number(newExp.amount),
         date: new Date().toISOString().split('T')[0],
         paidBy: newExp.paid_by,
-        mode: expenseMoney?.method ?? newExp.mode,
-        money: expenseMoney,
+        mode: newExp.mode,
+        // Paid by cheque: its number, date and bank go into the cheque register.
+        money: newExp.mode === 'cheque' ? expenseMoney : null,
       });
       await reload();
       setShowModal(false);
@@ -342,10 +343,19 @@ export default function ExpensesPage() {
                     <label className="form-label">Paid By</label>
                     <input className="form-input" value={newExp.paid_by} onChange={e => setNewExp({ ...newExp, paid_by: e.target.value })} />
                   </div>
-                  {activeCompany && (
-                    <MoneyPicker companyId={activeCompany.id} direction="out" value={expenseMoney} onChange={setExpenseMoney} disabled={savingExpense} />
-                  )}
+                  <div className="form-group">
+                    <label className="form-label">Payment Mode</label>
+                    <select className="form-input form-select" value={newExp.mode} disabled={savingExpense} onChange={e => setNewExp({ ...newExp, mode: e.target.value })}>
+                      <option value="upi">UPI</option>
+                      <option value="cash">Cash</option>
+                      <option value="bank_transfer">Bank Transfer</option>
+                      <option value="cheque">Cheque</option>
+                    </select>
+                  </div>
                 </div>
+                {activeCompany && newExp.mode === 'cheque' && (
+                  <MoneyPicker companyId={activeCompany.id} direction="out" value={expenseMoney} onChange={setExpenseMoney} disabled={savingExpense} alwaysCheque />
+                )}
               </div>
 
               <div className="modal-footer">

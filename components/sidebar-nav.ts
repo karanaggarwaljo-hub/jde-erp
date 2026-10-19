@@ -8,7 +8,6 @@ import {
   Building2,
   FileText,
   Globe,
-  Landmark,
   LayoutDashboard,
   Package,
   ScrollText,
@@ -83,7 +82,6 @@ export const navGroups: NavGroup[] = [
   {
     label: 'Money & reports',
     items: [
-      { name: 'Cash & Bank', href: '/cash-bank', icon: Landmark },
       { name: 'Cheques', href: '/cheques', icon: BookCheck },
       { name: 'Reports', href: '/reports', icon: FileText },
       { name: 'Stock Planning', href: '/stock-planning', icon: ClipboardList },

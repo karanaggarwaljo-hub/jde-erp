@@ -58,10 +58,10 @@ function isOwnerOnlyPath(pathname: string): boolean {
   if (pathname === '/api/companies/active') return false;
   if (pathname.startsWith('/api/companies/')) return true;
   // The Log Book records what every member of staff did; Google Drive holds the owner's own Google key.
-  // Cash & Bank shows what is in the drawer and the bank. Its /api/money/accounts list (names
-  // only, for the "paid into" choice every payment screen offers) stays open to every role, as
-  // does /api/cheques/next (the next cheque number, for the same choice).
-  return matchesAny(pathname, new Set(['/api/money', '/api/cheques']), ['/settings', '/api/auth/invite', '/api/local/users', '/api/local/companies', '/api/backup', '/logbook', '/api/audit-log', '/api/drive', '/cash-bank', '/cheques']);
+  // The cheque register is the owner's. /api/money/accounts (the owner's bank names, for the "paid
+  // by cheque" choice every payment screen offers) stays open to every role, as does
+  // /api/cheques/next (the next cheque number, for the same choice).
+  return matchesAny(pathname, new Set(['/api/cheques']), ['/settings', '/api/auth/invite', '/api/local/users', '/api/local/companies', '/api/backup', '/logbook', '/api/audit-log', '/api/drive', '/cheques']);
 }
 
 

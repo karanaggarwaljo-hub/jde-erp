@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       paidBy: String(paidBy ?? ''),
       mode: String(mode ?? ''),
     });
-    // Out of the drawer or the bank account chosen. A screen that still sends only the older free-text
+    // Paid by cheque: into the cheque register. A screen that still sends only the older free-text
     // mode ("cheque", "UPI") has it read as the method.
     if (typeof expense.id === 'string') {
       await placeMoney(companyId, 'expenses', expense.id, body?.money ?? { method: methodFromText(String(mode ?? '')) ?? 'cash' }, access.user.email);

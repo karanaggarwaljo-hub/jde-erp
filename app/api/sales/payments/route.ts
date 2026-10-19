@@ -44,7 +44,7 @@ export async function POST(request: Request) {
       note: typeof note === 'string' ? note.trim().slice(0, 500) : '',
       allocations,
     });
-    // Which drawer or bank it went into, and the cheque if it was one (lib/cash-book.ts).
+    // A cheque: into the cheque register (lib/cash-book.ts).
     await placeMoney(companyId, 'payments_received', String(result.payment_id), body?.money, access.user.email);
     await recordAudit({
       companyId, action: 'payment.receive', entity: 'payments_received', entityId: result.payment_id,

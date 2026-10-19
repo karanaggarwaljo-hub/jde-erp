@@ -1,7 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, BookCheck, CalendarClock, Plus, Search, Trash2, XCircle } from 'lucide-react';
+import { BookCheck, CalendarClock, Plus, Search, Trash2, XCircle } from 'lucide-react';
 import { useCompany } from '@/components/CompanyProvider';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import {
@@ -11,7 +11,6 @@ import {
   nextLeaf,
   PURPOSE_LABEL,
   registerOrder,
-  shortfalls,
   STATUS_LABEL,
   summarise,
   type ChequeBook,
@@ -20,8 +19,10 @@ import {
   type ChequeStatus,
 } from '@/lib/cheques';
 
-type Account = { id: string; name: string; kind: 'cash' | 'bank'; archived: boolean };
-type Data = { cheques: ChequeRow[]; books: ChequeBook[]; accounts: Account[]; balances: Record<string, number>; today: string };
+type Bank = { id: string; name: string };
+type Data = { cheques: ChequeRow[]; books: ChequeBook[]; banks: Bank[]; today: string };
+/** A bank picked from the company's banks, or named new (which adds it). */
+type BankChoice = { accountId: string; newBank: string };
 type Tab = 'out' | 'in' | 'books';
 type Filter = 'open' | ChequeStatus | 'all';
 type Dialog = { type: 'security'; direction: ChequeDirection } | { type: 'cancel-leaf' } | { type: 'book' } | { type: 'edit'; cheque: ChequeRow } | null;
@@ -84,11 +85,10 @@ export default function Cheques() {
   };
 
   const today = data?.today ?? '';
-  const banks = useMemo(() => (data?.accounts ?? []).filter((account) => account.kind === 'bank' && !account.archived), [data]);
-  const accountName = (id: string | null) => data?.accounts.find((account) => account.id === id)?.name ?? '';
+  const banks = useMemo(() => data?.banks ?? [], [data]);
+  const accountName = (id: string | null) => banks.find((bank) => bank.id === id)?.name ?? '';
   const direction: ChequeDirection = tab === 'in' ? 'in' : 'out';
   const summary = data ? summarise(data.cheques, direction, today) : null;
-  const shorts = data && tab === 'out' ? shortfalls(data.cheques, data.balances, today) : [];
   const rows = useMemo(() => {
     if (!data) return [];
     const term = search.trim().toLowerCase();
@@ -126,14 +126,16 @@ export default function Cheques() {
             <button type="button" className="btn btn-secondary" onClick={() => setDialog({ type: 'security', direction })}><Plus size={15} /> Security cheque</button>
           )}
           {tab === 'out' && <button type="button" className="btn btn-secondary" onClick={() => setDialog({ type: 'cancel-leaf' })} disabled={banks.length === 0}><XCircle size={15} /> Cancel a spoiled leaf</button>}
-          {tab === 'books' && <button type="button" className="btn btn-primary" onClick={() => setDialog({ type: 'book' })} disabled={banks.length === 0}><BookCheck size={15} /> Add cheque book</button>}
+          {tab === 'books' && <button type="button" className="btn btn-primary" onClick={() => setDialog({ type: 'book' })}><BookCheck size={15} /> Add cheque book</button>}
         </div>
       </div>
 
       {message && <div className="alert alert-success mb-4" role="status">{message}</div>}
       {error && <div className="alert alert-danger mb-4" role="alert">{error}</div>}
-      {data && banks.length === 0 && (
-        <div className="alert alert-info mb-4" role="status">Add your bank account on the Cash &amp; Bank page first — cheques you give are drawn on it.</div>
+      {data && banks.length === 0 && tab !== 'in' && (
+        <div className="alert alert-info mb-4" role="status">
+          Add your cheque book on the Cheque books tab, with the name of its bank. Cheques you give are then drawn on that bank, and the next leaf number is filled in for you.
+        </div>
       )}
 
       <div className="tabs mb-4" role="group" aria-label="Cheques view">
@@ -150,16 +152,6 @@ export default function Cheques() {
             <Stat title="Post-dated" value={rupees(summary.postDatedTotal)} note={`${summary.postDatedCount} dated later`} color="var(--chart-blue)" />
             <Stat title="Bounced" value={rupees(summary.bouncedTotal)} note={`${summary.bouncedCount} in all`} color="var(--chart-pink)" />
           </div>
-
-          {shorts.map((short) => (
-            <div key={short.accountId} className="alert alert-danger mb-4" role="alert">
-              <AlertTriangle size={16} />
-              <span>
-                Cheques worth <strong>{rupees(short.due)}</strong> on <strong>{accountName(short.accountId)}</strong> fall due by {short.byDate}, but it holds {rupees(short.balance)} —
-                <strong> short by {rupees(short.short)}</strong>. Put money in before they are presented, or a cheque may bounce.
-              </span>
-            </div>
-          ))}
 
           <div className="card">
             <div className="card-header" style={{ flexWrap: 'wrap', gap: 10 }}>
@@ -325,22 +317,38 @@ function Modal({ title, onClose, onSubmit, busy, children, submit = 'Save' }: { 
   );
 }
 
-function SecurityDialog({ direction, banks, today, busy, onClose, onSave }: { direction: ChequeDirection; banks: Account[]; today: string; busy: boolean; onClose: () => void; onSave: (body: Record<string, unknown>) => void }) {
-  const [form, setForm] = useState({ accountId: banks[0]?.id ?? '', bankName: '', chequeNo: '', chequeDate: '', issuedOn: today, party: '', partyType: direction === 'out' ? 'supplier' : 'customer', amount: '', note: '' });
+function BankField({ id, label, banks, value, onChange }: { id: string; label: string; banks: Bank[]; value: BankChoice; onChange: (value: BankChoice) => void }) {
+  const naming = banks.length === 0 || !value.accountId;
+  return (
+    <div className="form-group"><label className="form-label" htmlFor={id}>{label}</label>
+      {banks.length > 0 && (
+        <select id={id} className="form-input form-select" value={value.accountId} onChange={(event) => onChange({ accountId: event.target.value, newBank: '' })}>
+          {banks.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
+          <option value="">Another bank…</option>
+        </select>
+      )}
+      {naming && (
+        <input id={banks.length === 0 ? id : undefined} aria-label={banks.length === 0 ? undefined : 'Name of the other bank'} className="form-input" required
+          style={banks.length > 0 ? { marginTop: 6 } : undefined} placeholder="e.g. HDFC Bank, Sector 17" value={value.newBank}
+          onChange={(event) => onChange({ accountId: '', newBank: event.target.value })} />
+      )}
+    </div>
+  );
+}
+
+function SecurityDialog({ direction, banks, today, busy, onClose, onSave }: { direction: ChequeDirection; banks: Bank[]; today: string; busy: boolean; onClose: () => void; onSave: (body: Record<string, unknown>) => void }) {
+  const [form, setForm] = useState({ accountId: banks[0]?.id ?? '', newBank: '', bankName: '', chequeNo: '', chequeDate: '', issuedOn: today, party: '', partyType: direction === 'out' ? 'supplier' : 'customer', amount: '', note: '' });
   const set = (patch: Partial<typeof form>) => setForm({ ...form, ...patch });
   return (
     <Modal title={direction === 'out' ? 'Security cheque given' : 'Security cheque taken'} busy={busy} onClose={onClose}
       onSubmit={(event) => { event.preventDefault(); onSave({ ...form, amount: Number(form.amount) || 0 }); }}>
       <p className="text-muted" style={{ fontSize: 13 }}>
-        A cheque kept as a guarantee, not a payment — it does not change any balance. To pay by cheque, choose &quot;Cheque&quot; when you pay; it is entered here by itself.
+        A cheque kept as a guarantee, not a payment — it pays nothing. To pay by cheque, choose &quot;Cheque&quot; when you pay; it is entered here by itself.
       </p>
       <div className="form-group"><label className="form-label" htmlFor="sec-party">{direction === 'out' ? 'Given to' : 'Taken from'}</label>
         <input id="sec-party" className="form-input" required value={form.party} onChange={(event) => set({ party: event.target.value })} /></div>
       {direction === 'out' ? (
-        <div className="form-group"><label className="form-label" htmlFor="sec-bank">Drawn on</label>
-          <select id="sec-bank" className="form-input form-select" value={form.accountId} onChange={(event) => set({ accountId: event.target.value })}>
-            {banks.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
-          </select></div>
+        <BankField id="sec-bank" label="Drawn on" banks={banks} value={form} onChange={(bank) => set(bank)} />
       ) : (
         <div className="form-group"><label className="form-label" htmlFor="sec-bankname">Their bank</label>
           <input id="sec-bankname" className="form-input" value={form.bankName} onChange={(event) => set({ bankName: event.target.value })} /></div>
@@ -358,14 +366,14 @@ function SecurityDialog({ direction, banks, today, busy, onClose, onSave }: { di
   );
 }
 
-function LeafDialog({ banks, suggest, busy, onClose, onSave }: { banks: Account[]; suggest: (accountId: string) => string; busy: boolean; onClose: () => void; onSave: (body: Record<string, unknown>) => void }) {
+function LeafDialog({ banks, suggest, busy, onClose, onSave }: { banks: Bank[]; suggest: (accountId: string) => string; busy: boolean; onClose: () => void; onSave: (body: Record<string, unknown>) => void }) {
   const [accountId, setAccountId] = useState(banks[0]?.id ?? '');
   const [chequeNo, setChequeNo] = useState(() => (banks[0] ? suggest(banks[0].id) : ''));
   const [note, setNote] = useState('');
   return (
     <Modal title="Cancel a spoiled leaf" submit="Cancel this leaf" busy={busy} onClose={onClose} onSubmit={(event) => { event.preventDefault(); onSave({ accountId, chequeNo, note }); }}>
       <p className="text-muted" style={{ fontSize: 13 }}>For a leaf written wrongly or torn — it is marked cancelled, so the next number moves on and the book shows why it was not used.</p>
-      <div className="form-group"><label className="form-label" htmlFor="leaf-bank">Bank account</label>
+      <div className="form-group"><label className="form-label" htmlFor="leaf-bank">Bank</label>
         <select id="leaf-bank" className="form-input form-select" value={accountId} onChange={(event) => { setAccountId(event.target.value); setChequeNo(suggest(event.target.value)); }}>
           {banks.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
         </select></div>
@@ -375,14 +383,11 @@ function LeafDialog({ banks, suggest, busy, onClose, onSave }: { banks: Account[
   );
 }
 
-function BookDialog({ banks, today, busy, onClose, onSave }: { banks: Account[]; today: string; busy: boolean; onClose: () => void; onSave: (body: Record<string, unknown>) => void }) {
-  const [form, setForm] = useState({ accountId: banks[0]?.id ?? '', firstNo: '', lastNo: '', receivedOn: today, note: '' });
+function BookDialog({ banks, today, busy, onClose, onSave }: { banks: Bank[]; today: string; busy: boolean; onClose: () => void; onSave: (body: Record<string, unknown>) => void }) {
+  const [form, setForm] = useState({ accountId: banks[0]?.id ?? '', newBank: '', firstNo: '', lastNo: '', receivedOn: today, note: '' });
   return (
     <Modal title="Add a cheque book" busy={busy} onClose={onClose} onSubmit={(event) => { event.preventDefault(); onSave(form); }}>
-      <div className="form-group"><label className="form-label" htmlFor="book-bank">Bank account</label>
-        <select id="book-bank" className="form-input form-select" value={form.accountId} onChange={(event) => setForm({ ...form, accountId: event.target.value })}>
-          {banks.map((bank) => <option key={bank.id} value={bank.id}>{bank.name}</option>)}
-        </select></div>
+      <BankField id="book-bank" label="Bank" banks={banks} value={form} onChange={(bank) => setForm({ ...form, ...bank })} />
       <div className="form-grid-2">
         <div className="form-group"><label className="form-label" htmlFor="book-first">First leaf number</label><input id="book-first" className="form-input" required inputMode="numeric" placeholder="e.g. 000101" value={form.firstNo} onChange={(event) => setForm({ ...form, firstNo: event.target.value })} /></div>
         <div className="form-group"><label className="form-label" htmlFor="book-last">Last leaf number</label><input id="book-last" className="form-input" required inputMode="numeric" placeholder="e.g. 000125" value={form.lastNo} onChange={(event) => setForm({ ...form, lastNo: event.target.value })} /></div>

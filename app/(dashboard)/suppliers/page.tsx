@@ -46,7 +46,7 @@ export default function SuppliersPage() {
   const [showModal, setShowModal] = useState(false);
   const [paymentSupplier, setPaymentSupplier] = useState<Supplier | null>(null);
   const [paymentAmount, setPaymentAmount] = useState(0);
-  // How the supplier was paid and from which account (Cash & Bank).
+  // Whether the supplier was paid by cheque, and its details (the cheque register).
   const [paymentMoney, setPaymentMoney] = useState<MoneyChoice | null>(null);
   // Fixed when the dialog opens and reused by every retry of that same payment, so a double-click
   // or a re-submit after a timeout lands on the payment already recorded instead of a second one.

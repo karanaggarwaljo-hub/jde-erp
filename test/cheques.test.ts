@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bookLeaves, leavesOf, nextLeaf, registerOrder, shortfalls, summarise, type ChequeBook, type ChequeRow } from '../lib/cheques';
+import { bookLeaves, leavesOf, nextLeaf, registerOrder, summarise, type ChequeBook, type ChequeRow } from '../lib/cheques';
 
 const today = '2026-10-18';
 const cheque = (overrides: Partial<ChequeRow>): ChequeRow => ({
@@ -45,12 +45,6 @@ test('the summary separates what is due this week from post-dated cheques, and l
   assert.equal(out.postDatedTotal, 9000);
   assert.equal(out.bouncedTotal, 3000);
   assert.equal(summarise(cheques, 'in', today).pendingTotal, 4000);
-});
-
-test('a bank account that will not cover this week\'s cheques is flagged with the shortfall', () => {
-  const cheques = [cheque({ id: '1', amount: 30000 }), cheque({ id: '2', cheque_date: '2026-10-23', amount: 25000 }), cheque({ id: '3', cheque_date: '2026-12-01', amount: 90000 })];
-  assert.deepEqual(shortfalls(cheques, { hdfc: 40000 }, today), [{ accountId: 'hdfc', byDate: '2026-10-23', due: 55000, balance: 40000, short: 15000 }]);
-  assert.deepEqual(shortfalls(cheques, { hdfc: 60000 }, today), []);
 });
 
 test('the register lists cheques still to clear first, by the date on them', () => {

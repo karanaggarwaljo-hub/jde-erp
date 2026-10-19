@@ -17,7 +17,7 @@ export const LOG_KINDS: Array<{ key: LogKind; label: string; subjects: string[] 
   { key: 'website', label: 'Website', subjects: ['catalog_products', 'catalog', 'catalog_leads'] },
   { key: 'access', label: 'Sign-ins & staff', subjects: ['auth', 'users'] },
   { key: 'data', label: 'Company & backups', subjects: ['company', 'companies', 'backup'] },
-  { key: 'money', label: 'Cash, bank & cheques', subjects: ['money', 'cheque'] },
+  { key: 'money', label: 'Cheques', subjects: ['money', 'cheque'] },
 ];
 
 export function isLogKind(value: unknown): value is LogKind {

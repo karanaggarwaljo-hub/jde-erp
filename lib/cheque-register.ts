@@ -35,7 +35,7 @@ import {
 import { shopDay } from './logbook';
 import type { ChequeRow, ChequeStatus } from './cheques';
 
-type Money = { method: string; accountId: string | null; chequeNo: string | null; chequeDate: string | null };
+type Money = { method: string; accountId: string | null; chequeNo: string | null; chequeDate: string | null; bankName?: string | null };
 
 /** Enters a cheque that paid (or was received as) a payment, an expense or a cash-book entry.
  *  Never throws: the payment is already saved. A leaf number already in the register is noted in
@@ -49,6 +49,7 @@ export async function registerChequeFor(companyId: string, by: string, table: Mo
       company_id: companyId,
       direction,
       account_id: money.accountId,
+      bank_name: money.bankName ?? null,
       cheque_no: money.chequeNo?.replace(/\s+/g, '') || null,
       cheque_date: money.chequeDate,
       issued_on: /^\d{4}-\d{2}-\d{2}$/.test(source.date) ? source.date : shopDay(new Date()),
@@ -131,7 +132,7 @@ export async function setChequeStatus(companyId: string, by: string, chequeId: s
   if (status === 'bounced' || status === 'cancelled') undone = await undoPayment(companyId, cheque);
 
   await updateCheque(companyId, cheque.id, { status, status_on: day, ...(undone ? { reversed: true } : {}) });
-  // The payment's own record carries the state Cash & Bank reads, while it still exists.
+  // The payment's own record carries the cheque's state too, while it still exists.
   if (!undone && cheque.source_table && cheque.source_id) {
     await setMoneyFields(companyId, cheque.source_table as MoneySourceTable, cheque.source_id, {
       cheque_status: SOURCE_STATUS[status],

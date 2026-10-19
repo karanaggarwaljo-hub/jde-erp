@@ -223,7 +223,7 @@ export default function SalesPage() {
   // (tax carved out of them). Only ever changes how the same typed numbers are read.
   const [gstInclusive, setGstInclusive] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>('unpaid');
-  // How the money taken at the counter was paid and into which account (Cash & Bank).
+  // Whether the money taken at the counter was a cheque, and its details (the cheque register).
   const [moneyChoice, setMoneyChoice] = useState<MoneyChoice | null>(null);
   const [amountPaid, setAmountPaid] = useState(0);
   // Presentation-only view state: which payment slice of the list is on screen, and which page
