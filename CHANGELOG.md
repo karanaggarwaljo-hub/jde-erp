@@ -2,6 +2,18 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-19 — Bills with goods returned now add up
+
+When a customer returns goods, the ERP lowers the bill's discount, GST and total, but keeps the
+lines as they were sold. So the printed bill and its saved PDF showed lines that did not add up to
+the total.
+
+Now, under the lines, such a bill shows **Less goods returned** with the credit note numbers
+(e.g. SRN-1003) and the amount, then **Subtotal after returns**. The discount, GST and total
+follow from that, so every figure adds up. Bills without returns print exactly as before.
+
+Saved PDFs of bills with returns are redrawn the next time they're opened.
+
 ## 2026-10-18 — Cheques: every cheque given and received, cheque books, and bounces done properly
 
 A new **Cheques** page (in the menu, under Money & reports, next to Cash & Bank).

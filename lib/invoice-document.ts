@@ -8,7 +8,7 @@
  */
 
 import { paise } from './money';
-import { invoiceFigures, type FigureInvoice, type FigureItem } from './invoice-figures';
+import { invoiceFigures, type FigureInvoice, type FigureItem, type FigureReturn } from './invoice-figures';
 
 export type DocCompany = {
   name: string;
@@ -70,9 +70,11 @@ export function buildInvoiceDocument(source: {
   items: DocItem[];
   company: DocCompany;
   customer: DocCustomer;
+  /** Credit notes against the invoice. */
+  returns?: FigureReturn[];
 }): InvoiceDocument {
   const { invoice, items, company, customer } = source;
-  const f = invoiceFigures(invoice, items);
+  const f = invoiceFigures(invoice, items, source.returns ?? []);
   const paid = num(invoice.paid);
   const total = num(invoice.total);
 
@@ -108,6 +110,10 @@ export function buildInvoiceDocument(source: {
   const totals: InvoiceDocumentTotal[] = [];
   if (items.length > 0 && f.lineDiscountTotal > 0) totals.push({ label: 'Item discounts', value: `-${rs(f.lineDiscountTotal)}` });
   if (items.length > 0) totals.push({ label: f.lineDiscountTotal > 0 ? 'Subtotal after item discounts' : 'Subtotal', value: rs(f.subtotal) });
+  if (f.returnedValue > 0) {
+    totals.push({ label: `Less goods returned (${f.returnIds.join(', ')})`, value: `-${rs(f.returnedValue)}` });
+    totals.push({ label: 'Subtotal after returns', value: rs(f.keptSubtotal) });
+  }
   if (f.discountAmount > 0) totals.push({ label: `Discount (${num(invoice.discount_percent).toFixed(0)}%)`, value: `-${rs(f.discountAmount)}` });
   if (items.length > 0 && f.gstAmount > 0.005) {
     totals.push({ label: 'Taxable value', value: rs(f.netTaxableValue) });

@@ -8,6 +8,7 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 import { money } from '@/lib/money';
 import { type Customer, type Invoice, type InvoiceItem } from '@/lib/sales-types';
 import { invoiceFigures } from '@/lib/invoice-figures';
+import { type SalesReturnRow } from '@/lib/client-sales-returns';
 
 
 export default function SalesInvoicePrintPage() {
@@ -16,6 +17,7 @@ export default function SalesInvoicePrintPage() {
   const { rows: invoices, loading: invoicesLoading } = useCompanyTable<Invoice>('invoices');
   const { rows: invoiceItems, loading: itemsLoading } = useCompanyTable<InvoiceItem>('invoice_items');
   const { rows: customers } = useCompanyTable<Customer>('customers');
+  const { rows: salesReturns } = useCompanyTable<SalesReturnRow>('sales_returns');
 
   const loading = invoicesLoading || itemsLoading;
   const invoice = invoices.find((row) => row.id === id);
@@ -36,10 +38,13 @@ export default function SalesInvoicePrintPage() {
 
   const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
   const customer = customers.find((row) => row.name === invoice.customer);
+  const returns = salesReturns
+    .filter((row) => row.invoice_id === invoice.id)
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
   // The same figures the saved PDF prints (lib/invoice-figures.ts), so the two never disagree.
   const {
-    subtotal, anyLineDiscount, lineDiscountTotal, discountAmount, gstInclusive, gstAmount, netTaxableValue, balanceDue, writtenOff,
-  } = invoiceFigures(invoice, items);
+    subtotal, returnedValue, returnIds, keptSubtotal, anyLineDiscount, lineDiscountTotal, discountAmount, gstInclusive, gstAmount, netTaxableValue, balanceDue, writtenOff,
+  } = invoiceFigures(invoice, items, returns);
 
   // Subtotal and GST are not columns on the invoice row itself — only `total`, `discount_percent`
   // and `discount_amount` are (see the Invoice type above, copied from the sales page). When line
@@ -141,6 +146,14 @@ export default function SalesInvoicePrintPage() {
           )}
           {items.length > 0 && (
             <div className="report-line"><span>Subtotal{lineDiscountTotal > 0 ? " after item discounts" : ""}</span><span>₹{money(subtotal)}</span></div>
+          )}
+          {/* A return lowers the discount, GST and total but leaves the lines as sold, so the
+              returned goods are taken off here — otherwise the lines would not add up. */}
+          {returnedValue > 0 && (
+            <>
+              <div className="report-line"><span>Less goods returned ({returnIds.join(', ')})</span><span className="text-danger">-₹{money(returnedValue)}</span></div>
+              <div className="report-line"><span>Subtotal after returns</span><span>₹{money(keptSubtotal)}</span></div>
+            </>
           )}
           {discountAmount > 0 && (
             <div className="report-line"><span>Discount ({Number(invoice.discount_percent).toFixed(0)}%)</span><span className="text-danger">-₹{money(discountAmount)}</span></div>

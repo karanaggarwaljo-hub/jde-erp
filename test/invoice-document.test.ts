@@ -81,3 +81,31 @@ test('an invoice from before line items were recorded still has a document', () 
   assert.ok(doc.emptyNote);
   assert.deepEqual(doc.totals.map((t) => t.label), ['Total', 'Paid', 'Balance due']);
 });
+
+test('a bill with goods returned takes them off before the discount and GST, so its lines add up to its total', () => {
+  // INV-1018 on the test company: Rs. 75,900 sold, SRN-1003 took back Rs. 8,200 of it, and the
+  // return lowered the GST and total to the kept Rs. 67,700 but left the lines as sold.
+  const sold = [item({ qty: 10, unit_price: 7590, line_total: 75900 })];
+  const kept = invoice({ id: 'INV-1018', total: 79886, gst_amount: 12186 });
+  const f = invoiceFigures(kept, sold, [{ id: 'SRN-1003', subtotal: 8200 }]);
+  assert.equal(f.subtotal, 75900);
+  assert.equal(f.returnedValue, 8200);
+  assert.equal(f.keptSubtotal, 67700);
+  assert.equal(f.netTaxableValue, 67700);
+  assert.equal(f.keptSubtotal - f.discountAmount + f.gstAmount, 79886);
+
+  const doc = buildInvoiceDocument({ invoice: kept, items: sold, company: COMPANY, customer: null, returns: [{ id: 'SRN-1003', subtotal: '8200.00' }] });
+  assert.deepEqual(doc.totals.slice(0, 4).map((line) => [line.label, line.value]), [
+    ['Subtotal', 'Rs. 75,900.00'],
+    ['Less goods returned (SRN-1003)', '-Rs. 8,200.00'],
+    ['Subtotal after returns', 'Rs. 67,700.00'],
+    ['Taxable value', 'Rs. 67,700.00'],
+  ]);
+});
+
+test('a bill with no returns prints exactly as before', () => {
+  const plain = buildInvoiceDocument({ invoice: invoice(), items: [item()], company: COMPANY, customer: null });
+  const empty = buildInvoiceDocument({ invoice: invoice(), items: [item()], company: COMPANY, customer: null, returns: [] });
+  assert.deepEqual(empty, plain);
+  assert.ok(!plain.totals.some((line) => line.label.startsWith('Less goods returned')));
+});

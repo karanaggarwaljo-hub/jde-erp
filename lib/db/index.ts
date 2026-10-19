@@ -1463,12 +1463,13 @@ export function invoicePdfPath(companyId: string, invoiceId: string): string {
  *  invoice is not in this company. */
 export async function getInvoicePdfSource(companyId: string, invoiceId: string) {
   const client = getClient();
-  const [invoice, items, company] = await Promise.all([
+  const [invoice, items, company, returns] = await Promise.all([
     client.from('jde_invoices').select('*').eq('company_id', companyId).eq('id', invoiceId).maybeSingle(),
     client.from('jde_invoice_items').select('*').eq('company_id', companyId).eq('invoice_id', invoiceId).order('id', { ascending: true }),
     client.from('jde_companies').select('name, gstin, address, contact_phone, contact_email').eq('id', companyId).maybeSingle(),
+    client.from('jde_sales_returns').select('id, subtotal').eq('company_id', companyId).eq('invoice_id', invoiceId).order('created_at', { ascending: true }),
   ]);
-  for (const result of [invoice, items, company]) {
+  for (const result of [invoice, items, company, returns]) {
     if (result.error) throw result.error;
   }
   const row = invoice.data as Record<string, unknown> | null;
@@ -1482,6 +1483,7 @@ export async function getInvoicePdfSource(companyId: string, invoiceId: string) 
     items: ((items.data as unknown[]) ?? []) as import('../invoice-document').DocItem[],
     company: ((company.data as Record<string, unknown> | null) ?? { name: '' }) as unknown as import('../invoice-document').DocCompany,
     customer: (customer.data as import('../invoice-document').DocCustomer) ?? null,
+    returns: ((returns.data as unknown[]) ?? []) as import('../invoice-figures').FigureReturn[],
   };
 }
 

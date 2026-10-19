@@ -51,6 +51,8 @@ export type SalesReturnRow = {
   invoice_id: string;
   customer_id: string | null;
   reason: string;
+  /** What the returned lines were worth, before the bill's discount and GST. */
+  subtotal: number;
   credit_total: number;
   refund_or_credit_amount: number;
   created_at: string;
