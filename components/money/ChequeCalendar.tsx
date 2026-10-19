@@ -5,8 +5,9 @@ import { ChevronLeft, ChevronRight, Lightbulb } from 'lucide-react';
 import { dueDate, STATUS_LABEL, type ChequeRow, type ChequeStatus } from '@/lib/cheques';
 import {
   addDays,
-  collectionPattern,
-  coveredOn,
+  breakdown,
+  dailyAverage,
+  flatPattern,
   partyHabit,
   projectDays,
   suggestDate,
@@ -14,28 +15,28 @@ import {
   type CollectionDay,
 } from '@/lib/cheque-plan';
 
-const rupees = (value: number | string) => `₹${Number(value || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+const rupees = (value: number | string) => `₹${Math.round(Number(value || 0)).toLocaleString('en-IN')}`;
 /** Short enough for a calendar square on a phone. */
 const compact = (value: number) => (value >= 100000 ? `₹${(value / 100000).toFixed(1)}L` : value >= 1000 ? `₹${Math.round(value / 1000)}k` : `₹${Math.round(value)}`);
-const pretty = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const pretty = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 const monthTitle = (month: string) => new Date(`${month}-01T00:00:00Z`).toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' });
 const shiftMonth = (month: string, by: number) => {
   const [year, number] = month.split('-').map(Number);
-  const date = new Date(Date.UTC(year, number - 1 + by, 1));
-  return date.toISOString().slice(0, 7);
+  return new Date(Date.UTC(year, number - 1 + by, 1)).toISOString().slice(0, 7);
 };
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const STATUS_BADGE: Record<ChequeStatus, string> = { pending: 'badge-warning', cleared: 'badge-success', bounced: 'badge-danger', cancelled: 'badge-muted', returned: 'badge-info' };
-/** How far ahead the projection and the suggestion look. */
+/** How far ahead the planner looks. */
 const HORIZON = 90;
 
 type DayTotals = { given: number; givenCount: number; received: number; receivedCount: number; bounced: number; cheques: ChequeRow[] };
 
 /**
- * The Cheques page's Calendar: every cheque on the date written on it, and a planner that suggests
- * the date to give a new cheque — the earliest date it stays covered by the money your sales bring
- * in (lib/cheque-plan.ts), and the date you usually give that supplier, from your earlier cheques.
+ * The Cheques page's Calendar: every cheque on the date written on it, and a planner that answers
+ * "when can I date a cheque for this much?" from three figures the owner can see and change — the
+ * money in the bank today, the money sales bring in on an average day (worked out from the last 30
+ * days, lib/cheque-plan.ts), and the cheques already given and received. The answer is one sentence
+ * with the sum that gives it underneath.
  */
 export default function ChequeCalendar({ cheques, collections, today, parties }: {
   cheques: ChequeRow[];
@@ -49,18 +50,18 @@ export default function ChequeCalendar({ cheques, collections, today, parties }:
   const [amount, setAmount] = useState('');
   const [party, setParty] = useState('');
   const [inBank, setInBank] = useState('');
-  const [notBefore, setNotBefore] = useState('');
-  const [moreOptions, setMoreOptions] = useState(false);
+  const average = useMemo(() => dailyAverage(collections, today), [collections, today]);
+  // The daily figure starts as the average from sales and can be changed to what the owner knows.
+  const [perDayText, setPerDayText] = useState<string | null>(null);
+  const perDay = perDayText === null ? Math.round(average.perDay) : Number(perDayText) || 0;
 
-  const pattern = useMemo(() => collectionPattern(collections, today), [collections, today]);
-  const days = useMemo(() => projectDays({ cheques, pattern, today, startBalance: Number(inBank) || 0, horizon: HORIZON }), [cheques, pattern, today, inBank]);
+  const bankKnown = inBank.trim() !== '';
+  const days = useMemo(() => projectDays({ cheques, pattern: flatPattern(perDay), today, startBalance: Number(inBank) || 0, horizon: HORIZON }), [cheques, perDay, today, inBank]);
   const dayByDate = useMemo(() => new Map(days.map((day) => [day.date, day])), [days]);
   const wanted = Number(amount) || 0;
-  const suggestion = wanted > 0 ? suggestDate(days, wanted, notBefore || null) : null;
+  const suggestion = wanted > 0 && bankKnown ? suggestDate(days, wanted) : null;
+  const parts = suggestion?.date ? breakdown(days, suggestion.date) : null;
   const habit = useMemo(() => partyHabit(cheques, party.trim() || null), [cheques, party]);
-  const usualDate = habit.postDatedDays != null ? addDays(today, habit.postDatedDays) : null;
-  const nextPayment = party.trim() && habit.everyDays && habit.last ? addDays(habit.last.issuedOn, habit.everyDays) : null;
-  const busiest = pattern.daysCovered > 0 ? pattern.byWeekday.indexOf(Math.max(...pattern.byWeekday)) : -1;
 
   // Every cheque on the date written on it. A spoiled leaf (cancelled, no amount) is not a cheque.
   const byDate = useMemo(() => {
@@ -92,63 +93,61 @@ export default function ChequeCalendar({ cheques, collections, today, parties }:
   };
   const picked = byDate.get(selected);
   const pickedDay = dayByDate.get(selected);
+  const who = party.trim();
 
   return (
     <>
       <div className="card mb-4">
-        <h3 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}><Lightbulb size={16} /> When should I date a new cheque?</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
-          <div className="form-group"><label className="form-label" htmlFor="plan-amount">Amount (₹)</label>
-            <input id="plan-amount" type="number" min="0" step="1" inputMode="numeric" className="form-input" placeholder="e.g. 50000" value={amount} onChange={(event) => setAmount(event.target.value)} /></div>
+        <h3 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12 }}><Lightbulb size={16} /> When can I date a cheque?</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+          <div className="form-group"><label className="form-label" htmlFor="plan-amount">Cheque amount (₹)</label>
+            <input id="plan-amount" type="number" min="0" step="1" inputMode="numeric" className="form-input" placeholder="e.g. 40000" value={amount} onChange={(event) => setAmount(event.target.value)} /></div>
+          <div className="form-group"><label className="form-label" htmlFor="plan-bank">Money in your bank today (₹)</label>
+            <input id="plan-bank" type="number" step="1" inputMode="numeric" className="form-input" placeholder="e.g. 25000" value={inBank} onChange={(event) => setInBank(event.target.value)} /></div>
+          <div className="form-group"><label className="form-label" htmlFor="plan-perday">Money coming in per day (₹)</label>
+            <input id="plan-perday" type="number" min="0" step="1" inputMode="numeric" className="form-input" value={perDayText ?? String(Math.round(average.perDay))} onChange={(event) => setPerDayText(event.target.value)} />
+            <span className="text-muted" style={{ fontSize: 12 }}>
+              {average.days > 0 ? `Your sales brought in ${rupees(average.total)} in the last ${average.days} days. Change it if you know better.` : 'No sales money recorded in the last 30 days. Type your usual daily takings.'}
+            </span></div>
           <div className="form-group"><label className="form-label" htmlFor="plan-party">To (optional)</label>
             <input id="plan-party" className="form-input" list="plan-parties" placeholder="Supplier" value={party} onChange={(event) => setParty(event.target.value)} />
             <datalist id="plan-parties">{parties.map((name) => <option key={name} value={name} />)}</datalist></div>
-          {moreOptions && (
-            <>
-              <div className="form-group"><label className="form-label" htmlFor="plan-bank">In the bank today</label>
-                <input id="plan-bank" type="number" step="1" inputMode="numeric" className="form-input" placeholder="₹" value={inBank} onChange={(event) => setInBank(event.target.value)} /></div>
-              <div className="form-group"><label className="form-label" htmlFor="plan-after">Not before</label>
-                <input id="plan-after" type="date" className="form-input" min={today} value={notBefore} onChange={(event) => setNotBefore(event.target.value)} /></div>
-            </>
-          )}
         </div>
-        {!moreOptions && (
-          <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 4, paddingLeft: 0 }} onClick={() => setMoreOptions(true)}>+ Money in the bank today, earliest date</button>
+
+        {wanted > 0 && !bankKnown && (
+          <div className="alert alert-info" role="status" style={{ marginTop: 12 }}>Type how much money is in your bank today to get a date.</div>
         )}
 
-        {suggestion && (
-          suggestion.date ? (
-            <div className="alert alert-success" role="status" style={{ marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-              <span style={{ fontSize: 15 }}>Date it <strong>{pretty(suggestion.date)}</strong> or later.</span>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => show(suggestion.date!)}>Show on calendar</button>
-            </div>
-          ) : (
-            <div className="alert alert-danger" role="alert" style={{ marginTop: 10 }}>
-              <span>Not enough money expected in the next {HORIZON} days — about <strong>{rupees(suggestion.shortBy)}</strong> short.</span>
-            </div>
-          )
-        )}
+        {suggestion && (suggestion.date ? (
+          <div className="alert alert-success" role="status" style={{ marginTop: 12, flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+            <span style={{ fontSize: 16 }}>
+              {suggestion.date === today
+                ? <>✅ You can date it <strong>today</strong>{who ? <> for {who}</> : null}.</>
+                : <>Date it <strong>{pretty(suggestion.date)}</strong> or later{who ? <> for {who}</> : null}.</>}
+            </span>
+            {parts && (
+              <span style={{ fontSize: 13 }}>
+                By {suggestion.date === today ? 'today' : pretty(suggestion.date)}: {rupees(Number(inBank) || 0)} in the bank
+                {parts.sales > 0 && <> + {rupees(parts.sales)} from sales</>}
+                {parts.chequesIn > 0 && <> + {rupees(parts.chequesIn)} cheques you will receive</>}
+                {parts.chequesOut > 0 && <> − {rupees(parts.chequesOut)} cheques you have already given</>}
+                {' '}= <strong>{rupees(dayByDate.get(suggestion.date)?.balance ?? 0)}</strong>, enough for {rupees(wanted)}.
+              </span>
+            )}
+            {suggestion.date !== today && <button type="button" className="btn btn-secondary btn-sm" onClick={() => show(suggestion.date!)}>Show on calendar</button>}
+          </div>
+        ) : (
+          <div className="alert alert-danger" role="alert" style={{ marginTop: 12 }}>
+            <span>Not enough money in the next {HORIZON} days. You are about <strong>{rupees(suggestion.shortBy)}</strong> short.</span>
+          </div>
+        ))}
 
-        {party.trim() && habit.count > 0 && (
-          <p className="text-sm" style={{ marginTop: 8 }}>
-            {habit.postDatedDays != null
-              ? <>You usually date {party.trim()}&rsquo;s cheques <strong>{habit.postDatedDays} day{habit.postDatedDays === 1 ? '' : 's'} ahead</strong>{usualDate ? <> (that would be {pretty(usualDate)}{wanted > 0 ? (coveredOn(days, wanted, usualDate) ? ', which is fine' : <>, <span className="text-danger">which is too early</span></>) : ''})</> : null}.</>
-              : <>{habit.count} earlier cheque{habit.count === 1 ? '' : 's'} to {party.trim()}.</>}
-            {nextPayment && <> Next payment usually due around <strong>{pretty(nextPayment)}</strong>.</>}
+        {who && habit.count > 0 && habit.last && (
+          <p className="text-sm text-muted" style={{ marginTop: 8 }}>
+            Last cheque to {who}: {rupees(habit.last.amount)}, given {pretty(habit.last.issuedOn)}
+            {habit.postDatedDays ? <>; you usually date their cheques {habit.postDatedDays} day{habit.postDatedDays === 1 ? '' : 's'} ahead</> : null}.
           </p>
         )}
-
-        <details style={{ marginTop: 8 }}>
-          <summary className="text-muted" style={{ fontSize: 12, cursor: 'pointer' }}>How is this worked out?</summary>
-          <p className="text-muted" style={{ fontSize: 12, marginTop: 6 }}>
-            {pattern.daysCovered > 0
-              ? <>From the money your sales brought in over the last {pattern.daysCovered} days ({rupees(pattern.total)}, about {rupees(pattern.total / pattern.daysCovered)} a day, most on {WEEKDAY_NAMES[busiest]}s), plus cheques you will receive, less every cheque you have already given. </>
-              : <>No money has come in from sales in the last 12 weeks, so only cheques you will receive and the bank figure are counted. </>}
-            {pattern.daysCovered > 0 && pattern.daysCovered < 28 && <>Only {pattern.daysCovered} days of history so far, so this improves as more sales are recorded. </>}
-            {!inBank && <>Without a bank figure it starts from nothing, to be safe. </>}
-            It assumes the money you take in reaches the bank.
-          </p>
-        </details>
       </div>
 
       <div className="card">
@@ -164,13 +163,12 @@ export default function ChequeCalendar({ cheques, collections, today, parties }:
           {cells.map((day, index) => {
             if (!day) return <div key={`blank-${index}`} />;
             const totals = byDate.get(day);
-            const projected = dayByDate.get(day);
             const isSuggested = suggestion?.date === day;
             return (
               <button key={day} type="button" onClick={() => setSelected(day)} aria-pressed={selected === day}
                 aria-label={`${pretty(day)}${totals ? `: ${totals.givenCount} given, ${totals.receivedCount} received` : ''}${isSuggested ? ', suggested date' : ''}`}
                 style={{
-                  minHeight: 74, padding: 4, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2, borderRadius: 8, cursor: 'pointer', minWidth: 0, overflow: 'hidden',
+                  minHeight: 64, padding: 4, textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2, borderRadius: 8, cursor: 'pointer', minWidth: 0, overflow: 'hidden',
                   border: isSuggested ? '2px solid var(--color-success)' : day === today ? '2px solid var(--brand-primary)' : '1px solid var(--line)',
                   background: selected === day ? 'var(--panel-2)' : 'var(--bg-card)', color: 'var(--ink)', font: 'inherit',
                 }}>
@@ -178,14 +176,13 @@ export default function ChequeCalendar({ cheques, collections, today, parties }:
                 {totals && totals.givenCount > 0 && <span style={{ fontSize: 11, color: 'var(--color-danger)', fontWeight: 600, whiteSpace: 'nowrap' }}>−{compact(totals.given)}{totals.givenCount > 1 ? ` ·${totals.givenCount}` : ''}</span>}
                 {totals && totals.receivedCount > 0 && <span style={{ fontSize: 11, color: 'var(--color-success)', fontWeight: 600, whiteSpace: 'nowrap' }}>+{compact(totals.received)}{totals.receivedCount > 1 ? ` ·${totals.receivedCount}` : ''}</span>}
                 {totals && totals.bounced > 0 && <span style={{ fontSize: 10, color: 'var(--color-danger)' }}>{totals.bounced} bounced</span>}
-                {projected && day > today && projected.expectedIn > 0 && <span className="text-muted" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>~{compact(projected.expectedIn)} sales</span>}
                 {isSuggested && <span style={{ fontSize: 10, color: 'var(--color-success)', fontWeight: 700 }}>✓ date it</span>}
               </button>
             );
           })}
         </div>
         <p className="text-muted" style={{ fontSize: 12, marginTop: 8 }}>
-          <span style={{ color: 'var(--color-danger)', fontWeight: 600 }}>−</span> cheques you gave, <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>+</span> cheques you received, on the date written on them. &ldquo;~ sales&rdquo; is the money a usual day of that weekday brings in.
+          <span style={{ color: 'var(--color-danger)', fontWeight: 600 }}>−</span> cheques you gave, <span style={{ color: 'var(--color-success)', fontWeight: 600 }}>+</span> cheques you received, on the date written on them.
         </p>
 
         <div style={{ borderTop: '1px solid var(--line)', marginTop: 12, paddingTop: 12 }}>
@@ -208,11 +205,10 @@ export default function ChequeCalendar({ cheques, collections, today, parties }:
               </table>
             </div>
           )}
-          {pickedDay && selected >= today && (
+          {bankKnown && pickedDay && selected >= today && (
             <p className="text-muted text-sm" style={{ marginTop: 8 }}>
-              {selected > today && <>Usual money in from sales: {rupees(pickedDay.expectedIn)}. </>}
-              Expected {inBank ? 'in the bank' : 'built up from today'} by the end of the day: <strong style={{ color: pickedDay.balance < 0 ? 'var(--color-danger)' : undefined }}>{rupees(pickedDay.balance)}</strong>
-              {pickedDay.balance < 0 && <> — short; a cheque presented by then may bounce</>}.
+              Expected in your bank by the end of the day: <strong style={{ color: pickedDay.balance < 0 ? 'var(--color-danger)' : undefined }}>{rupees(pickedDay.balance)}</strong>
+              {pickedDay.balance < 0 && <> — not enough; a cheque presented by then may bounce</>}.
             </p>
           )}
         </div>
