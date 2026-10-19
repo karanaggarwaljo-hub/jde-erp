@@ -7,6 +7,7 @@ import {
   dbErrorMessage,
   deleteChequeBook,
   getCheque,
+  getCollections,
   insertCheque,
   insertChequeBook,
   listChequeBooks,
@@ -14,6 +15,7 @@ import {
   updateCheque,
 } from '@/lib/db';
 import { shopDay } from '@/lib/logbook';
+import { addDays } from '@/lib/cheque-plan';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,12 +26,13 @@ const dayOf = (value: unknown, fallback: string | null) => (DAY.test(String(valu
 
 /**
  * Cheques: the register of every cheque given and received, cheque books, and each cheque's life.
- * GET: cheques, books and the banks they are drawn on. POST: the owner's actions.
+ * GET: cheques, books, the banks they are drawn on, and recent money in (for planning a cheque).
+ * POST: the owner's actions.
  *
  * Owner-only (proxy.ts too). A cheque that pays something is entered by the payment itself
  * (lib/cash-book.ts); here the owner enters what pays nothing — a security cheque, or a spoiled
  * leaf — and moves cheques through their life (lib/cheque-register.ts). A bank is chosen from the
- * company's banks or named new (`bankName`), which adds it.
+ * company's banks or named new (`newBank`), which adds it.
  */
 export async function GET(request: Request) {
   await requireOwner();
@@ -37,9 +40,11 @@ export async function GET(request: Request) {
   const access = await checkCompanyAccess(companyId);
   if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
   try {
-    const [cheques, books, banks] = await Promise.all([listCheques(companyId), listChequeBooks(companyId), listBanks(companyId)]);
+    const today = shopDay(new Date());
+    // The last twelve weeks of money in, for planning when a cheque is safe to date (lib/cheque-plan.ts).
+    const [cheques, books, banks, collections] = await Promise.all([listCheques(companyId), listChequeBooks(companyId), listBanks(companyId), getCollections(companyId, addDays(today, -84))]);
     return Response.json({
-      cheques, books, today: shopDay(new Date()),
+      cheques, books, collections, today,
       banks: banks.map(({ id, name }) => ({ id, name })),
     }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {

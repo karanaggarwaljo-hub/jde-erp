@@ -1,9 +1,12 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { BookCheck, CalendarClock, Plus, Search, Trash2, XCircle } from 'lucide-react';
+import { BookCheck, CalendarClock, CalendarDays, Plus, Search, Trash2, XCircle } from 'lucide-react';
 import { useCompany } from '@/components/CompanyProvider';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
+import { useCompanyTable } from '@/lib/useCompanyTable';
+import ChequeCalendar from '@/components/money/ChequeCalendar';
+import type { CollectionDay } from '@/lib/cheque-plan';
 import {
   daysUntil,
   dueDate,
@@ -20,10 +23,10 @@ import {
 } from '@/lib/cheques';
 
 type Bank = { id: string; name: string };
-type Data = { cheques: ChequeRow[]; books: ChequeBook[]; banks: Bank[]; today: string };
+type Data = { cheques: ChequeRow[]; books: ChequeBook[]; banks: Bank[]; collections: CollectionDay[]; today: string };
 /** A bank picked from the company's banks, or named new (which adds it). */
 type BankChoice = { accountId: string; newBank: string };
-type Tab = 'out' | 'in' | 'books';
+type Tab = 'out' | 'in' | 'calendar' | 'books';
 type Filter = 'open' | ChequeStatus | 'all';
 type Dialog = { type: 'security'; direction: ChequeDirection } | { type: 'cancel-leaf' } | { type: 'book' } | { type: 'edit'; cheque: ChequeRow } | null;
 
@@ -48,6 +51,7 @@ export default function Cheques() {
   const [search, setSearch] = useState('');
   const [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false);
+  const { rows: suppliers } = useCompanyTable<{ id: string; name: string }>('suppliers');
 
   useEffect(() => {
     if (!companyId) return;
@@ -88,6 +92,8 @@ export default function Cheques() {
   const banks = useMemo(() => data?.banks ?? [], [data]);
   const accountName = (id: string | null) => banks.find((bank) => bank.id === id)?.name ?? '';
   const direction: ChequeDirection = tab === 'in' ? 'in' : 'out';
+  // Who a planned cheque can be for: suppliers, and anyone you have given a cheque to.
+  const parties = useMemo(() => [...new Set([...suppliers.map((row) => row.name), ...(data?.cheques ?? []).filter((cheque) => cheque.direction === 'out').map((cheque) => cheque.party)].map((name) => (name ?? '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [suppliers, data]);
   const summary = data ? summarise(data.cheques, direction, today) : null;
   const rows = useMemo(() => {
     if (!data) return [];
@@ -122,7 +128,7 @@ export default function Cheques() {
           <p className="page-subtitle">Every cheque you have given and received — what is still to clear and when, what bounced, and your cheque books.</p>
         </div>
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
-          {tab !== 'books' && (
+          {(tab === 'out' || tab === 'in') && (
             <button type="button" className="btn btn-secondary" onClick={() => setDialog({ type: 'security', direction })}><Plus size={15} /> Security cheque</button>
           )}
           {tab === 'out' && <button type="button" className="btn btn-secondary" onClick={() => setDialog({ type: 'cancel-leaf' })} disabled={banks.length === 0}><XCircle size={15} /> Cancel a spoiled leaf</button>}
@@ -132,7 +138,7 @@ export default function Cheques() {
 
       {message && <div className="alert alert-success mb-4" role="status">{message}</div>}
       {error && <div className="alert alert-danger mb-4" role="alert">{error}</div>}
-      {data && banks.length === 0 && tab !== 'in' && (
+      {data && banks.length === 0 && (tab === 'out' || tab === 'books') && (
         <div className="alert alert-info mb-4" role="status">
           Add your cheque book on the Cheque books tab, with the name of its bank. Cheques you give are then drawn on that bank, and the next leaf number is filled in for you.
         </div>
@@ -141,10 +147,15 @@ export default function Cheques() {
       <div className="tabs mb-4" role="group" aria-label="Cheques view">
         <button type="button" aria-pressed={tab === 'out'} className={`tab ${tab === 'out' ? 'active' : ''}`} onClick={() => setTab('out')}>Given<span className="tab-count">{data ? summarise(data.cheques, 'out', today).pendingCount : 0}</span></button>
         <button type="button" aria-pressed={tab === 'in'} className={`tab ${tab === 'in' ? 'active' : ''}`} onClick={() => setTab('in')}>Received<span className="tab-count">{data ? summarise(data.cheques, 'in', today).pendingCount : 0}</span></button>
+        <button type="button" aria-pressed={tab === 'calendar'} className={`tab ${tab === 'calendar' ? 'active' : ''}`} onClick={() => setTab('calendar')}><CalendarDays size={14} style={{ marginRight: 4, verticalAlign: '-2px' }} />Calendar</button>
         <button type="button" aria-pressed={tab === 'books'} className={`tab ${tab === 'books' ? 'active' : ''}`} onClick={() => setTab('books')}>Cheque books<span className="tab-count">{data?.books.length ?? 0}</span></button>
       </div>
 
-      {data && tab !== 'books' && summary && (
+      {data && tab === 'calendar' && (
+        <ChequeCalendar cheques={data.cheques} collections={data.collections ?? []} today={today} parties={parties} />
+      )}
+
+      {data && (tab === 'out' || tab === 'in') && summary && (
         <>
           <div className="kpi-grid">
             <Stat title="Not yet cleared" value={rupees(summary.pendingTotal)} note={`${summary.pendingCount} cheque${summary.pendingCount === 1 ? '' : 's'}`} color="var(--chart-amber)" />

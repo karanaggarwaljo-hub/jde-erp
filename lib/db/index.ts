@@ -2083,6 +2083,39 @@ export async function listCheques(companyId: string): Promise<import('../cheques
     .eq('company_id', companyId).order('id', { ascending: true }).range(from, to) as unknown as PromiseLike<Page<import('../cheques').ChequeRow>>);
 }
 
+/** Money actually received each day since `from`, for planning cheques (lib/cheque-plan.ts):
+ *  customer payments on their date, and what was paid at the counter on each bill (its paid figure
+ *  less what later payments put against it) on the bill's date. A payment by cheque counts only
+ *  once its cheque has cleared — one still to clear is counted on its own date as a cheque coming in. */
+export async function getCollections(companyId: string, from: string): Promise<import('../cheque-plan').CollectionDay[]> {
+  const client = getClient();
+  type Payment = { date: string; amount: number | string; method: string | null; cheque_status: string | null };
+  type Bill = { id: string; date: string; paid: number | string };
+  type Allocation = { invoice_id: string; amount: number | string };
+  const [payments, bills] = await Promise.all([
+    allPages<Payment>((start, end) => client.from('jde_payments_received').select('date, amount, method, cheque_status')
+      .eq('company_id', companyId).gte('date', from).order('id', { ascending: true }).range(start, end) as unknown as PromiseLike<Page<Payment>>),
+    allPages<Bill>((start, end) => client.from(supaTable('invoices')).select('id, date, paid')
+      .eq('company_id', companyId).gte('date', from).gt('paid', 0).order('id', { ascending: true }).range(start, end) as unknown as PromiseLike<Page<Bill>>),
+  ]);
+  const allocated = new Map<string, number>();
+  const ids = bills.map((bill) => bill.id);
+  for (let index = 0; index < ids.length; index += 200) {
+    const chunk = ids.slice(index, index + 200);
+    const { data, error } = await client.from('jde_payment_allocations').select('invoice_id, amount').eq('company_id', companyId).in('invoice_id', chunk);
+    if (error) throw error;
+    for (const row of (data as Allocation[]) ?? []) allocated.set(row.invoice_id, (allocated.get(row.invoice_id) ?? 0) + (Number(row.amount) || 0));
+  }
+  const byDay = new Map<string, number>();
+  const add = (date: string, amount: number) => { if (amount > 0) byDay.set(date.slice(0, 10), (byDay.get(date.slice(0, 10)) ?? 0) + amount); };
+  for (const payment of payments) {
+    if (payment.method === 'cheque' && payment.cheque_status !== 'cleared') continue;
+    add(payment.date, Number(payment.amount) || 0);
+  }
+  for (const bill of bills) add(bill.date, Math.max(0, (Number(bill.paid) || 0) - (allocated.get(bill.id) ?? 0)));
+  return [...byDay.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, amount]) => ({ date, amount: Math.round(amount * 100) / 100 }));
+}
+
 export async function listChequeBooks(companyId: string): Promise<import('../cheques').ChequeBook[]> {
   const { data, error } = await getClient().from('jde_cheque_books').select('*').eq('company_id', companyId).order('received_on', { ascending: true });
   if (error) throw error;
