@@ -79,3 +79,18 @@ test('how you usually pay someone: how far ahead the cheques are dated, and how 
   assert.equal(partyHabit(cheques).count, 4, 'everyone, when no one is chosen');
   assert.equal(addDays(today, 15), '2026-11-03');
 });
+
+test('the daily figure is everything received divided by the days since money first came in', async () => {
+  const { dailyAverage, flatPattern, breakdown } = await import('../lib/cheque-plan');
+  // Rs. 30,000 over the 10 days from 9 Oct to the 18th.
+  const average = dailyAverage([{ date: '2026-10-09', amount: 10000 }, { date: '2026-10-18', amount: 20000 }, { date: '2026-08-01', amount: 99999 }], today);
+  assert.deepEqual(average, { perDay: 3000, days: 10, total: 30000 });
+  assert.deepEqual(dailyAverage([], today), { perDay: 0, days: 0, total: 0 });
+
+  // Rs. 5,000 in the bank, Rs. 3,000 a day, a cheque given for Rs. 10,000 due on the 21st.
+  const days = projectDays({ cheques: [cheque({ cheque_date: '2026-10-21', amount: 10000 })], pattern: flatPattern(3000), today, startBalance: 5000, horizon: 10 });
+  assert.deepEqual(breakdown(days, '2026-10-22'), { sales: 9000, chequesIn: 0, chequesOut: 10000 });
+  // 19th 5000, 20th 8000, 21st 1000, 22nd 4000, 23rd 7000 … Rs. 6,000 is first safe on the 23rd.
+  assert.equal(suggestDate(days, 6000).date, '2026-10-23');
+  assert.equal(suggestDate(days, 1000).date, today, 'enough in the bank already: today');
+});

@@ -2,6 +2,22 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-19 — "When can I date a cheque?" fixed and made plain
+
+You said its dates were too late, its sales figure looked wrong, and it was confusing. It now
+works from three figures you can see and change:
+
+- **Money in your bank today.** It now asks for this. Before, it quietly assumed ₹0, which is why it
+  suggested dates weeks away.
+- **Money coming in per day,** filled in from your sales over the last 30 days and shown in rupees
+  (e.g. "Your sales brought in ₹89,778 in the last 8 days"). Change it to your real figure. It no
+  longer guesses by weekday, which one big sale could throw off.
+- **The cheques already given and received,** as before.
+
+The answer is one line: "✅ You can date it today", or "Date it Wed, 21 Oct or later". Under it is
+the sum: "₹25,000 in the bank + ₹22,444 from sales = ₹47,444, enough for ₹40,000". The calendar
+squares no longer show "~ sales".
+
 ## 2026-10-19 — The Cheques page, made simple
 
 You said the Cheques page felt complicated, so it's been rearranged. Nothing was taken away.

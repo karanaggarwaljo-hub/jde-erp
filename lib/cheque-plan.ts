@@ -168,3 +168,46 @@ export function partyHabit(cheques: ChequeRow[], party?: string | null): PartyHa
     last: last ? { issuedOn: last.issued_on, chequeDate: last.cheque_date, amount: num(last.amount) } : null,
   };
 }
+
+export type DailyAverage = {
+  /** Money in on an average day. */
+  perDay: number;
+  /** How many days it is averaged over. */
+  days: number;
+  total: number;
+};
+
+/** The money your sales bring in on an average day: everything received over the last
+ *  `windowDays` before today, divided by the days in that span (counted from the first day with any
+ *  money in, so a business that started recently is not averaged with empty weeks). One plain figure
+ *  the owner can check and change, rather than a per-weekday pattern a few big sales can skew. */
+export function dailyAverage(collections: CollectionDay[], today: string, windowDays = 30): DailyAverage {
+  const windowStart = addDays(today, -windowDays);
+  const inWindow = collections.filter((day) => day.date >= windowStart && day.date < today && num(day.amount) > 0);
+  if (inWindow.length === 0) return { perDay: 0, days: 0, total: 0 };
+  const first = inWindow.reduce((earliest, day) => (day.date < earliest ? day.date : earliest), inWindow[0].date);
+  const days = Math.max(1, daysBetween(first, today));
+  const total = inWindow.reduce((sum, day) => sum + num(day.amount), 0);
+  return { perDay: round2(total / days), days, total: round2(total) };
+}
+
+/** The same money in every day: what projectDays needs from a single daily figure. */
+export function flatPattern(perDay: number): CollectionPattern {
+  const value = Math.max(0, num(perDay));
+  return { byWeekday: [value, value, value, value, value, value, value], daysCovered: 0, total: 0 };
+}
+
+/** What makes up the projected figure at the end of `date`: the money in, split by where it comes
+ *  from, and the cheques already given that will have been paid by then. */
+export function breakdown(days: PlanDay[], date: string): { sales: number; chequesIn: number; chequesOut: number } {
+  let sales = 0;
+  let chequesIn = 0;
+  let chequesOut = 0;
+  for (const day of days) {
+    if (day.date > date) break;
+    sales += day.expectedIn;
+    chequesIn += day.chequesIn;
+    chequesOut += day.chequesOut;
+  }
+  return { sales: round2(sales), chequesIn: round2(chequesIn), chequesOut: round2(chequesOut) };
+}
