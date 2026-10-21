@@ -2,6 +2,21 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-21 — Fuller letterhead on invoices
+
+The top of every tax invoice can now also carry your **website**, your **MSME (Udyam) number**
+and your **IE Code**, modelled on the letterhead of the reference bill. Fill them in under
+**Settings → Companies → Edit**. Anything left blank stays off the invoice, and PAN stays off as
+you chose. The letterhead now reads, top to bottom:
+
+- the company name and address;
+- Phone, E-mail and Website;
+- GSTIN and state;
+- MSME (Udyam) No. and IE Code.
+
+The Phone and Email boxes in Settings were labelled "Quote Request". They're now just **Phone** and
+**Email**, because they print on invoices too.
+
 ## 2026-10-21 — Cancel an invoice, and a Bills & Invoices page
 
 **Cancel an invoice.** Each issued bill on the Sales page now has a **Cancel** button (⊘). Under

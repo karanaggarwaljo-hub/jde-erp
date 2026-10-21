@@ -21,6 +21,10 @@ export type TallyCompany = {
   contact_phone?: string | null;
   contact_email?: string | null;
   invoice_declaration?: string | null;
+  /** MSME (Udyam) registration, website and Import Export Code: on the letterhead when filled in. */
+  udyam_no?: string | null;
+  website?: string | null;
+  iec_code?: string | null;
 };
 
 export type TallyCustomer = { address?: string | null; phone?: string | null; gstin?: string | null } | null;
@@ -59,6 +63,9 @@ export type TallyInvoice = {
   title: string;
   subtitle: string;
   seller: Party;
+  /** The letterhead under the name and address, each line left out when empty: phone, e-mail and
+   *  website; then GSTIN and state; then the MSME (Udyam) number and IE Code. */
+  letterhead: { contact: string; gstin: string; registrations: string };
   buyer: Party;
   /** The invoice details beside Bill To / Ship To: [label, value] pairs, one per line. */
   details: Array<[string, string]>;
@@ -92,6 +99,8 @@ const num = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 const text = (value: unknown) => String(value ?? '').trim();
+/** Letterhead pieces on one line, the empty ones left out. */
+const joined = (pieces: Array<string | false>) => pieces.filter(Boolean).join('   |   ');
 const round2 = (value: number) => Math.round(value * 100) / 100;
 
 /** 1234567.5 → "12,34,567.50": Indian grouping, always two decimals. */
@@ -261,6 +270,18 @@ export function buildTallyInvoice(source: {
       stateCode: sellerState.code,
       phone: text(company.contact_phone),
       email: text(company.contact_email),
+    },
+    letterhead: {
+      contact: joined([
+        text(company.contact_phone) && `Phone: ${text(company.contact_phone)}`,
+        text(company.contact_email) && `E-mail: ${text(company.contact_email)}`,
+        text(company.website) && `Website: ${text(company.website)}`,
+      ]),
+      gstin: text(company.gstin) ? joined([`GSTIN/UIN: ${text(company.gstin).toUpperCase()}`, sellerState.name && `${sellerState.name} (${sellerState.code})`]) : '',
+      registrations: joined([
+        text(company.udyam_no) && `MSME (Udyam) No.: ${text(company.udyam_no).toUpperCase()}`,
+        text(company.iec_code) && `IE Code: ${text(company.iec_code).toUpperCase()}`,
+      ]),
     },
     buyer: {
       name: text(invoice.customer) || 'Cash',

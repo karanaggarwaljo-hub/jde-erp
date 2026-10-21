@@ -27,7 +27,7 @@ type UserAccount = { email: string; company_id: string; name: string; role: stri
 // nothing about who has access, and adds no request.
 type UserFilter = 'all' | 'active' | 'invited';
 
-const emptyCompanyForm = { name: '', gstin: '', invoice_prefix: 'INV', po_prefix: 'PO', address: '', contact_email: '', contact_phone: '', invoice_declaration: '' };
+const emptyCompanyForm = { name: '', gstin: '', invoice_prefix: 'INV', po_prefix: 'PO', address: '', contact_email: '', contact_phone: '', invoice_declaration: '', udyam_no: '', website: '', iec_code: '' };
 
 // Categorical dot colours for the role chip — the dot only tells roles apart, it carries no
 // status meaning, so green / amber / rose are deliberately absent here: on this screen those
@@ -130,7 +130,7 @@ export default function SettingsClient({ initialTab = 'users', driveOutcome = nu
 
   const openEditCompany = (company: Company) => {
     setEditingCompanyId(company.id);
-    setCompanyForm({ name: company.name, gstin: company.gstin, invoice_prefix: company.invoice_prefix, po_prefix: company.po_prefix, address: company.address, contact_email: company.contact_email || '', contact_phone: company.contact_phone || '', invoice_declaration: company.invoice_declaration || '' });
+    setCompanyForm({ name: company.name, gstin: company.gstin, invoice_prefix: company.invoice_prefix, po_prefix: company.po_prefix, address: company.address, contact_email: company.contact_email || '', contact_phone: company.contact_phone || '', invoice_declaration: company.invoice_declaration || '', udyam_no: company.udyam_no || '', website: company.website || '', iec_code: company.iec_code || '' });
     setCompanyError('');
     setCompanyModalOpen(true);
   };
@@ -468,10 +468,17 @@ export default function SettingsClient({ initialTab = 'users', driveOutcome = nu
         </div>
         <div className="form-group"><label className="form-label">Registered Office Address</label><textarea className="form-input" rows={2} value={companyForm.address} onChange={(event) => setCompanyForm({ ...companyForm, address: event.target.value })} /></div>
         <div className="form-grid-2">
-          <div className="form-group"><label className="form-label">Quote Request Email</label><input type="email" className="form-input" placeholder="For the website's Request a Quote button" value={companyForm.contact_email} onChange={(event) => setCompanyForm({ ...companyForm, contact_email: event.target.value })} /></div>
-          <div className="form-group"><label className="form-label">Quote Request Phone</label><input className="form-input" placeholder="Optional" value={companyForm.contact_phone} onChange={(event) => setCompanyForm({ ...companyForm, contact_phone: event.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Email</label><input type="email" className="form-input" placeholder="Optional" value={companyForm.contact_email} onChange={(event) => setCompanyForm({ ...companyForm, contact_email: event.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Phone</label><input className="form-input" placeholder="Optional" value={companyForm.contact_phone} onChange={(event) => setCompanyForm({ ...companyForm, contact_phone: event.target.value })} /></div>
         </div>
-        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '-8px' }}>Shown only on published Website Catalog listings, as a Request a Quote / Call button. Leave blank to hide it.</p>
+        <div className="form-grid-2">
+          <div className="form-group"><label className="form-label">Website</label><input className="form-input" placeholder="Optional, e.g. www.yourshop.com" value={companyForm.website} onChange={(event) => setCompanyForm({ ...companyForm, website: event.target.value })} /></div>
+          <div className="form-group"><label className="form-label">MSME (Udyam) No.</label><input className="form-input" placeholder="Optional, e.g. UDYAM-CH-01-0001234" value={companyForm.udyam_no} onChange={(event) => setCompanyForm({ ...companyForm, udyam_no: event.target.value })} /></div>
+        </div>
+        <div className="form-grid-2">
+          <div className="form-group"><label className="form-label">IE Code (Import Export)</label><input className="form-input" placeholder="Optional" value={companyForm.iec_code} onChange={(event) => setCompanyForm({ ...companyForm, iec_code: event.target.value })} /></div>
+        </div>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '-8px' }}>Printed at the top of every tax invoice; leave any of them blank to leave it off. Phone and email also show on published Website Catalog listings as a Request a Quote / Call button.</p>
         {/* Printed at the foot of every tax invoice (lib/tally-invoice.ts). */}
         <div className="form-group"><label className="form-label">Invoice Declaration</label><textarea className="form-input" rows={2} placeholder="We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct." value={companyForm.invoice_declaration} onChange={(event) => setCompanyForm({ ...companyForm, invoice_declaration: event.target.value })} /></div>
         <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '-8px' }}>Printed on every tax invoice. Your state is taken from the GSTIN above. Leave it blank to use the standard declaration.</p>

@@ -123,17 +123,19 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
     page.drawText(note, { x: LEFT + (WIDTH - fonts.bold.widthOfTextAtSize(note, 8.5)) / 2, y: y - 6, size: 8.5, font: fonts.bold, color: RED });
     y -= 12;
   }
-  const contact = [doc.seller.phone && `Phone: ${doc.seller.phone}`, doc.seller.email && `E-mail: ${doc.seller.email}`].filter(Boolean).join('   |   ');
   const address = doc.seller.lines.length ? wrap(doc.seller.lines.join(', '), fonts.regular, 8, WIDTH - 20) : [];
-  const gstLine = doc.seller.gstin ? `GSTIN/UIN: ${doc.seller.gstin}${doc.seller.state ? `   |   ${doc.seller.state} (${doc.seller.stateCode})` : ''}` : '';
-  const headHeight = 30 + address.length * 10 + (contact ? 10 : 0) + (gstLine ? 11 : 0);
+  const contact = doc.letterhead.contact ? wrap(doc.letterhead.contact, fonts.regular, 8, WIDTH - 20) : [];
+  const gstLine = doc.letterhead.gstin;
+  const registrations = doc.letterhead.registrations;
+  const headHeight = 30 + address.length * 10 + contact.length * 10 + (gstLine ? 11 : 0) + (registrations ? 10 : 0);
   box(LEFT, y, WIDTH, headHeight);
   let at = y - 20;
   center(doc.seller.name.toUpperCase(), LEFT, WIDTH, at, 16, fonts.bold);
   at -= 13;
   for (const piece of address) { center(piece, LEFT, WIDTH, at, 8); at -= 10; }
-  if (contact) { center(contact, LEFT, WIDTH, at, 8); at -= 10; }
-  if (gstLine) center(gstLine, LEFT, WIDTH, at - 1, 8, fonts.bold);
+  for (const piece of contact) { center(piece, LEFT, WIDTH, at, 8); at -= 10; }
+  if (gstLine) { center(gstLine, LEFT, WIDTH, at - 1, 8, fonts.bold); at -= 11; }
+  if (registrations) center(registrations, LEFT, WIDTH, at - 1, 8);
   y -= headHeight;
 
   // ── Bill To | Ship To | invoice details ──────────────────────────────────────────────────
