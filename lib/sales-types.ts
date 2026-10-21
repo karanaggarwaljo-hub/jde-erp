@@ -60,6 +60,8 @@ export type Invoice = {
   gst_percent?: number | null;
   gst_amount?: number | null;
   gst_mode?: string | null;
+  /** GST state code of the place of supply, chosen on the bill (lib/gst-supply.ts). */
+  place_of_supply?: string | null;
 };
 
 export type InvoiceItem = {
@@ -120,50 +122,8 @@ export const QUOTATION_FINAL_STATUS = 'final';
  *  not use this — see the credit check in the sales page. */
 export const WALK_IN_CUSTOMER = 'Walk-in Customer';
 
-/** First two digits of a GSTIN are the statutory state code; this maps them to the state name
- *  printed as "place of supply". Statutory data, not a business setting. */
-export const GST_STATE_NAMES: Record<string, string> = {
-  '01': 'Jammu and Kashmir',
-  '02': 'Himachal Pradesh',
-  '03': 'Punjab',
-  '04': 'Chandigarh',
-  '05': 'Uttarakhand',
-  '06': 'Haryana',
-  '07': 'Delhi',
-  '08': 'Rajasthan',
-  '09': 'Uttar Pradesh',
-  '10': 'Bihar',
-  '11': 'Sikkim',
-  '12': 'Arunachal Pradesh',
-  '13': 'Nagaland',
-  '14': 'Manipur',
-  '15': 'Mizoram',
-  '16': 'Tripura',
-  '17': 'Meghalaya',
-  '18': 'Assam',
-  '19': 'West Bengal',
-  '20': 'Jharkhand',
-  '21': 'Odisha',
-  '22': 'Chhattisgarh',
-  '23': 'Madhya Pradesh',
-  '24': 'Gujarat',
-  '25': 'Daman and Diu',
-  '26': 'Dadra and Nagar Haveli and Daman and Diu',
-  '27': 'Maharashtra',
-  '28': 'Andhra Pradesh',
-  '29': 'Karnataka',
-  '30': 'Goa',
-  '31': 'Lakshadweep',
-  '32': 'Kerala',
-  '33': 'Tamil Nadu',
-  '34': 'Puducherry',
-  '35': 'Andaman and Nicobar Islands',
-  '36': 'Telangana',
-  '37': 'Andhra Pradesh',
-  '38': 'Ladakh',
-  '97': 'Other Territory',
-  '99': 'Centre Jurisdiction',
-};
+/** GST state codes and names: lib/gst-supply.ts holds the one list. */
+export { GST_STATES as GST_STATE_NAMES } from './gst-supply';
 
 /** How a bill was settled at the moment it was written. */
 export type PaymentStatus = 'paid' | 'partial' | 'unpaid';

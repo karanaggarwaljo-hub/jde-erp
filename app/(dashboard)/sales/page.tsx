@@ -52,8 +52,7 @@ import InvoiceFormModal from '@/components/sales/InvoiceFormModal';
 import { amountReceived, billTotals, lineDiscountAmount, lineDiscountPercent, lineGross, lineNet } from '@/lib/invoice-totals';
 import {
   DRAFT_STATUS,
-  QUOTATION_FINAL_STATUS,
-  GST_STATE_NAMES,
+  QUOTATION_FINAL_STATUS,
   WALK_IN_CUSTOMER,
   type Customer,
   type Invoice,
@@ -66,6 +65,7 @@ import {
   type Product,
   type Quotation,
 } from '@/lib/sales-types';
+import { supplyTax } from '@/lib/gst-supply';
 
 type SalesTab = 'invoices' | 'quotations' | 'credits' | 'ledger';
 type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid' | 'drafts';
@@ -219,6 +219,8 @@ export default function SalesPage() {
   const [lines, setLines] = useState<InvoiceLine[]>([]);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [gstPercent, setGstPercent] = useState(18);
+  // The place of supply picked on the bill; '' follows the customer's GSTIN, else the shop's state.
+  const [placeOfSupplyChoice, setPlaceOfSupplyChoice] = useState('');
   // Whether the rates typed on the lines are before GST (tax added on top) or already include it
   // (tax carved out of them). Only ever changes how the same typed numbers are read.
   const [gstInclusive, setGstInclusive] = useState(false);
@@ -317,15 +319,13 @@ export default function SalesPage() {
   // Place of supply comes from the company's own GSTIN — the first two digits are the statutory
   // state code. No GSTIN on the company means no place of supply to state, so the whole clause
   // is dropped rather than guessed.
-  const companyStateCode = (activeCompany?.gstin ?? '').trim().slice(0, 2);
-  const customerStateCode = (selectedCustomer?.gstin ?? '').trim().slice(0, 2);
-  const placeOfSupply = GST_STATE_NAMES[companyStateCode] ? `${GST_STATE_NAMES[companyStateCode]} (${companyStateCode})` : '';
-  // Intra- vs inter-state decides whether GST is displayed as CGST + SGST or as a single IGST
-  // line. This is a labelling decision only — the stored total is the same either way. With a
-  // GSTIN missing on either side there is nothing to compare, so nothing is claimed.
-  const supplyKind: 'intra' | 'inter' | 'unknown' = companyStateCode && customerStateCode
-    ? (companyStateCode === customerStateCode ? 'intra' : 'inter')
-    : 'unknown';
+  // Where the goods go decides the tax (lib/gst-supply.ts): the place picked on the bill, else the
+  // customer's GSTIN state, else the shop's own state. Another state means IGST; the same state
+  // means CGST + SGST, or CGST + UTGST in a Union Territory without a legislature (Chandigarh).
+  // The total is the same either way; only how the tax is split and printed changes.
+  const supply = supplyTax(activeCompany?.gstin, selectedCustomer?.gstin, placeOfSupplyChoice || null);
+  const placeOfSupply = supply.placeName ? `${supply.placeName} (${supply.placeCode})` : '';
+  const supplyKind = supply.kind;
   const halfGstPercent = Number((gstPercent / 2).toFixed(3));
 
   const filteredInvoices = invoices.filter((invoice) => {
@@ -420,6 +420,7 @@ export default function SalesPage() {
     setDiscountPercent(0);
     setGstPercent(18);
     setGstInclusive(false);
+    setPlaceOfSupplyChoice('');
     setInvoiceDate(todayIso());
     setPaymentStatus('unpaid');
     setAmountPaid(0);
@@ -437,6 +438,7 @@ export default function SalesPage() {
     // Older invoices have no stored rate at all, so 18 stays the fallback for those only.
     setGstPercent(invoice.gst_percent == null ? 18 : Number(invoice.gst_percent));
     setGstInclusive(invoice.gst_mode === 'inclusive');
+    setPlaceOfSupplyChoice(invoice.place_of_supply ?? '');
     setLines(items.map((item) => ({ part: savedLineLabel(item, productsById), qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
     const paid = Number(invoice.paid);
     const invoiceTotal = Number(invoice.total);
@@ -752,6 +754,7 @@ export default function SalesPage() {
         gstPercent,
         gstAmount,
         gstMode: gstInclusive ? 'inclusive' : 'exclusive',
+        placeOfSupply: supply.placeCode || null,
       });
 
       const draftId = String(invoice.id);
@@ -841,6 +844,7 @@ Save it anyway?`,
           gstPercent,
           gstAmount,
           gstMode: gstInclusive ? 'inclusive' : 'exclusive',
+          placeOfSupply: supply.placeCode || null,
         });
 
         await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
@@ -879,6 +883,7 @@ Save it anyway?`,
         gstPercent,
         gstAmount,
         gstMode: gstInclusive ? 'inclusive' : 'exclusive',
+        placeOfSupply: supply.placeCode || null,
       });
 
       const createdId = String(invoice.id);
@@ -1977,7 +1982,8 @@ ${stockLine}`)) return;
           invoiceError={invoiceError} savingInvoice={savingInvoice} savingDraft={savingDraft}
           selectedCustomer={selectedCustomer} creditSaleNeedsCustomer={creditSaleNeedsCustomer}
           partOptions={partOptions} customers={customers} placeOfSupply={placeOfSupply} lastSold={lastSold}
-          halfGstPercent={halfGstPercent} supplyKind={supplyKind}
+          halfGstPercent={halfGstPercent} supplyKind={supplyKind} localTax={supply.localTax}
+          placeOfSupplyCode={supply.placeCode} setPlaceOfSupplyChoice={setPlaceOfSupplyChoice}
           setShowInvoiceModal={setShowInvoiceModal} setShowAddCustomer={setShowAddCustomer}
           saveInvoice={saveInvoice} saveDraftInvoice={saveDraftInvoice}
         />

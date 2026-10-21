@@ -20,6 +20,7 @@
  * as a prop and the page owns them. The only state here is what belongs to the act of typing.
  */
 
+import { PLACE_OF_SUPPLY_OPTIONS } from '@/lib/gst-supply';
 import { useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import MoneyPicker from '@/components/money/MoneyPicker';
 import type { MoneyChoice } from '@/lib/money-book';
@@ -78,6 +79,11 @@ export type InvoiceFormModalProps = {
   placeOfSupply: string;
   halfGstPercent: number;
   supplyKind: 'intra' | 'inter' | 'unknown';
+  /** The state half of intra-state GST: SGST, or UTGST in a Union Territory (lib/gst-supply.ts). */
+  localTax: 'SGST' | 'UTGST';
+  /** The place of supply in effect, as a GST state code, and a way to pick another. */
+  placeOfSupplyCode: string;
+  setPlaceOfSupplyChoice: (code: string) => void;
   /** What the selected customer last paid per part, keyed by part label. Empty for a walk-in. */
   lastSold: Map<string, LastSold>;
   setShowInvoiceModal: (open: boolean) => void;
@@ -93,7 +99,8 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
     discountPercent, setDiscountPercent, gstPercent, setGstPercent, gstInclusive, setGstInclusive,
     totals, paidAmount, newOutstanding,
     editingInvoice, setEditingInvoice, editingDraft, invoiceError, savingInvoice, savingDraft,
-    selectedCustomer, creditSaleNeedsCustomer, partOptions, customers, placeOfSupply, halfGstPercent, supplyKind,
+    selectedCustomer, creditSaleNeedsCustomer, partOptions, customers, placeOfSupply, halfGstPercent, supplyKind, localTax,
+    placeOfSupplyCode, setPlaceOfSupplyChoice,
     lastSold, setShowInvoiceModal, setShowAddCustomer, saveInvoice, saveDraftInvoice,
   } = props;
 
@@ -389,13 +396,21 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                       ? 'Line rates already include GST — the tax is taken out of them, and the total is what you typed.'
                       : 'Line rates are before GST — the tax is added on top of them.'}
                   </span>
-                  {/* Only claims intra/inter-state when both GSTINs are on file to compare. */}
+                  {/* Where the goods go decides the split: another state is IGST. Filled in from the
+                      customer's GSTIN, else the shop's state; can be changed for a buyer from
+                      elsewhere who has no GSTIN. */}
+                  <label className="form-label" htmlFor="place-of-supply" style={{ marginTop: 8 }}>Place of supply</label>
+                  <select id="place-of-supply" className="form-input form-select" value={placeOfSupplyCode}
+                    onChange={(event) => setPlaceOfSupplyChoice(event.target.value)}>
+                    {!placeOfSupplyCode && <option value="">Choose a state</option>}
+                    {PLACE_OF_SUPPLY_OPTIONS.map((option) => <option key={option.code} value={option.code}>{option.name} ({option.code})</option>)}
+                  </select>
                   <span className="text-muted text-sm">
                     {supplyKind === 'intra'
-                      ? 'Intra-state · CGST + SGST'
+                      ? `Same state · CGST + ${localTax}`
                       : supplyKind === 'inter'
-                        ? 'Inter-state · IGST'
-                        : 'Charged on the taxable value'}
+                        ? 'Another state · IGST'
+                        : 'Add your GSTIN in Settings to split the tax'}
                   </span>
                 </div>
               </div>
@@ -456,7 +471,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                   ? <span className="badge badge-muted">IGST {gstPercent}% · ₹{paise(gstAmount)}</span>
                   : <>
                       <span className="badge badge-muted">CGST {halfGstPercent}% · ₹{paise(gstAmount / 2)}</span>
-                      <span className="badge badge-muted">SGST {halfGstPercent}% · ₹{paise(gstAmount / 2)}</span>
+                      <span className="badge badge-muted">{localTax} {halfGstPercent}% · ₹{paise(gstAmount / 2)}</span>
                     </>}
               </div>
 

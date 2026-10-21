@@ -256,7 +256,7 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   // ── HSN-wise tax summary ─────────────────────────────────────────────────────────────────
   const intra = !doc.interState;
   const taxCols = intra
-    ? [{ w: 0.18, label: 'HSN/SAC' }, { w: 0.18, label: 'Taxable Value' }, { w: 0.09, label: 'Rate', group: 'Central Tax' }, { w: 0.13, label: 'Amount', group: 'Central Tax' }, { w: 0.09, label: 'Rate', group: 'State Tax' }, { w: 0.13, label: 'Amount', group: 'State Tax' }, { w: 0.2, label: 'Total Tax Amount' }]
+    ? [{ w: 0.18, label: 'HSN/SAC' }, { w: 0.18, label: 'Taxable Value' }, { w: 0.09, label: 'Rate', group: 'Central Tax' }, { w: 0.13, label: 'Amount', group: 'Central Tax' }, { w: 0.09, label: 'Rate', group: doc.localTaxColumn }, { w: 0.13, label: 'Amount', group: doc.localTaxColumn }, { w: 0.2, label: 'Total Tax Amount' }]
     : [{ w: 0.22, label: 'HSN/SAC' }, { w: 0.24, label: 'Taxable Value' }, { w: 0.12, label: 'Rate', group: 'Integrated Tax' }, { w: 0.18, label: 'Amount', group: 'Integrated Tax' }, { w: 0.24, label: 'Total Tax Amount' }];
   const taxX: number[] = [];
   {

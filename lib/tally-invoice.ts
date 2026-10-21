@@ -10,6 +10,9 @@
  */
 
 import { invoiceFigures, type FigureInvoice, type FigureItem, type FigureReturn } from './invoice-figures';
+import { GST_STATES, supplyTax } from './gst-supply';
+
+export { GST_STATES };
 
 export type TallyCompany = {
   name: string;
@@ -22,7 +25,7 @@ export type TallyCompany = {
 
 export type TallyCustomer = { address?: string | null; phone?: string | null; gstin?: string | null } | null;
 
-export type TallyInvoiceInput = FigureInvoice & { id: string; date: string; customer: string; mode?: string | null };
+export type TallyInvoiceInput = FigureInvoice & { id: string; date: string; customer: string; mode?: string | null; /** State code chosen on the bill. */ place_of_supply?: string | null };
 
 export type TallyItemInput = FigureItem & {
   part_number?: string | null;
@@ -57,6 +60,10 @@ export type TallyInvoice = {
   total: string;
   amountInWords: string;
   interState: boolean;
+  /** The state half of intra-state GST: SGST, or UTGST in a Union Territory without a legislature. */
+  localTax: 'SGST' | 'UTGST';
+  /** Its column heading in the tax summary. */
+  localTaxColumn: 'State Tax' | 'UT Tax';
   /** The figures are GST-inclusive: the item amounts already contain the tax. */
   inclusive: boolean;
   taxRows: TaxRow[];
@@ -123,16 +130,6 @@ export function amountInWords(value: number): string {
   return `INR ${rupeesInWords(whole)}${paise ? ` and ${belowHundred(paise)} paise` : ''} Only`;
 }
 
-/** GST state codes (the first two digits of a GSTIN). */
-export const GST_STATES: Record<string, string> = {
-  '01': 'Jammu and Kashmir', '02': 'Himachal Pradesh', '03': 'Punjab', '04': 'Chandigarh', '05': 'Uttarakhand', '06': 'Haryana',
-  '07': 'Delhi', '08': 'Rajasthan', '09': 'Uttar Pradesh', '10': 'Bihar', '11': 'Sikkim', '12': 'Arunachal Pradesh', '13': 'Nagaland',
-  '14': 'Manipur', '15': 'Mizoram', '16': 'Tripura', '17': 'Meghalaya', '18': 'Assam', '19': 'West Bengal', '20': 'Jharkhand',
-  '21': 'Odisha', '22': 'Chhattisgarh', '23': 'Madhya Pradesh', '24': 'Gujarat', '25': 'Daman and Diu', '26': 'Dadra and Nagar Haveli and Daman and Diu',
-  '27': 'Maharashtra', '29': 'Karnataka', '30': 'Goa', '31': 'Lakshadweep', '32': 'Kerala', '33': 'Tamil Nadu', '34': 'Puducherry',
-  '35': 'Andaman and Nicobar Islands', '36': 'Telangana', '37': 'Andhra Pradesh', '38': 'Ladakh', '97': 'Other Territory',
-};
-
 /** The state code and name a GSTIN belongs to, or blanks when it is not a GSTIN. */
 export function stateOfGstin(gstin: string | null | undefined): { code: string; name: string } {
   const value = text(gstin).toUpperCase();
@@ -174,10 +171,10 @@ export function buildTallyInvoice(source: {
   const paid = num(invoice.paid);
 
   const sellerState = stateOfGstin(company.gstin);
-  const buyerGstState = stateOfGstin(customer?.gstin);
-  // Place of supply: the buyer's state when their GSTIN says it, else the seller's (a counter sale).
-  const buyerState = buyerGstState.code ? buyerGstState : sellerState;
-  const interState = Boolean(sellerState.code && buyerState.code && sellerState.code !== buyerState.code);
+  // Where the goods go decides the tax (lib/gst-supply.ts): IGST to another state, else CGST plus
+  // SGST, or UTGST when the seller is in a Union Territory without a legislature (Chandigarh).
+  const supply = supplyTax(company.gstin, customer?.gstin, invoice.place_of_supply);
+  const interState = supply.kind === 'inter';
 
   const rate = num(invoice.gst_percent);
   const tallyItems: TallyItem[] = items.map((item, index) => {
@@ -207,7 +204,7 @@ export function buildTallyInvoice(source: {
     if (interState) charges.push({ label: `IGST${suffix}`, rate: percentText(rate), amount: indianAmount(tax) });
     else {
       charges.push({ label: `CGST${suffix}`, rate: percentText(rate / 2), amount: indianAmount(halfOne) });
-      charges.push({ label: `SGST${suffix}`, rate: percentText(rate / 2), amount: indianAmount(halfTwo) });
+      charges.push({ label: `${supply.localTax}${suffix}`, rate: percentText(rate / 2), amount: indianAmount(halfTwo) });
     }
   }
 
@@ -253,8 +250,8 @@ export function buildTallyInvoice(source: {
       name: text(invoice.customer) || 'Cash',
       lines: addressLines(customer?.address),
       gstin: text(customer?.gstin).toUpperCase(),
-      state: buyerState.name,
-      stateCode: buyerState.code,
+      state: supply.placeName,
+      stateCode: supply.placeCode,
       phone: text(customer?.phone),
       email: '',
     },
@@ -275,6 +272,8 @@ export function buildTallyInvoice(source: {
     total: indianAmount(total),
     amountInWords: amountInWords(total),
     interState,
+    localTax: supply.localTax,
+    localTaxColumn: supply.localTaxColumn,
     inclusive: f.gstInclusive,
     taxRows,
     taxTotal,
