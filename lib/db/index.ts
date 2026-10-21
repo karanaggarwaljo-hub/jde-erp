@@ -1466,7 +1466,7 @@ export async function getInvoicePdfSource(companyId: string, invoiceId: string) 
   const [invoice, items, company, returns] = await Promise.all([
     client.from('jde_invoices').select('*').eq('company_id', companyId).eq('id', invoiceId).maybeSingle(),
     client.from('jde_invoice_items').select('*').eq('company_id', companyId).eq('invoice_id', invoiceId).order('id', { ascending: true }),
-    client.from('jde_companies').select('name, gstin, address, contact_phone, contact_email').eq('id', companyId).maybeSingle(),
+    client.from('jde_companies').select('name, gstin, address, contact_phone, contact_email, bank_name, bank_account_no, bank_ifsc, bank_branch, invoice_declaration').eq('id', companyId).maybeSingle(),
     client.from('jde_sales_returns').select('id, subtotal').eq('company_id', companyId).eq('invoice_id', invoiceId).order('created_at', { ascending: true }),
   ]);
   for (const result of [invoice, items, company, returns]) {
@@ -1478,11 +1478,20 @@ export async function getInvoicePdfSource(companyId: string, invoiceId: string) 
     .from('jde_customers').select('address, phone, gstin')
     .eq('company_id', companyId).eq('name', String(row.customer ?? '')).limit(1).maybeSingle();
   if (customer.error) throw customer.error;
+  // Each line's HSN code comes from its part, as the Tally-style invoice prints it.
+  const lineRows = ((items.data as Array<Record<string, unknown>>) ?? []);
+  const productIds = [...new Set(lineRows.map((line) => line.product_id).filter((id): id is string => typeof id === 'string' && id.length > 0))];
+  const hsnOf = new Map<string, string>();
+  if (productIds.length > 0) {
+    const parts = await client.from('jde_products').select('id, hsn_code').eq('company_id', companyId).in('id', productIds);
+    if (parts.error) throw parts.error;
+    for (const part of (parts.data as Array<{ id: string; hsn_code: string | null }>) ?? []) hsnOf.set(part.id, part.hsn_code ?? '');
+  }
   return {
-    invoice: row as unknown as import('../invoice-document').DocInvoice,
-    items: ((items.data as unknown[]) ?? []) as import('../invoice-document').DocItem[],
-    company: ((company.data as Record<string, unknown> | null) ?? { name: '' }) as unknown as import('../invoice-document').DocCompany,
-    customer: (customer.data as import('../invoice-document').DocCustomer) ?? null,
+    invoice: row as unknown as import('../tally-invoice').TallyInvoiceInput,
+    items: lineRows.map((line) => ({ ...line, hsn: hsnOf.get(String(line.product_id ?? '')) ?? '' })) as unknown as import('../tally-invoice').TallyItemInput[],
+    company: ((company.data as Record<string, unknown> | null) ?? { name: '' }) as unknown as import('../tally-invoice').TallyCompany,
+    customer: (customer.data as import('../tally-invoice').TallyCustomer) ?? null,
     returns: ((returns.data as unknown[]) ?? []) as import('../invoice-figures').FigureReturn[],
   };
 }

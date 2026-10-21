@@ -11,8 +11,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { buildInvoiceDocument, type InvoiceDocument } from './invoice-document';
-import { renderInvoicePdf } from './invoice-pdf';
+import { buildTallyInvoice, type TallyInvoice } from './tally-invoice';
+import { renderTallyInvoicePdf } from './tally-invoice-pdf';
 import {
   getInvoiceFileRecord,
   getInvoicePdfSource,
@@ -24,7 +24,7 @@ import {
 
 export type InvoicePdf = { bytes: Uint8Array | null; sizeBytes: number; savedAt: string; redrawn: boolean };
 
-export function invoiceFingerprint(doc: InvoiceDocument): string {
+export function invoiceFingerprint(doc: TallyInvoice): string {
   return createHash('sha256').update(JSON.stringify(doc)).digest('hex').slice(0, 32);
 }
 
@@ -35,7 +35,7 @@ export async function ensureInvoicePdf(companyId: string, invoiceId: string, opt
   const needBytes = options.needBytes ?? true;
   const source = await getInvoicePdfSource(companyId, invoiceId);
   if (!source) return null;
-  const doc = buildInvoiceDocument(source);
+  const doc = buildTallyInvoice(source);
   const fingerprint = invoiceFingerprint(doc);
 
   const record = await getInvoiceFileRecord(invoiceId);
@@ -45,7 +45,7 @@ export async function ensureInvoicePdf(companyId: string, invoiceId: string, opt
     if (stored) return { bytes: stored, sizeBytes: record.size_bytes, savedAt: record.saved_at, redrawn: false };
   }
 
-  const bytes = await renderInvoicePdf(doc);
+  const bytes = await renderTallyInvoicePdf(doc);
   const saved = await saveInvoiceFile({ companyId, invoiceId, bytes, fingerprint });
   return { bytes, sizeBytes: saved.size_bytes, savedAt: saved.saved_at, redrawn: true };
 }
