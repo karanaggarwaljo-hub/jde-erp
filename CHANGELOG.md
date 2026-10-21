@@ -2,6 +2,22 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-21 — UTGST for Chandigarh, and IGST by place of supply
+
+**UTGST.** Your shop is in Chandigarh, a Union Territory, so a sale inside Chandigarh is now
+charged **CGST + UTGST**, not CGST + SGST. The tax summary column says **UT Tax**. The same applies
+in Ladakh, Lakshadweep, Andaman and Nicobar, and Dadra and Nagar Haveli and Daman and Diu. Delhi,
+Puducherry and Jammu and Kashmir keep SGST, as the GST law says.
+
+**Place of supply on every bill.** Under the GST rate there is now a **Place of supply** box:
+
+- It fills itself in: the customer's state from their GSTIN, or Chandigarh for a counter sale.
+- Change it when the goods go elsewhere, e.g. **Punjab** for a buyer from Punjab with no GSTIN.
+- A different state charges **IGST**; the same state charges **CGST + UTGST**. The bill says which
+  as you type.
+- It's saved with the bill and printed on the invoice as Place of Supply. The total doesn't
+  change, only how the tax is split.
+
 ## 2026-10-21 — The invoice, in the layout you showed
 
 Based on the Ganpati Auto Traders bill you sent, every invoice, printed and as its PDF, now has:

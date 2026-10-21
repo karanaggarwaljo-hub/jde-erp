@@ -1496,6 +1496,12 @@ export async function getInvoicePdfSource(companyId: string, invoiceId: string) 
   };
 }
 
+/** Records where a sale's goods go, as a GST state code (lib/gst-supply.ts), or none. */
+export async function setInvoicePlaceOfSupply(companyId: string, invoiceId: string, code: string | null): Promise<void> {
+  const { error } = await getClient().from('jde_invoices').update({ place_of_supply: code }).eq('company_id', companyId).eq('id', invoiceId);
+  if (error) throw error;
+}
+
 export async function getInvoiceFileRecord(invoiceId: string): Promise<InvoiceFileRecord | undefined> {
   const { data, error } = await getClient().from('jde_invoice_files').select('*').eq('invoice_id', invoiceId).maybeSingle();
   if (error) throw error;

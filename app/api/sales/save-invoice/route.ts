@@ -1,4 +1,5 @@
-import { dbErrorMessage, getRow, saveSalesInvoice } from '@/lib/db';
+import { dbErrorMessage, getRow, saveSalesInvoice, setInvoicePlaceOfSupply } from '@/lib/db';
+import { isStateCode } from '@/lib/gst-supply';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { money, recordAudit } from '@/lib/audit-log';
 import { after } from 'next/server';
@@ -12,7 +13,7 @@ export async function POST(request: Request) {
   const {
     companyId, invoiceId, isEdit, customerLabel, oldCustomerId, newCustomerId,
     oldOutstanding, newOutstanding, date, items, total, paid, status, mode,
-    discountPercent, discountAmount, gstPercent, gstAmount, gstMode,
+    discountPercent, discountAmount, gstPercent, gstAmount, gstMode, placeOfSupply,
   } = body ?? {};
 
   if (typeof companyId !== 'string' || !companyId) {
@@ -58,6 +59,9 @@ export async function POST(request: Request) {
       gstMode: gstMode === 'inclusive' ? 'inclusive' : 'exclusive',
     });
     const savedId = String(invoice.id);
+    // Where the goods go (a GST state code), which decides IGST on the invoice. Its own column, set
+    // straight after the save transaction; anything that is not a state code is stored as none.
+    await setInvoicePlaceOfSupply(companyId, savedId, isStateCode(placeOfSupply) ? placeOfSupply : null);
     const newTotal = Number(invoice.total ?? 0);
     await recordAudit({
       companyId,

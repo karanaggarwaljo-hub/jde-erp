@@ -152,7 +152,7 @@ export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
             <tr>
               <th rowSpan={2}>HSN/SAC</th>
               <th rowSpan={2}>Taxable Value</th>
-              {intra ? <><th colSpan={2}>Central Tax</th><th colSpan={2}>State Tax</th></> : <th colSpan={2}>Integrated Tax</th>}
+              {intra ? <><th colSpan={2}>Central Tax</th><th colSpan={2}>{doc.localTaxColumn}</th></> : <th colSpan={2}>Integrated Tax</th>}
               <th rowSpan={2}>Total Tax Amount</th>
             </tr>
             <tr><th>Rate</th><th>Amount</th>{intra && <><th>Rate</th><th>Amount</th></>}</tr>
