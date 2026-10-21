@@ -15,9 +15,15 @@ export type Company = {
   is_storefront?: boolean;
   contact_email?: string | null;
   contact_phone?: string | null;
+  /** Printed on Tally-style tax invoices (scripts/company-bank-details.sql). */
+  bank_name?: string | null;
+  bank_account_no?: string | null;
+  bank_ifsc?: string | null;
+  bank_branch?: string | null;
+  invoice_declaration?: string | null;
 };
 
-type NewCompanyInput = { name: string; gstin: string; invoice_prefix: string; po_prefix: string; address: string; contact_email?: string; contact_phone?: string };
+type NewCompanyInput = { name: string; gstin: string; invoice_prefix: string; po_prefix: string; address: string; contact_email?: string; contact_phone?: string; bank_name?: string; bank_account_no?: string; bank_ifsc?: string; bank_branch?: string; invoice_declaration?: string };
 
 type CompanyContextValue = {
   companies: Company[];

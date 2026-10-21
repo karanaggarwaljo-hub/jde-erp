@@ -27,7 +27,7 @@ type UserAccount = { email: string; company_id: string; name: string; role: stri
 // nothing about who has access, and adds no request.
 type UserFilter = 'all' | 'active' | 'invited';
 
-const emptyCompanyForm = { name: '', gstin: '', invoice_prefix: 'INV', po_prefix: 'PO', address: '', contact_email: '', contact_phone: '' };
+const emptyCompanyForm = { name: '', gstin: '', invoice_prefix: 'INV', po_prefix: 'PO', address: '', contact_email: '', contact_phone: '', bank_name: '', bank_account_no: '', bank_ifsc: '', bank_branch: '', invoice_declaration: '' };
 
 // Categorical dot colours for the role chip — the dot only tells roles apart, it carries no
 // status meaning, so green / amber / rose are deliberately absent here: on this screen those
@@ -130,7 +130,7 @@ export default function SettingsClient({ initialTab = 'users', driveOutcome = nu
 
   const openEditCompany = (company: Company) => {
     setEditingCompanyId(company.id);
-    setCompanyForm({ name: company.name, gstin: company.gstin, invoice_prefix: company.invoice_prefix, po_prefix: company.po_prefix, address: company.address, contact_email: company.contact_email || '', contact_phone: company.contact_phone || '' });
+    setCompanyForm({ name: company.name, gstin: company.gstin, invoice_prefix: company.invoice_prefix, po_prefix: company.po_prefix, address: company.address, contact_email: company.contact_email || '', contact_phone: company.contact_phone || '', bank_name: company.bank_name || '', bank_account_no: company.bank_account_no || '', bank_ifsc: company.bank_ifsc || '', bank_branch: company.bank_branch || '', invoice_declaration: company.invoice_declaration || '' });
     setCompanyError('');
     setCompanyModalOpen(true);
   };
@@ -472,6 +472,18 @@ export default function SettingsClient({ initialTab = 'users', driveOutcome = nu
           <div className="form-group"><label className="form-label">Quote Request Phone</label><input className="form-input" placeholder="Optional" value={companyForm.contact_phone} onChange={(event) => setCompanyForm({ ...companyForm, contact_phone: event.target.value })} /></div>
         </div>
         <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '-8px' }}>Shown only on published Website Catalog listings, as a Request a Quote / Call button. Leave blank to hide it.</p>
+        {/* Printed at the foot of every Tally-style tax invoice (lib/tally-invoice.ts). */}
+        <div className="form-label" style={{ marginBottom: '-8px' }}>Bank details on invoices</div>
+        <div className="form-grid-2">
+          <div className="form-group"><label className="form-label">Bank Name</label><input className="form-input" placeholder="e.g. HDFC Bank" value={companyForm.bank_name} onChange={(event) => setCompanyForm({ ...companyForm, bank_name: event.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Account Number</label><input className="form-input" inputMode="numeric" value={companyForm.bank_account_no} onChange={(event) => setCompanyForm({ ...companyForm, bank_account_no: event.target.value })} /></div>
+        </div>
+        <div className="form-grid-2">
+          <div className="form-group"><label className="form-label">IFSC Code</label><input className="form-input" placeholder="e.g. HDFC0001234" value={companyForm.bank_ifsc} onChange={(event) => setCompanyForm({ ...companyForm, bank_ifsc: event.target.value.toUpperCase() })} /></div>
+          <div className="form-group"><label className="form-label">Branch</label><input className="form-input" value={companyForm.bank_branch} onChange={(event) => setCompanyForm({ ...companyForm, bank_branch: event.target.value })} /></div>
+        </div>
+        <div className="form-group"><label className="form-label">Invoice Declaration</label><textarea className="form-input" rows={2} placeholder="We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct." value={companyForm.invoice_declaration} onChange={(event) => setCompanyForm({ ...companyForm, invoice_declaration: event.target.value })} /></div>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '-8px' }}>Printed on every tax invoice. Your state and PAN are taken from the GSTIN above. Leave the declaration blank to use the standard one.</p>
       </div>
       <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setCompanyModalOpen(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={companySubmitting}>{companySubmitting ? 'Saving…' : editingCompanyId ? 'Save Changes' : 'Add Company'}</button></div>
     </form></div></div>}

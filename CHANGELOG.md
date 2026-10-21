@@ -2,6 +2,31 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-21 — Invoices now print in Tally style
+
+Every sales invoice, printed and as its saved PDF, now looks like a Tally GST **Tax Invoice**:
+
+- **The top:** your company with address, GSTIN, state and state code, phone and email.
+  Beside it, the invoice details grid: Invoice No., Dated (21-Oct-26), Mode/Terms of Payment, and
+  Tally's other boxes.
+- **Buyer (Bill to):** the customer, with GSTIN, state and code when they have one.
+- **The goods table:** Sl No., Description of Goods (with the part number under it), HSN/SAC,
+  Quantity, Rate, per (Nos), Disc. % and Amount.
+- **Under the goods:** returns, the bill discount, then **CGST and SGST**, or **IGST** when the
+  buyer's GSTIN is from another state. A counter sale counts as your own state.
+- **The total, in words:** "INR Twelve Thousand Thirty Six Only", in lakhs and crores.
+- **HSN-wise tax summary:** taxable value, Central Tax and State Tax (or Integrated Tax), and the
+  tax amount in words.
+- **The bottom:** your PAN, the declaration, your bank details, "for Jai Durga Enterprises /
+  Authorised Signatory", and a space for the customer's seal and signature.
+
+Your state and PAN come from your GSTIN. Each line's HSN code comes from the part, so fill in HSN
+codes on your parts to have them printed. In **Settings → Companies → Edit** you can now add
+your **bank name, account number, IFSC and branch**, and change the declaration if you like.
+
+Under the invoice, the amount received and balance due still show, as before. Saved PDFs are
+redrawn in the new style the next time they're opened.
+
 ## 2026-10-21 — Backups kept in Google Drive, a parts catalogue in Drive, and an easy way to add part photos
 
 **Every night, a backup into your Google Drive, kept for good.** All of Jai Durga Enterprises'

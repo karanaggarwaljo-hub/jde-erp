@@ -1,16 +1,20 @@
 'use client';
 
 import Link from 'next/link';
+import { useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, FileDown, Printer } from 'lucide-react';
 import { useCompany } from '@/components/CompanyProvider';
+import TallyInvoiceSheet from '@/components/sales/TallyInvoiceSheet';
 import { useCompanyTable } from '@/lib/useCompanyTable';
-import { money } from '@/lib/money';
 import { type Customer, type Invoice, type InvoiceItem } from '@/lib/sales-types';
-import { invoiceFigures } from '@/lib/invoice-figures';
 import { type SalesReturnRow } from '@/lib/client-sales-returns';
+import { buildTallyInvoice, type TallyCompany } from '@/lib/tally-invoice';
 
+type PartHsn = { id: string; hsn_code?: string | null };
 
+/** A sales invoice, printed the way Tally prints a GST Tax Invoice. The saved PDF draws the same
+ *  thing (lib/tally-invoice.ts builds both), so the two never disagree. */
 export default function SalesInvoicePrintPage() {
   const { id } = useParams<{ id: string }>();
   const { activeCompany } = useCompany();
@@ -18,15 +22,35 @@ export default function SalesInvoicePrintPage() {
   const { rows: invoiceItems, loading: itemsLoading } = useCompanyTable<InvoiceItem>('invoice_items');
   const { rows: customers } = useCompanyTable<Customer>('customers');
   const { rows: salesReturns } = useCompanyTable<SalesReturnRow>('sales_returns');
+  const { rows: parts } = useCompanyTable<PartHsn>('products');
 
   const loading = invoicesLoading || itemsLoading;
   const invoice = invoices.find((row) => row.id === id);
+
+  const doc = useMemo(() => {
+    if (!invoice) return null;
+    const hsnOf = new Map(parts.map((part) => [part.id, part.hsn_code ?? '']));
+    const items = invoiceItems
+      .filter((item) => item.invoice_id === invoice.id)
+      .map((item) => ({ ...item, hsn: item.product_id ? hsnOf.get(String(item.product_id)) ?? '' : '' }));
+    const customer = customers.find((row) => row.name === invoice.customer);
+    const returns = salesReturns
+      .filter((row) => row.invoice_id === invoice.id)
+      .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
+    return buildTallyInvoice({
+      invoice: { ...invoice, mode: (invoice as Invoice & { mode?: string | null }).mode ?? null },
+      items,
+      company: (activeCompany ?? { name: 'Company' }) as TallyCompany,
+      customer: customer ? { address: customer.address, phone: customer.phone, gstin: customer.gstin } : null,
+      returns,
+    });
+  }, [invoice, invoiceItems, customers, salesReturns, parts, activeCompany]);
 
   if (loading && !invoice) {
     return <div className="empty-state"><p className="empty-state-title">Loading invoice…</p></div>;
   }
 
-  if (!invoice) {
+  if (!invoice || !doc) {
     return (
       <div className="empty-state">
         <p className="empty-state-title">Invoice not found</p>
@@ -35,26 +59,6 @@ export default function SalesInvoicePrintPage() {
       </div>
     );
   }
-
-  const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
-  const customer = customers.find((row) => row.name === invoice.customer);
-  const returns = salesReturns
-    .filter((row) => row.invoice_id === invoice.id)
-    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
-  // The same figures the saved PDF prints (lib/invoice-figures.ts), so the two never disagree.
-  const {
-    subtotal, returnedValue, returnIds, keptSubtotal, anyLineDiscount, lineDiscountTotal, discountAmount, gstInclusive, gstAmount, netTaxableValue, balanceDue, writtenOff,
-  } = invoiceFigures(invoice, items, returns);
-
-  // Subtotal and GST are not columns on the invoice row itself — only `total`, `discount_percent`
-  // and `discount_amount` are (see the Invoice type above, copied from the sales page). When line
-  // items were recorded, both are exact reconstructions from numbers that ARE stored: summing each
-  // line's `line_total` reproduces the same subtotal the sales page's invoice form summed at save
-  // time, and `total - (subtotal - discount)` reverses the same formula that form uses to arrive at
-  // `total` (see `saveInvoice` in app/(dashboard)/sales/page.tsx: taxableAmount = subtotal -
-  // discountAmount; total = taxableAmount + gstAmount). This is exact arithmetic on real stored
-  // figures, not an estimate, so it's shown. Invoices that predate line-item tracking have nothing
-  // to reconstruct it from, so the subtotal/GST rows are simply left out for them.
 
   return (
     <div>
@@ -73,113 +77,13 @@ export default function SalesInvoicePrintPage() {
           </button>
         </div>
       </div>
-
-      <div className="invoice-sheet">
-        <div className="invoice-letterhead">
-          <div>
-            <div className="invoice-company-name">{activeCompany?.name || 'Company'}</div>
-            {activeCompany?.address && <div className="text-muted text-sm">{activeCompany.address}</div>}
-            <div className="text-muted text-sm">
-              {activeCompany?.gstin && <span>GSTIN: {activeCompany.gstin}</span>}
-              {activeCompany?.contact_phone && <span>{activeCompany.gstin ? ' · ' : ''}Phone: {activeCompany.contact_phone}</span>}
-              {activeCompany?.contact_email && <span>{(activeCompany.gstin || activeCompany.contact_phone) ? ' · ' : ''}{activeCompany.contact_email}</span>}
-            </div>
-          </div>
-          <div className="invoice-heading">
-            <div className="invoice-heading-title">TAX INVOICE</div>
-            <div className="pn-chip">{invoice.id}</div>
-            <div className="text-muted text-sm" style={{ marginTop: '6px' }}>Date: {invoice.date}</div>
-          </div>
-        </div>
-
-        <div className="invoice-bill-to">
-          <small className="text-muted">Bill To</small>
-          <div style={{ fontWeight: 600, fontSize: '15px' }}>{invoice.customer}</div>
-          {customer?.address && <div className="text-muted text-sm">{customer.address}</div>}
-          {(customer?.phone || customer?.gstin) && (
-            <div className="text-muted text-sm">
-              {customer?.phone && <span>Phone: {customer.phone}</span>}
-              {customer?.gstin && <span>{customer.phone ? ' · ' : ''}GSTIN: {customer.gstin}</span>}
-            </div>
-          )}
-        </div>
-
-        <div className="table-wrap">
-          <table className="erp-table invoice-items-table">
-            <thead>
-              <tr>
-                <th>Part No.</th>
-                <th>Description</th>
-                <th className="text-right">Qty</th>
-                <th className="text-right">Unit Price</th>
-                {anyLineDiscount && <th className="text-right">Discount</th>}
-                <th className="text-right">Line Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.part_number || '—'}</td>
-                  <td>{item.name}</td>
-                  <td className="text-right">{item.qty}</td>
-                  <td className="text-right">₹{money(Number(item.unit_price))}</td>
-                  {anyLineDiscount && (
-                    <td className="text-right">
-                      {Number(item.discount_percent) > 0
-                        ? `${Number(item.discount_percent)}%  (-₹${money(Number(item.discount_amount ?? 0))})`
-                        : '—'}
-                    </td>
-                  )}
-                  <td className="text-right">₹{money(Number(item.line_total))}</td>
-                </tr>
-              ))}
-              {items.length === 0 && (
-                <tr><td colSpan={anyLineDiscount ? 6 : 5}><p className="text-muted text-sm" style={{ padding: '12px 0' }}>Line items weren&apos;t recorded for this older invoice — only the total is available.</p></td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="report-summary">
-          {items.length > 0 && lineDiscountTotal > 0 && (
-            <div className="report-line"><span>Item discounts</span><span className="text-danger">-₹{money(lineDiscountTotal)}</span></div>
-          )}
-          {items.length > 0 && (
-            <div className="report-line"><span>Subtotal{lineDiscountTotal > 0 ? " after item discounts" : ""}</span><span>₹{money(subtotal)}</span></div>
-          )}
-          {/* A return lowers the discount, GST and total but leaves the lines as sold, so the
-              returned goods are taken off here — otherwise the lines would not add up. */}
-          {returnedValue > 0 && (
-            <>
-              <div className="report-line"><span>Less goods returned ({returnIds.join(', ')})</span><span className="text-danger">-₹{money(returnedValue)}</span></div>
-              <div className="report-line"><span>Subtotal after returns</span><span>₹{money(keptSubtotal)}</span></div>
-            </>
-          )}
-          {discountAmount > 0 && (
-            <div className="report-line"><span>Discount ({Number(invoice.discount_percent).toFixed(0)}%)</span><span className="text-danger">-₹{money(discountAmount)}</span></div>
-          )}
-          {items.length > 0 && gstAmount > 0.005 && (
-            <>
-              <div className="report-line">
-                <span>Taxable value</span><span>₹{money(netTaxableValue)}</span>
-              </div>
-              <div className="report-line">
-                <span>GST{invoice.gst_percent == null ? '' : ` (${Number(invoice.gst_percent)}%)`}{gstInclusive ? ' — included in the prices above' : ''}</span>
-                <span>₹{money(gstAmount)}</span>
-              </div>
-            </>
-          )}
-          <div className="report-line report-strong"><span>Total</span><strong>₹{money(Number(invoice.total))}</strong></div>
-          <div className="report-line"><span>Paid</span><strong className="text-success">₹{money(Number(invoice.paid))}</strong></div>
-          {/* Its own line, never folded into Paid — this money was forgiven, not received. */}
-          {writtenOff > 0 && (
-            <div className="report-line"><span>Written off (settled short)</span><strong className="text-muted">₹{money(writtenOff)}</strong></div>
-          )}
-          <div className={`report-line report-strong${balanceDue > 0 ? ' invoice-balance-due' : ''}`}>
-            <span>Balance Due</span>
-            <strong className={balanceDue > 0 ? 'text-danger' : 'text-success'}>₹{money(balanceDue)}</strong>
-          </div>
-        </div>
+      {!doc.bank && (
+        <p className="no-print text-muted text-sm mb-4" style={{ textAlign: 'center' }}>
+          Add your bank details in Settings → Company to print them on every invoice.
+        </p>
+      )}
+      <div className="invoice-sheet" style={{ background: '#fff', padding: 24 }}>
+        <TallyInvoiceSheet doc={doc} />
       </div>
     </div>
   );
