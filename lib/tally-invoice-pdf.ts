@@ -7,7 +7,7 @@
  * further pages, each with the column headings again; the summary boxes follow the last goods.
  */
 
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import { degrees, PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import type { TallyInvoice } from './tally-invoice';
 
 const PAGE: [number, number] = [595.28, 841.89]; // A4
@@ -18,6 +18,7 @@ const TOP = PAGE[1] - 28;
 const BOTTOM = 34;
 const BLACK = rgb(0, 0, 0);
 const GREY = rgb(0.35, 0.35, 0.35);
+const RED = rgb(0.78, 0, 0);
 
 // The extra characters the built-in fonts' WinAnsi encoding has beyond Latin-1.
 const WIN_ANSI_EXTRA = new Set(Array.from('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'));
@@ -117,6 +118,11 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   center(doc.title, LEFT, WIDTH, y - 10, 10, fonts.bold);
   center(doc.subtitle, LEFT, WIDTH, y - 19, 6.5);
   y -= 24;
+  if (doc.cancelled) {
+    const note = pdfSafe(`CANCELLED${doc.cancelled.on ? ` on ${doc.cancelled.on}` : ''}${doc.cancelled.reason ? ` - ${doc.cancelled.reason}` : ''}`).slice(0, 120);
+    page.drawText(note, { x: LEFT + (WIDTH - fonts.bold.widthOfTextAtSize(note, 8.5)) / 2, y: y - 6, size: 8.5, font: fonts.bold, color: RED });
+    y -= 12;
+  }
   const contact = [doc.seller.phone && `Phone: ${doc.seller.phone}`, doc.seller.email && `E-mail: ${doc.seller.email}`].filter(Boolean).join('   |   ');
   const address = doc.seller.lines.length ? wrap(doc.seller.lines.join(', '), fonts.regular, 8, WIDTH - 20) : [];
   const gstLine = doc.seller.gstin ? `GSTIN/UIN: ${doc.seller.gstin}${doc.seller.state ? `   |   ${doc.seller.state} (${doc.seller.stateCode})` : ''}` : '';
@@ -324,6 +330,14 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   }
 
   const pages = pdf.getPages();
+  // A cancelled invoice is stamped across every page.
+  if (doc.cancelled) {
+    for (const each of pages) {
+      const size = 78;
+      const width = fonts.bold.widthOfTextAtSize('CANCELLED', size);
+      each.drawText('CANCELLED', { x: PAGE[0] / 2 - (width / 2) * Math.cos(Math.PI / 6.5), y: PAGE[1] / 2 - (width / 2) * Math.sin(Math.PI / 6.5), size, font: fonts.bold, color: RED, opacity: 0.22, rotate: degrees(180 / 6.5) });
+    }
+  }
   if (pages.length > 1) {
     pages.forEach((each, index) => {
       const label = pdfSafe(`Page ${index + 1} of ${pages.length}`);

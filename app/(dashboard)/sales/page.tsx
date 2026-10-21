@@ -13,6 +13,7 @@ import {
   Eye,
   Pencil,
   Trash2,
+  Ban,
   ArrowRight,
   ArrowLeft,
   ChevronLeft,
@@ -31,7 +32,7 @@ import {
   HandCoins,
   History,
 } from 'lucide-react';
-import { saveSalesInvoice, deleteSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance, receiveCustomerPayment, getInvoiceCost } from '@/lib/client-sales';
+import { saveSalesInvoice, cancelSalesInvoice, deleteSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance, receiveCustomerPayment, getInvoiceCost } from '@/lib/client-sales';
 import { realisedProfit, type InvoiceCost } from '@/lib/invoice-profit';
 import { invoiceBalanceDue, invoiceWrittenOff, wasSettledShort } from '@/lib/invoice-balance';
 import { addCustomLine, addPartToLines, buildLastSoldIndex, partLabel } from '@/lib/sale-entry';
@@ -52,6 +53,7 @@ import InvoiceFormModal from '@/components/sales/InvoiceFormModal';
 import { amountReceived, billTotals, lineDiscountAmount, lineDiscountPercent, lineGross, lineNet } from '@/lib/invoice-totals';
 import {
   DRAFT_STATUS,
+  CANCELLED_STATUS,
   QUOTATION_FINAL_STATUS,
   WALK_IN_CUSTOMER,
   type Customer,
@@ -68,7 +70,7 @@ import {
 import { supplyTax } from '@/lib/gst-supply';
 
 type SalesTab = 'invoices' | 'quotations' | 'credits' | 'ledger';
-type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid' | 'drafts';
+type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid' | 'drafts' | 'cancelled';
 
 // Everything the printable document needs, captured at the moment it is opened. A snapshot rather
 // than a live lookup, so the document keeps showing the invoice it was opened for even after the
@@ -214,6 +216,11 @@ export default function SalesPage() {
 
   const [deleteError, setDeleteError] = useState('');
   const [deletingInvoice, setDeletingInvoice] = useState(false);
+  // Cancelling an issued invoice: it keeps its number, marked cancelled (scripts/cancel-sales-invoice.sql).
+  const [cancelCandidate, setCancelCandidate] = useState<Invoice | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelError, setCancelError] = useState('');
+  const [cancellingInvoice, setCancellingInvoice] = useState(false);
   const [customer, setCustomer] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(todayIso());
   const [lines, setLines] = useState<InvoiceLine[]>([]);
@@ -338,7 +345,9 @@ export default function SalesPage() {
   // A draft is a parked sale, not a sale. It holds stock, but nothing has been billed and nothing
   // is owed — so every money figure on this screen is summed over the live invoices only.
   const isDraft = (invoice: Invoice) => invoice.status === DRAFT_STATUS;
-  const liveInvoices = invoices.filter((invoice) => !isDraft(invoice));
+  const isCancelled = (invoice: Invoice) => invoice.status === CANCELLED_STATUS;
+  // Sales that happened: neither parked drafts nor cancelled bills.
+  const liveInvoices = invoices.filter((invoice) => !isDraft(invoice) && !isCancelled(invoice));
   const draftInvoices = invoices.filter(isDraft);
   const draftInvoiceIds = new Set(draftInvoices.map((invoice) => invoice.id));
 
@@ -369,13 +378,14 @@ export default function SalesPage() {
   // Tab counts are taken from the search result rather than the whole ledger, so the number on a
   // tab is always exactly how many rows clicking it will show. The payment tabs are drawn from the
   // live invoices only: a draft owes nothing, so it belongs in none of them and has its own tab.
-  const filteredLiveInvoices = filteredInvoices.filter((invoice) => !isDraft(invoice));
+  const filteredLiveInvoices = filteredInvoices.filter((invoice) => !isDraft(invoice) && !isCancelled(invoice));
   const paymentTabs: Array<{ key: PaymentFilter; label: string; title: string; rows: Invoice[] }> = [
     { key: 'all', label: 'All', title: 'All invoices', rows: filteredInvoices },
     { key: 'paid', label: 'Paid', title: 'Fully settled invoices', rows: filteredLiveInvoices.filter(isSettled) },
     { key: 'partial', label: 'Partial', title: 'Part-paid invoices', rows: filteredLiveInvoices.filter(isPartlyPaid) },
     { key: 'unpaid', label: 'Unpaid', title: 'Invoices with nothing received', rows: filteredLiveInvoices.filter(isUnpaid) },
     { key: 'drafts', label: 'Drafts', title: 'Parked drafts — stock is reserved, nothing is billed', rows: filteredInvoices.filter(isDraft) },
+    { key: 'cancelled', label: 'Cancelled', title: 'Cancelled invoices — kept on record with their numbers, billing nothing', rows: filteredInvoices.filter(isCancelled) },
   ];
   const activePaymentTab = paymentTabs.find((tab) => tab.key === paymentFilter) ?? paymentTabs[0];
   const visibleInvoices = activePaymentTab.rows;
@@ -994,6 +1004,27 @@ Save it anyway?`,
     }
   };
 
+  const confirmCancelInvoice = async () => {
+    if (!cancelCandidate || !activeCompany) return;
+    if (!cancelReason.trim()) { setCancelError('Say why the invoice is being cancelled.'); return; }
+    setCancelError('');
+    setCancellingInvoice(true);
+    try {
+      const custRow = customers.find((c) => c.name === cancelCandidate.customer);
+      // One transaction on the database side (jde_cancel_sales_invoice): stock back on the shelf,
+      // the customer's balance reversed, the invoice kept with its number, marked cancelled.
+      await cancelSalesInvoice(activeCompany.id, cancelCandidate.id, custRow?.id ?? null, cancelReason.trim());
+      await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
+      setFeedback(`${cancelCandidate.id} cancelled — its stock is back and nothing is owed on it. It stays on record, marked cancelled.`);
+      setCancelCandidate(null);
+      setCancelReason('');
+    } catch (error) {
+      setCancelError(error instanceof Error ? error.message : `Failed to cancel ${cancelCandidate.id}.`);
+    } finally {
+      setCancellingInvoice(false);
+    }
+  };
+
   const confirmDeleteInvoice = async () => {
     if (!deleteCandidate || !activeCompany) return;
     setDeleteError('');
@@ -1353,7 +1384,11 @@ ${stockLine}`)) return;
                         ? <span className="text-danger">-₹{money(Number(invoice.discount_amount))} ({Number(invoice.discount_percent).toFixed(0)}%)</span>
                         : <span className="text-muted">—</span>}
                     </td>
-                    <td className="text-right font-semibold">₹{money(invoiceTotal)}</td>
+                    <td className="text-right font-semibold">
+                      {isCancelled(invoice)
+                        ? <s className="text-muted" title="Cancelled — the amount it was issued for">₹{money(Number(invoice.cancelled_copy?.invoice?.total ?? 0))}</s>
+                        : <>₹{money(invoiceTotal)}</>}
+                    </td>
                     <td>
                       {/* The bar is this invoice's own received-against-billed share, so a full bar
                           always means settled no matter how large the invoice is. */}
@@ -1367,7 +1402,9 @@ ${stockLine}`)) return;
                       </div>
                     </td>
                     <td>
-                      {balance <= 0
+                      {isCancelled(invoice)
+                        ? <span className="badge badge-muted" title={invoice.cancel_reason ?? undefined}><Ban size={12} />Cancelled</span>
+                        : balance <= 0
                         ? writtenOff > 0
                           ? <span className="badge badge-success"><CheckCircle2 size={12} />Settled</span>
                           : <span className="badge badge-success"><CheckCircle2 size={12} />Paid</span>
@@ -1377,6 +1414,7 @@ ${stockLine}`)) return;
                     </td>
                     <td className="text-center"><div className="flex justify-between gap-1 items-center">
                       <button className="btn btn-ghost btn-sm" aria-label={`View ${invoice.id}`} title="View invoice" onClick={() => setViewingInvoice(invoice)}><Eye size={14} /></button>
+                      {!isCancelled(invoice) && <>
                       <button
                         className="btn btn-ghost btn-sm"
                         aria-label={`Edit ${invoice.id}`}
@@ -1397,16 +1435,23 @@ ${stockLine}`)) return;
                         style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         onClick={() => items.length > 0 && openSalesReturn(invoice)}
                       ><Undo2 size={14} /></button>
+                      </>}
                       <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={() => window.open(`/sales/invoice/${invoice.id}`, '_blank')}><Printer size={14} /></button>
                       {activeCompany && (
                         <button className="btn btn-ghost btn-sm" aria-label={`Saved PDF of ${invoice.id}`} title="Open the saved PDF — works on any device signed in to the ERP"
                           onClick={() => window.open(`/api/sales/invoice-pdf?companyId=${encodeURIComponent(activeCompany.id)}&invoiceId=${encodeURIComponent(invoice.id)}`, '_blank')}><FileDown size={14} /></button>
                       )}
-                      <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`}
+                      {!isCancelled(invoice) && !isDraft(invoice) && (
+                        <button className="btn btn-ghost btn-sm" aria-label={`Cancel ${invoice.id}`}
+                          title="Cancel invoice — it keeps its number and stays on record, marked cancelled"
+                          style={{ color: 'var(--color-danger)' }}
+                          onClick={() => { setCancelReason(''); setCancelError(''); setCancelCandidate(invoice); }}><Ban size={14} /></button>
+                      )}
+                      {!isCancelled(invoice) && <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`}
                         title={returnCount > 0 ? 'Delete unavailable — goods have been returned against this invoice' : 'Delete invoice'}
                         disabled={returnCount > 0}
                         style={returnCount > 0 ? { color: 'var(--color-danger)', opacity: 0.4, cursor: 'not-allowed' } : { color: 'var(--color-danger)' }}
-                        onClick={() => returnCount === 0 && setDeleteCandidate(invoice)}><Trash2 size={14} /></button>
+                        onClick={() => returnCount === 0 && setDeleteCandidate(invoice)}><Trash2 size={14} /></button>}
                     </div></td>
                   </tr>;
                 })}
@@ -1905,6 +1950,23 @@ ${stockLine}`)) return;
           <button type="button" className="btn btn-secondary" disabled={undoingCredit} onClick={() => setCreditToUndo(null)}>Cancel</button>
           <button type="button" className="btn btn-danger" disabled={undoingCredit} onClick={confirmUndoCredit}>{undoingCredit ? 'Undoing…' : 'Undo Credit Note'}</button>
         </div>
+      </div></div>}
+
+      {cancelCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '460px' }} role="dialog" aria-modal="true" aria-labelledby="cancel-invoice-title">
+        <div className="modal-header"><h3 id="cancel-invoice-title" className="modal-title">Cancel invoice {cancelCandidate.id}?</h3></div>
+        <div className="modal-body flex flex-col gap-3">
+          {cancelError && <div className="alert alert-danger" role="alert">{cancelError}</div>}
+          <p>
+            <strong>{cancelCandidate.id}</strong> stays on record with its number, marked <strong>CANCELLED</strong>. Its items go back into stock
+            {customers.some((c) => c.name === cancelCandidate.customer) && invoiceBalanceDue(cancelCandidate) > 0 ? ` and ${cancelCandidate.customer} will no longer owe its ₹${invoiceBalanceDue(cancelCandidate).toLocaleString('en-IN')}` : ''}.
+            {Number(cancelCandidate.paid) > 0 ? ` The ₹${Number(cancelCandidate.paid).toLocaleString('en-IN')} received on it is taken off — give it back to the customer.` : ''}
+          </p>
+          <div className="form-group">
+            <label className="form-label" htmlFor="cancel-reason">Reason for cancelling</label>
+            <input id="cancel-reason" className="form-input" autoFocus placeholder="e.g. Wrong customer, order cancelled" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} />
+          </div>
+        </div>
+        <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setCancelCandidate(null)} disabled={cancellingInvoice}>Keep invoice</button><button className="btn btn-danger" onClick={confirmCancelInvoice} disabled={cancellingInvoice || !cancelReason.trim()}>{cancellingInvoice ? 'Cancelling…' : 'Cancel Invoice'}</button></div>
       </div></div>}
 
       {deleteCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="delete-invoice-title">

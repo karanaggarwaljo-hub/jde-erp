@@ -25,7 +25,17 @@ export type TallyCompany = {
 
 export type TallyCustomer = { address?: string | null; phone?: string | null; gstin?: string | null } | null;
 
-export type TallyInvoiceInput = FigureInvoice & { id: string; date: string; customer: string; mode?: string | null; /** State code chosen on the bill. */ place_of_supply?: string | null };
+export type TallyInvoiceInput = FigureInvoice & {
+  id: string;
+  date: string;
+  customer: string;
+  mode?: string | null;
+  /** State code chosen on the bill. */
+  place_of_supply?: string | null;
+  status?: string | null;
+  cancelled_at?: string | null;
+  cancel_reason?: string | null;
+};
 
 export type TallyItemInput = FigureItem & {
   part_number?: string | null;
@@ -73,6 +83,8 @@ export type TallyInvoice = {
   /** What has been received and what is still owed — not on a Tally invoice, but asked at the counter. */
   payment: { paid: string; balance: string; writtenOff: string } | null;
   emptyNote: string | null;
+  /** Set on a cancelled invoice: printed across it, with when and why. */
+  cancelled: { on: string; reason: string } | null;
 };
 
 const num = (value: unknown) => {
@@ -176,7 +188,11 @@ export function buildTallyInvoice(source: {
   const supply = supplyTax(company.gstin, customer?.gstin, invoice.place_of_supply);
   const interState = supply.kind === 'inter';
 
-  const rate = num(invoice.gst_percent);
+  // Older bills stored the tax but not its rate; it is worked back out from the tax and what it was
+  // charged on (Rs. 45 on Rs. 250 is 18%), rather than printed as 0%.
+  const storedRate = num(invoice.gst_percent);
+  const rate = storedRate > 0 ? storedRate
+    : f.gstAmount > 0.005 && f.netTaxableValue > 0 ? Math.round((f.gstAmount / f.netTaxableValue) * 10000) / 100 : 0;
   const tallyItems: TallyItem[] = items.map((item, index) => {
     const lineDiscount = num(item.discount_percent);
     return {
@@ -279,10 +295,13 @@ export function buildTallyInvoice(source: {
     taxTotal,
     taxInWords: amountInWords(tax),
     declaration: text(company.invoice_declaration) || DEFAULT_DECLARATION,
-    payment: paid > 0 || f.writtenOff > 0
+    payment: invoice.status !== 'cancelled' && (paid > 0 || f.writtenOff > 0)
       ? { paid: indianAmount(paid), balance: indianAmount(f.balanceDue), writtenOff: f.writtenOff > 0 ? indianAmount(f.writtenOff) : '' }
       : null,
     emptyNote: items.length === 0 ? 'Line items were not recorded for this older invoice; only the total is available.' : null,
+    cancelled: invoice.status === 'cancelled'
+      ? { on: invoice.cancelled_at ? tallyDate(String(invoice.cancelled_at).slice(0, 10)) : '', reason: text(invoice.cancel_reason) }
+      : null,
   };
 }
 
@@ -297,5 +316,17 @@ function taxRow(hsn: string, taxable: number, tax: number, cgst: number, sgst: n
     igstRate: interState && tax ? percentText(rate) : '',
     igst: interState ? indianAmount(tax) : '',
     totalTax: indianAmount(tax),
+  };
+}
+
+/** A cancelled invoice's figures are zeroed and its lines gone (scripts/cancel-sales-invoice.sql), but
+ *  it keeps a copy of itself as issued. This returns what to print: that copy, marked cancelled, or
+ *  the invoice and lines as they are when it was never cancelled. */
+export function asIssued<I extends Record<string, unknown>, L>(invoice: I, items: L[]): { invoice: I; items: L[] } {
+  const copy = invoice.cancelled_copy as { invoice?: Record<string, unknown>; items?: L[] } | null | undefined;
+  if (invoice.status !== 'cancelled' || !copy?.invoice) return { invoice, items };
+  return {
+    invoice: { ...copy.invoice, status: 'cancelled', cancelled_at: invoice.cancelled_at, cancel_reason: invoice.cancel_reason, place_of_supply: invoice.place_of_supply ?? copy.invoice.place_of_supply } as unknown as I,
+    items: copy.items ?? [],
   };
 }

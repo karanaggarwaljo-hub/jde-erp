@@ -2,6 +2,35 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-21 — Cancel an invoice, and a Bills & Invoices page
+
+**Cancel an invoice.** Each issued bill on the Sales page now has a **Cancel** button (⊘). Under
+GST a bill is cancelled rather than deleted:
+
+- **It keeps its number** and stays on record, marked **Cancelled**. It has its own **Cancelled**
+  tab on the Sales page, with its amount struck through.
+- **Its items go back into stock**, and the customer no longer owes it.
+- **You give a reason**, which is kept with it and shown in the Log Book.
+- **Printing it, or opening its PDF**, shows the bill exactly as issued, stamped **CANCELLED** with
+  the date and reason.
+- **It's refused** while a payment, a short settlement or a return is recorded against the bill;
+  undo those first. A parked draft is deleted, not cancelled.
+
+**Bills & Invoices** (new, under Transactions): every bill in one place, by This month, Last month
+or All, with a search box:
+
+- **Invoices issued:** each invoice's number, date, customer, amount and status, with **View**
+  (to print) and **PDF**.
+- **Supplier bills:** every purchase with its supplier bill uploaded, with **Open**, and **Drive**
+  when it's in Google Drive. Tick **Show purchases with no bill** to see which still need one.
+
+**Fixed on the way:**
+
+- The **Reports** page counted parked **drafts** as sales; it no longer does. Cancelled bills
+  aren't counted either, there or on the Day Book and customer pages.
+- **Older bills** that didn't store their GST rate printed "CGST @ 0%". They now show the real rate,
+  worked out from the tax.
+
 ## 2026-10-21 — UTGST for Chandigarh, and IGST by place of supply
 
 **UTGST.** Your shop is in Chandigarh, a Union Territory, so a sale inside Chandigarh is now

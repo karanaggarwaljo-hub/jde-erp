@@ -8,7 +8,7 @@
 import type { Party, TallyInvoice } from '@/lib/tally-invoice';
 
 const CSS = `
-.gst { background:#fff; color:#000; font-family: Arial, Helvetica, sans-serif; font-size:11px; line-height:1.4; max-width:800px; margin:0 auto; }
+.gst { position:relative; background:#fff; color:#000; font-family: Arial, Helvetica, sans-serif; font-size:11px; line-height:1.4; max-width:800px; margin:0 auto; }
 .gst * { box-sizing:border-box; }
 .gst .g-top { text-align:center; margin-bottom:4px; }
 .gst .g-top b { font-size:13px; letter-spacing:.3px; }
@@ -42,6 +42,9 @@ const CSS = `
 .gst .g-tax thead tr:first-child th { border-top:0; }
 .gst .g-sign { display:flex; flex-direction:column; justify-content:space-between; min-height:86px; text-align:right; }
 .gst .g-foot { text-align:center; font-size:9.5px; margin-top:4px; }
+.gst .g-void { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
+.gst .g-void span { transform:rotate(-28deg); font-size:84px; font-weight:800; letter-spacing:6px; color:rgba(200,0,0,.28); border:6px solid rgba(200,0,0,.28); padding:4px 24px; }
+.gst .g-void-note { text-align:center; color:#c00; font-weight:700; margin:2px 0 4px; }
 @media print { .gst { max-width:none; } .gst .g-items thead th, .gst .g-grand, .gst .g-tax thead th { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
 `;
 
@@ -69,6 +72,12 @@ export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
     <div className="gst">
       <style>{CSS}</style>
       <div className="g-top"><b>{doc.title}</b><span>{doc.subtitle}</span></div>
+      {doc.cancelled && (
+        <>
+          <div className="g-void" aria-hidden="true"><span>CANCELLED</span></div>
+          <p className="g-void-note">CANCELLED{doc.cancelled.on ? ` on ${doc.cancelled.on}` : ''}{doc.cancelled.reason ? ` — ${doc.cancelled.reason}` : ''}</p>
+        </>
+      )}
       <div className="g-box">
         <div className="g-head">
           <div className="g-co">{doc.seller.name}</div>

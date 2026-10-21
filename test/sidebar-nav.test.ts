@@ -17,6 +17,8 @@ test('the menu still reaches every screen it reached before', () => {
     '/stock-planning',
     // Added October 2026: every cheque given and received.
     '/cheques',
+    // Added October 2026: every invoice issued and supplier bill uploaded.
+    '/documents',
   ];
   assert.deepEqual(everyScreen.map((item) => item.href).sort(), [...before].sort());
 });
@@ -48,12 +50,12 @@ test('no two rows share an icon', () => {
 
 /** The Day Book starts sales, purchases and expenses itself, so the owner asked for the three rows
  *  to become one that opens to show them. */
-test('Sales, Purchases and Expenses share one Transactions row, after the rest of daily work', () => {
+test('Sales, Purchases, Expenses and Bills & Invoices share one Transactions row, after the rest of daily work', () => {
   const daily = navGroups[0].items;
   assert.deepEqual(daily.map((entry) => entry.name), ['Dashboard', 'Day Book', 'Inventory', 'Transactions']);
   const transactions = daily[3];
   assert.ok(isMenu(transactions));
-  assert.deepEqual(transactions.items.map((item) => item.name), ['Sales', 'Purchases', 'Expenses']);
+  assert.deepEqual(transactions.items.map((item) => item.name), ['Sales', 'Purchases', 'Expenses', 'Bills & Invoices']);
   const menus = navGroups.flatMap((group) => group.items).filter(isMenu);
   assert.equal(menus.length, 1);
 });
