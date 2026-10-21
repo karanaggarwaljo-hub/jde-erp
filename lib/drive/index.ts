@@ -18,10 +18,13 @@ import {
   GoogleError,
   isLive,
   refreshAccessToken,
+  listFolder,
   replaceFile,
   trashFile,
   uploadFile,
   type DriveFile,
+  type DriveListed,
+  type FileLabels,
   type OAuthClient,
 } from './google';
 import {
@@ -144,6 +147,10 @@ export type DrivePut = {
   /** Replace this file in place instead of adding a new one. */
   existingFileId?: string | null;
   description?: string;
+  /** Private labels the ERP can read back later (lib/drive/google.ts FileLabels). */
+  labels?: FileLabels;
+  /** Turn it into a Google file on the way in (a CSV saved as a Google Sheet). New files only. */
+  saveAs?: string;
 };
 
 /** Saves a file into the company's Drive. Null when no Drive is connected. Records the failure on
@@ -172,13 +179,13 @@ export async function putInDrive(companyId: string, file: DrivePut): Promise<Dri
     let parentId = await folderFor(session, file.folderPath);
     let saved: DriveFile;
     try {
-      saved = await uploadFile(session.token, { name: file.name, parentId, mimeType: file.mimeType, bytes: file.bytes, description: file.description });
+      saved = await uploadFile(session.token, { name: file.name, parentId, mimeType: file.mimeType, bytes: file.bytes, description: file.description, labels: file.labels, saveAs: file.saveAs });
     } catch (error) {
       // A remembered folder that no longer exists answers 404: find or make the folders again.
       if (!(error instanceof GoogleError && error.status === 404)) throw error;
       await resetFolders(session);
       parentId = await folderFor(session, file.folderPath);
-      saved = await uploadFile(session.token, { name: file.name, parentId, mimeType: file.mimeType, bytes: file.bytes, description: file.description });
+      saved = await uploadFile(session.token, { name: file.name, parentId, mimeType: file.mimeType, bytes: file.bytes, description: file.description, labels: file.labels, saveAs: file.saveAs });
     }
     await clearDriveError(session);
     return saved;
@@ -207,6 +214,21 @@ async function clearDriveError(session: DriveSession): Promise<void> {
   if (!session.connection.last_error) return;
   session.connection.last_error = null;
   await updateDriveConnectionRow(session.companyId, { last_error: null, last_error_at: null }).catch(() => undefined);
+}
+
+/** The files the ERP saved in one of its folders, made if missing. Null with no Drive connected. */
+export async function listDriveFolder(companyId: string, folderPath: string[]): Promise<{ folderId: string; files: DriveListed[] } | null> {
+  const session = await driveSession(companyId);
+  if (!session) return null;
+  let folderId = await folderFor(session, folderPath);
+  try {
+    return { folderId, files: await listFolder(session.token, folderId) };
+  } catch (error) {
+    if (!(error instanceof GoogleError && error.status === 404)) throw error;
+    await resetFolders(session);
+    folderId = await folderFor(session, folderPath);
+    return { folderId, files: await listFolder(session.token, folderId) };
+  }
 }
 
 /** A link that opens the file in Google Drive, for someone signed in to that Google account. */

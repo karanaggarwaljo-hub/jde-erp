@@ -4,6 +4,9 @@ import { dbErrorMessage } from '@/lib/db';
 import { syncInvoicePdfs } from '@/lib/invoice-archive';
 import { connectedCompanyIds, syncInvoicePdfsToDrive } from '@/lib/invoice-drive';
 import { clearUnusedBills, syncBillsToDrive } from '@/lib/purchase-bills';
+import { backupAllToDrive } from '@/lib/drive-backup';
+import { syncPartsToDrive } from '@/lib/parts-drive';
+import { shopDay } from '@/lib/logbook';
 import { ALL_COMPANIES, recordAudit, SYSTEM_ACTOR } from '@/lib/audit-log';
 
 export const dynamic = 'force-dynamic';
@@ -58,6 +61,15 @@ export async function GET(request: Request) {
         actor: SYSTEM_ACTOR,
       });
     }
+    // Each company's own records into its own Google Drive, kept for good (lib/drive-backup.ts):
+    // the Storage snapshot above is kept for seven days only. Before the file syncs, because a lost
+    // night of bills is recoverable tomorrow and a lost backup is not.
+    const driveBackups = await backupAllToDrive(shopDay(new Date())).catch((error) => {
+      console.error('[drive-backup] nightly run failed:', error);
+      return null;
+    });
+    if (driveBackups) console.log('[drive-backup]', JSON.stringify(driveBackups));
+
     const invoicePdfs = await syncInvoicePdfs({ budgetMs: Math.min(15_000, timeLeft()) }).catch((error) => {
       console.error('[invoice-pdfs] nightly sync failed:', error);
       return null;
@@ -71,18 +83,20 @@ export async function GET(request: Request) {
       drive.unusedBillsCleared = await clearUnusedBills();
       const companies = await connectedCompanyIds();
       for (const companyId of companies) {
-        const share = Math.max(0, timeLeft()) / (2 * companies.length);
+        const share = Math.max(0, timeLeft()) / (3 * companies.length);
         if (share < 1_000) break;
         drive[companyId] = {
           bills: await syncBillsToDrive(companyId, share),
           invoices: await syncInvoicePdfsToDrive(companyId, share),
+          // Every part's photo and the Parts list sheet (lib/parts-drive.ts).
+          parts: await syncPartsToDrive(companyId, share).catch((error) => ({ error: error instanceof Error ? error.message : String(error) })),
         };
       }
       console.log('[drive] nightly sync:', JSON.stringify(drive));
     } catch (error) {
       console.error('[drive] nightly sync failed:', error);
     }
-    return Response.json({ created: created?.filename ?? null, pruned, invoicePdfs, drive });
+    return Response.json({ created: created?.filename ?? null, pruned, driveBackups, invoicePdfs, drive });
   } catch (error) {
     console.error('[backup] scheduled backup failed:', error);
     return Response.json({ error: dbErrorMessage(error, 'Backup failed.') }, { status: 500 });

@@ -18,6 +18,7 @@ import {
   XCircle,
   ArrowRight,
   Merge,
+  Camera,
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { money, wholeMoney } from '@/lib/money';
@@ -854,6 +855,9 @@ export default function InventoryPage() {
             <Upload size={16} /> {importing ? 'Reading…' : 'Import from File'}
             <input type="file" accept={`${SPREADSHEET_ACCEPT},${SCANNABLE_IMPORT_ACCEPT}`} hidden disabled={importing} onChange={handleFileImport} />
           </label>
+          <Link href="/inventory/photos" className="btn btn-secondary" title="Go through your parts and add a photo to each">
+            <Camera size={16} /> Add Photos
+          </Link>
           <button className="btn btn-primary" onClick={handleOpenAdd}>
             <Plus size={16} /> Add New Part
           </button>
