@@ -1,5 +1,5 @@
 /**
- * Draws a Tally-style GST Tax Invoice (lib/tally-invoice.ts) as a PDF: the same boxes, in the
+ * Draws a GST Tax Invoice (lib/tally-invoice.ts) as a PDF: the same boxes, in the
  * same order, as the printed page (components/sales/TallyInvoiceSheet.tsx).
  *
  * Built-in fonts only, nothing embedded, so each invoice stays a few kilobytes (see
@@ -14,7 +14,6 @@ const PAGE: [number, number] = [595.28, 841.89]; // A4
 const LEFT = 28;
 const RIGHT = PAGE[0] - 28;
 const WIDTH = RIGHT - LEFT;
-const MID = LEFT + WIDTH / 2;
 const TOP = PAGE[1] - 28;
 const BOTTOM = 34;
 const BLACK = rgb(0, 0, 0);
@@ -59,27 +58,29 @@ function wrap(value: string, font: PDFFont, size: number, width: number): string
   return lines;
 }
 
-// Goods table columns: x positions from the left edge of the box.
-const COLUMNS = [
-  { key: 'sl', label: 'Sl No.', width: 26, align: 'center' },
-  { key: 'description', label: 'Description of Goods', width: 0, align: 'left' },
-  { key: 'hsn', label: 'HSN/SAC', width: 58, align: 'center' },
-  { key: 'qty', label: 'Quantity', width: 54, align: 'right' },
-  { key: 'rate', label: 'Rate', width: 62, align: 'right' },
-  { key: 'per', label: 'per', width: 28, align: 'center' },
-  { key: 'disc', label: 'Disc. %', width: 36, align: 'right' },
-  { key: 'amount', label: 'Amount', width: 74, align: 'right' },
-] as const;
-const FIXED = COLUMNS.reduce((sum, column) => sum + column.width, 0);
-const COL_X: number[] = [];
-{
-  let x = LEFT;
-  for (const column of COLUMNS) {
-    COL_X.push(x);
-    x += column.width || WIDTH - FIXED;
-  }
+const SHADE = rgb(0.94, 0.94, 0.94);
+
+type Column = { label: string; width: number; align: 'left' | 'right' | 'center' };
+
+/** The goods columns; the description takes whatever width the others leave. */
+function goodsColumns(showDiscount: boolean): { columns: Column[]; x: number[] } {
+  const fixed: Column[] = [
+    { label: 'Sr. No.', width: 30, align: 'center' },
+    { label: 'Description of Goods', width: 0, align: 'left' },
+    { label: 'HSN', width: 58, align: 'center' },
+    { label: 'Qty', width: 40, align: 'right' },
+    { label: 'Price', width: 64, align: 'right' },
+    { label: 'Unit', width: 32, align: 'center' },
+    ...(showDiscount ? [{ label: 'Disc. %', width: 38, align: 'right' as const }] : []),
+    { label: 'Amount', width: 78, align: 'right' },
+  ];
+  const used = fixed.reduce((sum, column) => sum + column.width, 0);
+  const columns = fixed.map((column) => (column.width ? column : { ...column, width: WIDTH - used }));
+  const x: number[] = [];
+  let at = LEFT;
+  for (const column of columns) { x.push(at); at += column.width; }
+  return { columns, x };
 }
-const colWidth = (index: number) => (COLUMNS[index].width || WIDTH - FIXED);
 
 export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
@@ -109,68 +110,76 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
     page.drawText(safe, { x: x + (width - font.widthOfTextAtSize(safe, size)) / 2, y: at, size, font, color: BLACK });
   };
   const line = (x1: number, y1: number, x2: number, y2: number) => page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness: 0.6, color: BLACK });
-  const box = (x: number, top: number, width: number, height: number) => page.drawRectangle({ x, y: top - height, width, height, borderColor: BLACK, borderWidth: 0.6 });
+  const box = (x: number, top: number, width: number, height: number, fill?: typeof SHADE) =>
+    page.drawRectangle({ x, y: top - height, width, height, borderColor: BLACK, borderWidth: 0.6, color: fill });
 
-  // Title
-  center(doc.title, LEFT, WIDTH, y - 12, 12, fonts.bold);
-  y -= 18;
+  // ── Title and letterhead ─────────────────────────────────────────────────────────────────
+  center(doc.title, LEFT, WIDTH, y - 10, 10, fonts.bold);
+  center(doc.subtitle, LEFT, WIDTH, y - 19, 6.5);
+  y -= 24;
+  const contact = [doc.seller.phone && `Phone: ${doc.seller.phone}`, doc.seller.email && `E-mail: ${doc.seller.email}`].filter(Boolean).join('   |   ');
+  const address = doc.seller.lines.length ? wrap(doc.seller.lines.join(', '), fonts.regular, 8, WIDTH - 20) : [];
+  const gstLine = doc.seller.gstin ? `GSTIN/UIN: ${doc.seller.gstin}${doc.seller.state ? `   |   ${doc.seller.state} (${doc.seller.stateCode})` : ''}` : '';
+  const headHeight = 30 + address.length * 10 + (contact ? 10 : 0) + (gstLine ? 11 : 0);
+  box(LEFT, y, WIDTH, headHeight);
+  let at = y - 20;
+  center(doc.seller.name.toUpperCase(), LEFT, WIDTH, at, 16, fonts.bold);
+  at -= 13;
+  for (const piece of address) { center(piece, LEFT, WIDTH, at, 8); at -= 10; }
+  if (contact) { center(contact, LEFT, WIDTH, at, 8); at -= 10; }
+  if (gstLine) center(gstLine, LEFT, WIDTH, at - 1, 8, fonts.bold);
+  y -= headHeight;
 
-  // ── Seller | details grid ─────────────────────────────────────────────────────────────────
-  const sellerLines: Array<[string, PDFFont, number]> = [[doc.seller.name, fonts.bold, 10]];
-  for (const addressLine of doc.seller.lines) for (const piece of wrap(addressLine, fonts.regular, 8, WIDTH / 2 - 12)) sellerLines.push([piece, fonts.regular, 8]);
-  if (doc.seller.gstin) sellerLines.push([`GSTIN/UIN: ${doc.seller.gstin}`, fonts.regular, 8]);
-  if (doc.seller.state) sellerLines.push([`State Name : ${doc.seller.state}, Code : ${doc.seller.stateCode}`, fonts.regular, 8]);
-  if (doc.seller.phone) sellerLines.push([`Contact : ${doc.seller.phone}`, fonts.regular, 8]);
-  if (doc.seller.email) sellerLines.push([`E-Mail : ${doc.seller.email}`, fonts.regular, 8]);
-  const detailRows = Math.ceil(doc.details.length / 2);
-  const detailHeight = 21;
-  const headerHeight = Math.max(detailRows * detailHeight, sellerLines.length * 10.5 + 8);
-  box(LEFT, y, WIDTH, headerHeight);
-  line(MID, y, MID, y - headerHeight);
-  let at = y - 12;
-  for (const [value, font, size] of sellerLines) { text(value, LEFT + 5, at, size, font); at -= 10.5; }
-  const rowHeight = headerHeight / detailRows;
-  doc.details.forEach(([label, value], index) => {
-    const row = Math.floor(index / 2);
-    const x = index % 2 === 0 ? MID : MID + WIDTH / 4;
-    const top = y - row * rowHeight;
-    if (row > 0 && index % 2 === 0) line(MID, top, RIGHT, top);
-    text(label, x + 4, top - 9, 7, fonts.regular, GREY);
-    if (value) text(wrap(value, fonts.bold, 8, WIDTH / 4 - 8)[0], x + 4, top - 18, 8, fonts.bold);
-  });
-  line(MID + WIDTH / 4, y, MID + WIDTH / 4, y - headerHeight);
-  y -= headerHeight;
-
-  // ── Buyer | terms of delivery ─────────────────────────────────────────────────────────────
-  const buyerLines: Array<[string, PDFFont, number, typeof GREY]> = [['Buyer (Bill to)', fonts.regular, 7, GREY], [doc.buyer.name, fonts.bold, 10, BLACK]];
-  for (const addressLine of doc.buyer.lines) for (const piece of wrap(addressLine, fonts.regular, 8, WIDTH / 2 - 12)) buyerLines.push([piece, fonts.regular, 8, BLACK]);
-  if (doc.buyer.gstin) buyerLines.push([`GSTIN/UIN : ${doc.buyer.gstin}`, fonts.regular, 8, BLACK]);
-  if (doc.buyer.state) buyerLines.push([`State Name : ${doc.buyer.state}, Code : ${doc.buyer.stateCode}`, fonts.regular, 8, BLACK]);
-  if (doc.buyer.phone) buyerLines.push([`Contact : ${doc.buyer.phone}`, fonts.regular, 8, BLACK]);
-  const buyerHeight = Math.max(44, buyerLines.length * 10.5 + 6);
-  box(LEFT, y, WIDTH, buyerHeight);
-  line(MID, y, MID, y - buyerHeight);
-  at = y - 10;
-  for (const [value, font, size, color] of buyerLines) { text(value, LEFT + 5, at, size, font, color); at -= 10.5; }
-  text('Terms of Delivery', MID + 4, y - 10, 7, fonts.regular, GREY);
-  y -= buyerHeight;
+  // ── Bill To | Ship To | invoice details ──────────────────────────────────────────────────
+  const third = WIDTH / 3;
+  const partyLines = (party: TallyInvoice['buyer']): Array<[string, PDFFont, number]> => {
+    const out: Array<[string, PDFFont, number]> = [[party.name, fonts.bold, 9]];
+    for (const addressLine of party.lines) for (const piece of wrap(addressLine, fonts.regular, 8, third - 12)) out.push([piece, fonts.regular, 8]);
+    if (party.phone) out.push([`Contact No.  ${party.phone}`, fonts.regular, 8]);
+    if (party.gstin) out.push([`GSTIN/UIN  ${party.gstin}`, fonts.bold, 8]);
+    if (party.state) out.push([`Place of Supply  ${party.state}`, fonts.regular, 8]);
+    if (party.stateCode) out.push([`State Code  ${party.stateCode}`, fonts.regular, 8]);
+    return out;
+  };
+  const buyer = partyLines(doc.buyer);
+  const detailLabelWidth = Math.max(...doc.details.map(([label]) => fonts.regular.widthOfTextAtSize(label, 8))) + 6;
+  const partyHeight = Math.max(18 + buyer.length * 10.5, 10 + doc.details.length * 11.5);
+  box(LEFT, y, WIDTH, partyHeight);
+  line(LEFT + third, y, LEFT + third, y - partyHeight);
+  line(LEFT + 2 * third, y, LEFT + 2 * third, y - partyHeight);
+  for (const [index, caption] of ['BILL TO', 'SHIP TO'].entries()) {
+    const x = LEFT + index * third + 5;
+    text(caption, x, y - 9, 6.5, fonts.bold, GREY);
+    let lineAt = y - 20;
+    for (const [value, font, size] of buyer) { text(wrap(value, font, size, third - 10)[0], x, lineAt, size, font); lineAt -= 10.5; }
+  }
+  at = y - 11;
+  for (const [label, value] of doc.details) {
+    const x = LEFT + 2 * third + 5;
+    text(label, x, at, 8, fonts.regular, GREY);
+    text(`: ${value}`, x + detailLabelWidth, at, 8, fonts.bold);
+    at -= 11.5;
+  }
+  y -= partyHeight;
 
   // ── Goods ────────────────────────────────────────────────────────────────────────────────
-  // What must still fit after the goods on the page they end on: the total, the words, the tax
-  // summary, and the bottom boxes.
-  const summaryHeight = 16 + 30 + 26 + (doc.taxRows.length + 1) * 12 + 18 + 120 + 24;
+  const showDiscount = doc.items.some((item) => item.discount);
+  const { columns, x: colX } = goodsColumns(showDiscount);
+  const amountCol = columns.length - 1;
+  // What must still fit after the goods on their last page.
+  const after = 16 + 70 + 22 + 26 + (doc.taxRows.length + 1) * 12 + 16 + 96 + 24;
 
   let tableTop = y;
   const headings = () => {
-    box(LEFT, y, WIDTH, 16);
-    COLUMNS.forEach((column, index) => center(column.label, COL_X[index], colWidth(index), y - 11, 7));
+    box(LEFT, y, WIDTH, 16, SHADE);
+    columns.forEach((column, index) => center(column.label, colX[index], column.width, y - 11, 7.5, fonts.bold));
     y -= 16;
     tableTop = y;
   };
   const closeColumns = (bottom: number) => {
     line(LEFT, tableTop, LEFT, bottom);
     line(RIGHT, tableTop, RIGHT, bottom);
-    for (let index = 1; index < COLUMNS.length; index += 1) line(COL_X[index], tableTop + 16, COL_X[index], bottom);
+    for (let index = 1; index < columns.length; index += 1) line(colX[index], tableTop + 16, colX[index], bottom);
   };
   const newPage = () => {
     closeColumns(y);
@@ -178,69 +187,71 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
     right('continued ...', RIGHT, y - 12, 8, fonts.italic);
     page = pdf.addPage(PAGE);
     y = TOP;
-    center(`${doc.title} (continued)`, LEFT, WIDTH, y - 12, 10, fonts.bold);
+    center(`${doc.title} ${doc.details[0]?.[1] ?? ''} (continued)`, LEFT, WIDTH, y - 10, 9, fonts.bold);
     y -= 18;
     headings();
   };
   headings();
-
   const cell = (index: number, value: string, at2: number, font = fonts.regular, size = 8) => {
-    const column = COLUMNS[index];
-    const x = COL_X[index];
-    const width = colWidth(index);
-    if (column.align === 'right') right(value, x + width - 4, at2, size, font);
-    else if (column.align === 'center') center(value, x, width, at2, size, font);
-    else text(value, x + 4, at2, size, font);
+    const column = columns[index];
+    if (column.align === 'right') right(value, colX[index] + column.width - 4, at2, size, font);
+    else if (column.align === 'center') center(value, colX[index], column.width, at2, size, font);
+    else text(value, colX[index] + 4, at2, size, font);
   };
 
   for (const item of doc.items) {
-    const description = wrap(item.description, fonts.bold, 8, colWidth(1) - 8);
-    const partLine = item.partNumber ? wrap(`Part No. ${item.partNumber}`, fonts.italic, 7, colWidth(1) - 8) : [];
+    const description = wrap(item.description, fonts.bold, 8, columns[1].width - 8);
+    const partLine = item.partNumber ? wrap(`Part No. ${item.partNumber}`, fonts.regular, 7, columns[1].width - 8) : [];
     const height = (description.length + partLine.length) * 10 + 5;
     if (y - height < BOTTOM + 20) newPage();
     at = y - 10;
     cell(0, String(item.sl), at);
     cell(2, item.hsn, at);
-    cell(3, `${item.qty} ${item.unit}`, at, fonts.bold);
+    cell(3, item.qty, at);
     cell(4, item.rate, at);
     cell(5, item.unit, at);
-    cell(6, item.discount, at);
-    cell(7, item.amount, at, fonts.bold);
-    for (const piece of description) { text(piece, COL_X[1] + 4, at, 8, fonts.bold); at -= 10; }
-    for (const piece of partLine) { text(piece, COL_X[1] + 4, at, 7, fonts.italic); at -= 10; }
+    if (showDiscount) cell(6, item.discount, at);
+    cell(amountCol, item.amount, at);
+    for (const piece of description) { text(piece, colX[1] + 4, at, 8, fonts.bold); at -= 10; }
+    for (const piece of partLine) { text(piece, colX[1] + 4, at, 7, fonts.regular, GREY); at -= 10; }
     y -= height;
   }
   if (doc.emptyNote) {
-    for (const piece of wrap(doc.emptyNote, fonts.italic, 8, colWidth(1) - 8)) { text(piece, COL_X[1] + 4, y - 10, 8, fonts.italic); y -= 10; }
+    for (const piece of wrap(doc.emptyNote, fonts.italic, 8, columns[1].width - 8)) { text(piece, colX[1] + 4, y - 10, 8, fonts.italic); y -= 10; }
   }
-  y -= 8;
-  const chargesHeight = doc.charges.length * 13;
-  if (y - chargesHeight - summaryHeight < BOTTOM) newPage();
-  for (const charge of doc.charges) {
-    right(charge.label, COL_X[2] - 4, y - 10, 8, fonts.boldItalic);
-    cell(4, charge.rate, y - 10);
-    cell(7, charge.amount, y - 10, fonts.bold);
-    y -= 13;
-  }
-  y -= 4;
-  // Total row
+  y -= 10;
+  if (y - after < BOTTOM) newPage();
   line(LEFT, y, RIGHT, y);
-  right('Total', COL_X[2] - 4, y - 11, 8);
+  right('Total', colX[2] - 4, y - 11, 8, fonts.bold);
   cell(3, doc.totalQty, y - 11, fonts.bold);
-  cell(7, `Rs. ${doc.total}`, y - 11, fonts.bold, 9);
+  cell(amountCol, doc.itemsTotal, y - 11, fonts.bold);
   y -= 16;
   closeColumns(y);
   line(LEFT, y, RIGHT, y);
 
-  // ── Amount in words ──────────────────────────────────────────────────────────────────────
-  const words = wrap(doc.amountInWords, fonts.bold, 9, WIDTH - 10);
-  const wordsHeight = 14 + words.length * 11;
-  box(LEFT, y, WIDTH, wordsHeight);
-  text('Amount Chargeable (in words)', LEFT + 5, y - 9, 7, fonts.regular, GREY);
-  right('E. & O.E', RIGHT - 5, y - 9, 7, fonts.italic);
+  // ── Amount in words | tax and deductions ────────────────────────────────────────────────
+  const split = LEFT + WIDTH * 0.565;
+  const words = wrap(doc.amountInWords, fonts.bold, 8.5, split - LEFT - 10);
+  const charges = doc.charges.length ? doc.charges : [{ label: 'No tax charged', rate: '', amount: '' }];
+  const sumHeight = Math.max(18 + words.length * 11, 8 + charges.length * 12);
+  box(LEFT, y, WIDTH, sumHeight);
+  line(split, y, split, y - sumHeight);
+  text('AMOUNT IN WORDS', LEFT + 5, y - 9, 6.5, fonts.bold, GREY);
   at = y - 20;
-  for (const piece of words) { text(piece, LEFT + 5, at, 9, fonts.bold); at -= 11; }
-  y -= wordsHeight;
+  for (const piece of words) { text(piece, LEFT + 5, at, 8.5, fonts.bold); at -= 11; }
+  at = y - 11;
+  for (const charge of charges) {
+    text(`${charge.label}${charge.rate ? ` @ ${charge.rate}` : ''}`, split + 5, at, 8);
+    right(charge.amount, RIGHT - 5, at, 8);
+    at -= 12;
+  }
+  y -= sumHeight;
+
+  // Grand total, shaded.
+  box(LEFT, y, WIDTH, 20, SHADE);
+  right(`Rs. ${doc.total}`, RIGHT - 5, y - 14, 11, fonts.bold);
+  right('GRAND TOTAL', RIGHT - 5 - fonts.bold.widthOfTextAtSize(pdfSafe(`Rs. ${doc.total}`), 11) - 24, y - 14, 10, fonts.bold);
+  y -= 20;
 
   // ── HSN-wise tax summary ─────────────────────────────────────────────────────────────────
   const intra = !doc.interState;
@@ -255,6 +266,7 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   const taxHead = 24;
   const taxRows = [...doc.taxRows, doc.taxTotal];
   const taxHeight = taxHead + taxRows.length * 12;
+  box(LEFT, y, WIDTH, taxHead, SHADE);
   box(LEFT, y, WIDTH, taxHeight);
   taxCols.forEach((column, index) => {
     const x = taxX[index];
@@ -262,12 +274,12 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
     if (index > 0) line(x, y - (column.group && taxCols[index - 1].group === column.group ? 12 : 0), x, y - taxHeight);
     if (column.group) {
       if (taxCols[index - 1]?.group !== column.group) {
-        center(column.group, x, width + taxCols[index + 1].w * WIDTH, y - 9, 7);
+        center(column.group, x, width + taxCols[index + 1].w * WIDTH, y - 9, 7, fonts.bold);
         line(x, y - 12, x + width + taxCols[index + 1].w * WIDTH, y - 12);
       }
-      center(column.label, x, width, y - 21, 7);
+      center(column.label, x, width, y - 21, 7, fonts.bold);
     } else {
-      center(column.label, x, width, y - 15, 7);
+      center(column.label, x, width, y - 15, 7, fonts.bold);
     }
   });
   line(LEFT, y - taxHead, RIGHT, y - taxHead);
@@ -281,62 +293,36 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
     values.forEach((value, column) => {
       const x = taxX[column];
       const width = taxCols[column].w * WIDTH;
-      if (column === 0) {
-        if (isTotal) right(value, x + width - 4, at, 7.5, font);
-        else text(value, x + 4, at, 7.5, font);
-      } else right(value, x + width - 4, at, 7.5, font);
+      if (column === 0 && !isTotal) text(value, x + 4, at, 7.5, font);
+      else right(value, x + width - 4, at, 7.5, font);
     });
     if (isTotal) line(LEFT, at + 9, RIGHT, at + 9);
     at -= 12;
   });
   y -= taxHeight;
 
-  // Tax in words
-  const taxWordsHeight = doc.inclusive ? 26 : 16;
-  box(LEFT, y, WIDTH, taxWordsHeight);
-  text('Tax Amount (in words) :', LEFT + 5, y - 11, 7.5);
-  text(wrap(doc.taxInWords, fonts.bold, 8, WIDTH - 110)[0], LEFT + 95, y - 11, 8, fonts.bold);
-  if (doc.inclusive) text('Prices include GST.', LEFT + 5, y - 21, 7, fonts.italic);
-  y -= taxWordsHeight;
+  const taxWords = `Tax Amount (in words): ${doc.taxInWords}${doc.inclusive ? '  (prices include GST)' : ''}`;
+  box(LEFT, y, WIDTH, 16);
+  text(wrap(taxWords, fonts.regular, 7.5, WIDTH - 10)[0], LEFT + 5, y - 11, 7.5);
+  y -= 16;
 
-  // ── PAN, declaration | bank, signature ───────────────────────────────────────────────────
-  const declaration = wrap(doc.declaration, fonts.regular, 7.5, WIDTH / 2 - 12);
-  const bottomHeight = Math.max(110, 40 + declaration.length * 9 + 26);
-  box(LEFT, y, WIDTH, bottomHeight);
-  line(MID, y, MID, y - bottomHeight);
-  at = y - 11;
-  if (doc.seller.pan) { text(`Company's PAN : ${doc.seller.pan}`, LEFT + 5, at, 8); }
-  at -= 16;
-  text('Declaration', LEFT + 5, at, 7.5, fonts.bold);
-  at -= 10;
+  // ── Declaration | signatory ──────────────────────────────────────────────────────────────
+  const declaration = wrap(doc.declaration, fonts.regular, 7.5, split - LEFT - 10);
+  const footHeight = Math.max(80, 22 + declaration.length * 9);
+  box(LEFT, y, WIDTH, footHeight);
+  line(split, y, split, y - footHeight);
+  text('TERMS & DECLARATION', LEFT + 5, y - 9, 6.5, fonts.bold, GREY);
+  at = y - 20;
   for (const piece of declaration) { text(piece, LEFT + 5, at, 7.5); at -= 9; }
-  text("Customer's Seal and Signature", LEFT + 5, y - bottomHeight + 8, 7.5);
+  right(`For, ${doc.seller.name.toUpperCase()}`, RIGHT - 5, y - 13, 8.5, fonts.bold);
+  right('Authorised Signatory', RIGHT - 5, y - footHeight + 8, 8);
+  y -= footHeight;
 
-  text("Company's Bank Details", MID + 5, y - 10, 7, fonts.regular, GREY);
-  const bankTop = y - 21;
-  if (doc.bank) {
-    const rows: Array<[string, string]> = [
-      ['Bank Name', doc.bank.name],
-      ['A/c No.', doc.bank.account],
-      ['Branch & IFS Code', [doc.bank.branch, doc.bank.ifsc].filter(Boolean).join(' & ')],
-    ];
-    rows.forEach(([label, value], index) => {
-      text(label, MID + 5, bankTop - index * 10, 7.5);
-      text(`: ${wrap(value, fonts.bold, 7.5, WIDTH / 2 - 95)[0]}`, MID + 80, bankTop - index * 10, 7.5, fonts.bold);
-    });
-  }
-  const signTop = y - 50;
-  line(MID, signTop, RIGHT, signTop);
-  right(`for ${doc.seller.name}`, RIGHT - 5, signTop - 11, 8, fonts.bold);
-  right('Authorised Signatory', RIGHT - 5, y - bottomHeight + 8, 8);
-  y -= bottomHeight;
-
-  center('This is a Computer Generated Invoice', LEFT, WIDTH, y - 11, 7);
+  center('This is a computer generated invoice.', LEFT, WIDTH, y - 11, 7);
   if (doc.payment) {
     center(`Received: Rs. ${doc.payment.paid}${doc.payment.writtenOff ? `  |  Settled short: Rs. ${doc.payment.writtenOff}` : ''}  |  Balance due: Rs. ${doc.payment.balance}`, LEFT, WIDTH, y - 22, 7.5, fonts.bold);
   }
 
-  // Page numbers when the goods ran on.
   const pages = pdf.getPages();
   if (pages.length > 1) {
     pages.forEach((each, index) => {

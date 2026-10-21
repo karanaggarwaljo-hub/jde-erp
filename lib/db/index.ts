@@ -1466,7 +1466,7 @@ export async function getInvoicePdfSource(companyId: string, invoiceId: string) 
   const [invoice, items, company, returns] = await Promise.all([
     client.from('jde_invoices').select('*').eq('company_id', companyId).eq('id', invoiceId).maybeSingle(),
     client.from('jde_invoice_items').select('*').eq('company_id', companyId).eq('invoice_id', invoiceId).order('id', { ascending: true }),
-    client.from('jde_companies').select('name, gstin, address, contact_phone, contact_email, bank_name, bank_account_no, bank_ifsc, bank_branch, invoice_declaration').eq('id', companyId).maybeSingle(),
+    client.from('jde_companies').select('name, gstin, address, contact_phone, contact_email, invoice_declaration').eq('id', companyId).maybeSingle(),
     client.from('jde_sales_returns').select('id, subtotal').eq('company_id', companyId).eq('invoice_id', invoiceId).order('created_at', { ascending: true }),
   ]);
   for (const result of [invoice, items, company, returns]) {

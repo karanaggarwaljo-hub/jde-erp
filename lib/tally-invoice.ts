@@ -1,12 +1,12 @@
 /**
- * A sales invoice laid out the way Tally prints a GST "Tax Invoice" — the format Indian traders,
- * their customers and their accountants are used to: seller and buyer with GSTIN and state, the
- * invoice details grid, goods with HSN/SAC, CGST and SGST (or IGST between states), the amount in
- * words, the HSN-wise tax summary, PAN, bank details, the declaration and the signatory.
+ * A sales invoice in the GST "Tax Invoice" form Indian traders and their accountants know from
+ * Tally: the seller's letterhead, Bill To / Ship To beside the invoice details, goods with HSN,
+ * CGST and SGST (or IGST between states), the amount in words, the grand total, the HSN-wise tax
+ * summary, the declaration and the signatory. The owner chose to leave PAN and bank details off.
  *
  * Pure: the printed page and the saved PDF both draw this, so they can never disagree. Every
- * figure comes from what the invoice stored (lib/invoice-figures.ts); the state, state code and
- * PAN come from the GSTINs, so nothing is made up.
+ * figure comes from what the invoice stored (lib/invoice-figures.ts); the state and state code come
+ * from the GSTINs, so nothing is made up.
  */
 
 import { invoiceFigures, type FigureInvoice, type FigureItem, type FigureReturn } from './invoice-figures';
@@ -17,10 +17,6 @@ export type TallyCompany = {
   gstin?: string | null;
   contact_phone?: string | null;
   contact_email?: string | null;
-  bank_name?: string | null;
-  bank_account_no?: string | null;
-  bank_ifsc?: string | null;
-  bank_branch?: string | null;
   invoice_declaration?: string | null;
 };
 
@@ -48,12 +44,15 @@ export type TaxRow = { hsn: string; taxable: string; cgstRate: string; cgst: str
 
 export type TallyInvoice = {
   title: string;
-  seller: Party & { pan: string };
+  subtitle: string;
+  seller: Party;
   buyer: Party;
-  /** The details grid beside the seller: [label, value] pairs, two per row, as Tally prints them. */
+  /** The invoice details beside Bill To / Ship To: [label, value] pairs, one per line. */
   details: Array<[string, string]>;
   items: TallyItem[];
   totalQty: string;
+  /** The goods added up, before anything below them. */
+  itemsTotal: string;
   charges: TallyCharge[];
   total: string;
   amountInWords: string;
@@ -63,7 +62,6 @@ export type TallyInvoice = {
   taxRows: TaxRow[];
   taxTotal: TaxRow;
   taxInWords: string;
-  bank: { name: string; account: string; ifsc: string; branch: string } | null;
   declaration: string;
   /** What has been received and what is still owed — not on a Tally invoice, but asked at the counter. */
   payment: { paid: string; balance: string; writtenOff: string } | null;
@@ -142,20 +140,13 @@ export function stateOfGstin(gstin: string | null | undefined): { code: string; 
   return { code, name: GST_STATES[code] ?? '' };
 }
 
-/** The PAN inside a GSTIN (characters 3 to 12), or blank. */
-export function panOfGstin(gstin: string | null | undefined): string {
-  const value = text(gstin).toUpperCase();
-  const pan = value.slice(2, 12);
-  return /^[A-Z]{5}\d{4}[A-Z]$/.test(pan) ? pan : '';
-}
-
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** 2026-10-21 → "21-Oct-26", Tally's date. */
+/** 2026-10-21 → "21-Oct-2026". */
 export function tallyDate(iso: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(text(iso));
   if (!match) return text(iso);
-  return `${match[3]}-${MONTHS[Number(match[2]) - 1] ?? match[2]}-${match[1].slice(2)}`;
+  return `${Number(match[3])}-${MONTHS[Number(match[2]) - 1] ?? match[2]}-${match[1]}`;
 }
 
 const MODE_LABELS: Record<string, string> = { cash: 'Cash', upi: 'UPI', card: 'Card', bank: 'Bank Transfer', bank_transfer: 'Bank Transfer', cheque: 'Cheque', credit: 'Credit' };
@@ -197,7 +188,7 @@ export function buildTallyInvoice(source: {
       partNumber: text(item.part_number),
       hsn: text(item.hsn),
       qty: String(num(item.qty)),
-      unit: 'Nos',
+      unit: 'Pcs',
       rate: indianAmount(num(item.unit_price)),
       discount: lineDiscount > 0 ? percentText(lineDiscount) : '',
       amount: indianAmount(num(item.line_total)),
@@ -246,12 +237,9 @@ export function buildTallyInvoice(source: {
   // Tally leaves the rate blank on the total line: it adds amounts, not rates.
   const taxTotal = { ...taxRow('Total', round2(taxable), round2(tax), halfOne, halfTwo, rate, interState), cgstRate: '', sgstRate: '', igstRate: '' };
 
-  const bank = text(company.bank_name) || text(company.bank_account_no)
-    ? { name: text(company.bank_name), account: text(company.bank_account_no), ifsc: text(company.bank_ifsc).toUpperCase(), branch: text(company.bank_branch) }
-    : null;
-
   return {
-    title: 'TAX INVOICE',
+    title: 'Tax Invoice',
+    subtitle: '(Invoice Under Rule 46 of the GST Tax Rules, 2017)',
     seller: {
       name: text(company.name) || 'Company',
       lines: addressLines(company.address),
@@ -260,7 +248,6 @@ export function buildTallyInvoice(source: {
       stateCode: sellerState.code,
       phone: text(company.contact_phone),
       email: text(company.contact_email),
-      pan: panOfGstin(company.gstin),
     },
     buyer: {
       name: text(invoice.customer) || 'Cash',
@@ -273,20 +260,17 @@ export function buildTallyInvoice(source: {
     },
     details: [
       ['Invoice No.', text(invoice.id)],
-      ['Dated', tallyDate(invoice.date)],
-      ['Delivery Note', ''],
-      ['Mode/Terms of Payment', MODE_LABELS[text(invoice.mode).toLowerCase()] ?? text(invoice.mode)],
-      ['Reference No. & Date', ''],
-      ['Other References', ''],
-      ["Buyer's Order No.", ''],
-      ['Dated', ''],
-      ['Dispatch Doc No.', ''],
-      ['Delivery Note Date', ''],
-      ['Dispatched through', ''],
+      ['Date', tallyDate(invoice.date)],
+      ['Payment Terms', MODE_LABELS[text(invoice.mode).toLowerCase()] ?? text(invoice.mode)],
+      ['Disp Through', ''],
+      ['Terms of Delivery', ''],
       ['Destination', ''],
+      ['Other Reference', ''],
+      ['E-Way Bill No.', ''],
     ],
     items: tallyItems,
-    totalQty: `${items.reduce((sum, item) => sum + num(item.qty), 0)} Nos`,
+    totalQty: `${items.reduce((sum, item) => sum + num(item.qty), 0)}`,
+    itemsTotal: indianAmount(f.subtotal),
     charges,
     total: indianAmount(total),
     amountInWords: amountInWords(total),
@@ -295,7 +279,6 @@ export function buildTallyInvoice(source: {
     taxRows,
     taxTotal,
     taxInWords: amountInWords(tax),
-    bank,
     declaration: text(company.invoice_declaration) || DEFAULT_DECLARATION,
     payment: paid > 0 || f.writtenOff > 0
       ? { paid: indianAmount(paid), balance: indianAmount(f.balanceDue), writtenOff: f.writtenOff > 0 ? indianAmount(f.writtenOff) : '' }

@@ -13,7 +13,7 @@ import { buildTallyInvoice, type TallyCompany } from '@/lib/tally-invoice';
 
 type PartHsn = { id: string; hsn_code?: string | null };
 
-/** A sales invoice, printed the way Tally prints a GST Tax Invoice. The saved PDF draws the same
+/** A sales invoice, printed as a GST Tax Invoice. The saved PDF draws the same
  *  thing (lib/tally-invoice.ts builds both), so the two never disagree. */
 export default function SalesInvoicePrintPage() {
   const { id } = useParams<{ id: string }>();
@@ -77,11 +77,6 @@ export default function SalesInvoicePrintPage() {
           </button>
         </div>
       </div>
-      {!doc.bank && (
-        <p className="no-print text-muted text-sm mb-4" style={{ textAlign: 'center' }}>
-          Add your bank details in Settings → Company to print them on every invoice.
-        </p>
-      )}
       <div className="invoice-sheet" style={{ background: '#fff', padding: 24 }}>
         <TallyInvoiceSheet doc={doc} />
       </div>

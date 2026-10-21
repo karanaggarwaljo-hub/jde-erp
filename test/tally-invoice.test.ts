@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { amountInWords, buildTallyInvoice, indianAmount, panOfGstin, rupeesInWords, stateOfGstin, tallyDate, type TallyItemInput, type TallyInvoiceInput } from '../lib/tally-invoice';
+import { amountInWords, buildTallyInvoice, indianAmount, rupeesInWords, stateOfGstin, tallyDate, type TallyItemInput, type TallyInvoiceInput } from '../lib/tally-invoice';
 
-const COMPANY = { name: 'Jai Durga Enterprises', address: 'Shop 12, Industrial Area, Mohali', gstin: '03ABCDE1234F1Z5', contact_phone: '98140 00000', bank_name: 'HDFC Bank', bank_account_no: '50200012345678', bank_ifsc: 'hdfc0001234', bank_branch: 'Phase 7, Mohali' };
+const COMPANY = { name: 'Jai Durga Enterprises', address: 'Shop 12, Industrial Area, Mohali', gstin: '03ABCDE1234F1Z5', contact_phone: '98140 00000' };
 const invoice = (overrides: Partial<TallyInvoiceInput> = {}): TallyInvoiceInput => ({
   id: 'INV-1021', date: '2026-10-21', customer: 'Sharma Earthmovers', total: 1180, paid: 0, mode: 'cash',
   settlement_write_off: 0, discount_percent: 0, discount_amount: 0, gst_percent: 18, gst_amount: 180, gst_mode: 'exclusive',
@@ -24,11 +24,11 @@ test('amounts are grouped the Indian way and written in words as Tally does', ()
   assert.equal(amountInWords(0), 'INR Zero Only');
 });
 
-test('the state, state code and PAN come from the GSTIN; the date is Tally\'s', () => {
+test('the state and state code come from the GSTIN; dates read 21-Oct-2026', () => {
   assert.deepEqual(stateOfGstin('03ABCDE1234F1Z5'), { code: '03', name: 'Punjab' });
   assert.deepEqual(stateOfGstin('not a gstin'), { code: '', name: '' });
-  assert.equal(panOfGstin('03abcde1234f1z5'), 'ABCDE1234F');
-  assert.equal(tallyDate('2026-10-21'), '21-Oct-26');
+  assert.equal(tallyDate('2026-10-21'), '21-Oct-2026');
+  assert.equal(tallyDate('2026-08-01'), '1-Aug-2026');
 });
 
 test('a sale inside the state splits the tax into CGST and SGST, and the HSN summary adds up', () => {
@@ -39,14 +39,15 @@ test('a sale inside the state splits the tax into CGST and SGST, and the HSN sum
   });
   assert.equal(doc.interState, false);
   assert.equal(doc.seller.state, 'Punjab');
-  assert.equal(doc.seller.pan, 'ABCDE1234F');
   assert.deepEqual(doc.charges.map((c) => [c.label, c.rate, c.amount]), [['CGST', '9%', '135.00'], ['SGST', '9%', '135.00']]);
   assert.equal(doc.total, '1,770.00');
   assert.equal(doc.amountInWords, 'INR One Thousand Seven Hundred Seventy Only');
   assert.deepEqual(doc.taxRows.map((r) => [r.hsn, r.taxable, r.cgst, r.sgst, r.totalTax]), [['84314930', '1,000.00', '90.00', '90.00', '180.00'], ['84812000', '500.00', '45.00', '45.00', '90.00']]);
   assert.equal(doc.taxTotal.totalTax, '270.00');
-  assert.deepEqual(doc.bank, { name: 'HDFC Bank', account: '50200012345678', ifsc: 'HDFC0001234', branch: 'Phase 7, Mohali' });
-  assert.equal(doc.details[3][1], 'Cash');
+  assert.equal(doc.itemsTotal, '1,500.00');
+  assert.equal(doc.details[2][0], 'Payment Terms');
+  assert.equal(doc.details[2][1], 'Cash');
+  assert.ok(!('bank' in doc) && !('pan' in doc.seller), 'no PAN or bank details: the owner left them off');
 });
 
 test('a buyer in another state is charged IGST; a counter sale with no GSTIN is in the seller\'s state', () => {
