@@ -134,7 +134,8 @@ export function buildCustomerInsights(input: {
 
   // Drafts are parked, not sold — they reserve stock but bill nothing, so they must not count
   // as purchase history or the tiers would reward parking quotes.
-  const liveInvoices = invoices.filter((invoice) => invoice.status !== 'draft');
+  // Cancelled bills likewise bill nothing.
+  const liveInvoices = invoices.filter((invoice) => invoice.status !== 'draft' && invoice.status !== 'cancelled');
 
   const byCustomerKey = new Map<string, InsightsInvoice[]>();
   for (const invoice of liveInvoices) {

@@ -9,7 +9,7 @@ import TallyInvoiceSheet from '@/components/sales/TallyInvoiceSheet';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { type Customer, type Invoice, type InvoiceItem } from '@/lib/sales-types';
 import { type SalesReturnRow } from '@/lib/client-sales-returns';
-import { buildTallyInvoice, type TallyCompany } from '@/lib/tally-invoice';
+import { asIssued, buildTallyInvoice, type TallyCompany } from '@/lib/tally-invoice';
 
 type PartHsn = { id: string; hsn_code?: string | null };
 
@@ -30,15 +30,15 @@ export default function SalesInvoicePrintPage() {
   const doc = useMemo(() => {
     if (!invoice) return null;
     const hsnOf = new Map(parts.map((part) => [part.id, part.hsn_code ?? '']));
-    const items = invoiceItems
-      .filter((item) => item.invoice_id === invoice.id)
-      .map((item) => ({ ...item, hsn: item.product_id ? hsnOf.get(String(item.product_id)) ?? '' : '' }));
+    // A cancelled invoice prints as it was issued, stamped cancelled.
+    const issued = asIssued(invoice as unknown as Record<string, unknown>, invoiceItems.filter((item) => item.invoice_id === invoice.id));
+    const items = issued.items.map((item) => ({ ...item, hsn: item.product_id ? hsnOf.get(String(item.product_id)) ?? '' : '' }));
     const customer = customers.find((row) => row.name === invoice.customer);
     const returns = salesReturns
       .filter((row) => row.invoice_id === invoice.id)
       .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
     return buildTallyInvoice({
-      invoice: { ...invoice, mode: (invoice as Invoice & { mode?: string | null }).mode ?? null },
+      invoice: issued.invoice as unknown as Invoice,
       items,
       company: (activeCompany ?? { name: 'Company' }) as TallyCompany,
       customer: customer ? { address: customer.address, phone: customer.phone, gstin: customer.gstin } : null,

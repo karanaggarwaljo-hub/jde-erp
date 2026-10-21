@@ -82,6 +82,12 @@ export function deleteSalesInvoice(companyId: string, invoiceId: string, custome
   return postJson<{ ok: true }>('/api/sales/delete-invoice', { companyId, invoiceId, customerId });
 }
 
+/** Cancels an issued invoice: it keeps its number and is marked cancelled; its stock comes back and
+ *  the customer stops owing it. */
+export function cancelSalesInvoice(companyId: string, invoiceId: string, customerId: string | null, reason: string) {
+  return postJson<{ ok: true }>('/api/sales/cancel-invoice', { companyId, invoiceId, customerId, reason });
+}
+
 export type PaymentAllocationInput = { invoiceId: string; amount: number };
 
 export type ReceiveCustomerPaymentInput = {

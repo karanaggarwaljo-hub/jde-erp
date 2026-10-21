@@ -75,3 +75,21 @@ test('returns and the bill discount come off before the tax, and odd paise land 
   assert.equal(withReturn.charges[0].label, 'Less: Goods returned (SRN-1001)');
   assert.equal(withReturn.taxTotal.taxable, '500.00');
 });
+
+test('an older bill with no stored rate shows the rate its tax works out to, not 0%', () => {
+  const doc = buildTallyInvoice({ invoice: invoice({ gst_percent: null, total: 295, gst_amount: 45 }), items: [item({ qty: 1, unit_price: 250, line_total: 250 })], company: COMPANY, customer: null });
+  assert.deepEqual(doc.charges.map((c) => [c.label, c.rate, c.amount]), [['CGST', '9%', '22.50'], ['SGST', '9%', '22.50']]);
+});
+
+test('a cancelled invoice prints as issued, stamped, with no payment line', async () => {
+  const { asIssued } = await import('../lib/tally-invoice');
+  const row = { id: 'INV-1008', date: '2026-08-24', customer: 'Walk-in', total: 0, paid: 0, status: 'cancelled', cancelled_at: '2026-10-21T10:00:00Z', cancel_reason: 'Wrong customer',
+    cancelled_copy: { invoice: { id: 'INV-1008', date: '2026-08-24', customer: 'Walk-in', total: 295, paid: 100, gst_percent: 18, gst_amount: 45, gst_mode: 'exclusive', status: 'unpaid' }, items: [item({ qty: 1, unit_price: 250, line_total: 250 })] } };
+  const issued = asIssued(row as Record<string, unknown>, [] as ReturnType<typeof item>[]);
+  const doc = buildTallyInvoice({ invoice: issued.invoice as unknown as TallyInvoiceInput, items: issued.items, company: COMPANY, customer: null });
+  assert.equal(doc.total, '295.00');
+  assert.deepEqual(doc.cancelled, { on: '21-Oct-2026', reason: 'Wrong customer' });
+  assert.equal(doc.payment, null);
+  const live = asIssued({ id: 'INV-1', status: 'paid' } as Record<string, unknown>, [1, 2]);
+  assert.deepEqual(live.items, [1, 2], 'an invoice never cancelled prints as it is');
+});

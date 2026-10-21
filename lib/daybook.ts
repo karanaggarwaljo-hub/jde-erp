@@ -132,7 +132,8 @@ export function buildDayBook(sources: DayBookSources): DayBookEntry[] {
   const allocatedToPurchase = sumBy(sources.supplierPaymentAllocations, (row) => row.po_id, (row) => num(row.amount));
 
   for (const invoice of sources.invoices) {
-    if (invoice.status === DRAFT_STATUS) continue;
+    // Parked drafts and cancelled bills moved no goods and no money.
+    if (invoice.status === DRAFT_STATUS || invoice.status === 'cancelled') continue;
     const paid = num(invoice.paid);
     // Only what was taken at the counter. Anything allocated since is a receipt on its own day.
     const atCounter = Math.max(0, round2(paid - (allocatedToInvoice.get(invoice.id) ?? 0)));

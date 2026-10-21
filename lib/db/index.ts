@@ -425,6 +425,19 @@ export async function deleteSalesInvoice(companyId: string, invoiceId: string, c
   if (error) throw error;
 }
 
+/** Cancels a sales invoice through jde_cancel_sales_invoice (scripts/cancel-sales-invoice.sql): it keeps
+ *  its number, marked cancelled with a copy of itself, while its stock comes back and the customer
+ *  stops owing it — one transaction. */
+export async function cancelSalesInvoice(companyId: string, invoiceId: string, customerId: string | null, reason: string): Promise<void> {
+  const { error } = await getClient().rpc('jde_cancel_sales_invoice', {
+    p_company_id: companyId,
+    p_invoice_id: invoiceId,
+    p_customer_id: customerId,
+    p_reason: reason,
+  });
+  if (error) throw error;
+}
+
 export type PaymentAllocationInput = { invoiceId: string; amount: number };
 
 export type ReceiveCustomerPaymentInput = {
@@ -1478,8 +1491,11 @@ export async function getInvoicePdfSource(companyId: string, invoiceId: string) 
     .from('jde_customers').select('address, phone, gstin')
     .eq('company_id', companyId).eq('name', String(row.customer ?? '')).limit(1).maybeSingle();
   if (customer.error) throw customer.error;
+  // A cancelled invoice prints as it was issued, stamped cancelled (lib/tally-invoice.ts asIssued).
+  const { asIssued } = await import('../tally-invoice');
+  const issued = asIssued(row, ((items.data as Array<Record<string, unknown>>) ?? []));
   // Each line's HSN code comes from its part, as the Tally-style invoice prints it.
-  const lineRows = ((items.data as Array<Record<string, unknown>>) ?? []);
+  const lineRows = issued.items;
   const productIds = [...new Set(lineRows.map((line) => line.product_id).filter((id): id is string => typeof id === 'string' && id.length > 0))];
   const hsnOf = new Map<string, string>();
   if (productIds.length > 0) {
@@ -1488,7 +1504,7 @@ export async function getInvoicePdfSource(companyId: string, invoiceId: string) 
     for (const part of (parts.data as Array<{ id: string; hsn_code: string | null }>) ?? []) hsnOf.set(part.id, part.hsn_code ?? '');
   }
   return {
-    invoice: row as unknown as import('../tally-invoice').TallyInvoiceInput,
+    invoice: issued.invoice as unknown as import('../tally-invoice').TallyInvoiceInput,
     items: lineRows.map((line) => ({ ...line, hsn: hsnOf.get(String(line.product_id ?? '')) ?? '' })) as unknown as import('../tally-invoice').TallyItemInput[],
     company: ((company.data as Record<string, unknown> | null) ?? { name: '' }) as unknown as import('../tally-invoice').TallyCompany,
     customer: (customer.data as import('../tally-invoice').TallyCustomer) ?? null,

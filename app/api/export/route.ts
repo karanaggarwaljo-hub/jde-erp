@@ -5,6 +5,7 @@ import { AGE_BUCKETS, agingRows } from '@/lib/aging';
 import { filterToPeriod, formatPeriod, isAllTime, type Period } from '@/lib/report-period';
 import { stockValueLookup, totalStockValue, type StockLayerLike } from '@/lib/stock-value';
 import { costOfSales, grossProfit, gstPosition, type PeriodConsumption, type PeriodInvoiceItem } from '@/lib/period-accounts';
+import { isCountedSale } from '@/lib/sales-types';
 
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; gst_amount: number | null; };
 type PurchaseOrder = { total: number; supplier: string; date: string; paid: number; status: string; gst_amount: number | null };
@@ -21,7 +22,8 @@ async function buildExport(type: string, period: Period): Promise<{ filename: st
   const companyId = await resolveRequestCompanyId();
   // Scoped to the same period the Reports screen is showing, so a downloaded file and the screen
   // it was downloaded from can never report different totals for the same question.
-  const invoices = filterToPeriod((await listRows('invoices', companyId)) as unknown as Invoice[], (row) => row.date, period);
+  // Sales that happened: parked drafts and cancelled bills are not sales (lib/sales-types.ts).
+  const invoices = filterToPeriod(((await listRows('invoices', companyId)) as unknown as Invoice[]).filter(isCountedSale), (row) => row.date, period);
   const purchaseOrders = filterToPeriod((await listRows('purchase_orders', companyId)) as unknown as PurchaseOrder[], (row) => row.date, period);
   const expenses = filterToPeriod((await listRows('expenses', companyId)) as unknown as Expense[], (row) => row.date, period);
   const products = (await listRows('products', companyId)) as unknown as Product[];

@@ -15,6 +15,7 @@ import {
   periodFor, previousPeriod, todayIso, type Period, type PeriodPreset,
 } from '@/lib/report-period';
 import { costOfSales, grossProfit, gstPosition, type GstPosition, type PeriodConsumption, type PeriodInvoiceItem } from '@/lib/period-accounts';
+import { isCountedSale } from '@/lib/sales-types';
 
 type ReportType = 'pnl' | 'profit' | 'sales' | 'stock' | 'gst' | 'aging';
 
@@ -155,7 +156,9 @@ export default function ReportsPage() {
   const period: Period = preset === 'custom'
     ? { start: customStart || null, end: customEnd || null }
     : periodFor(preset, todayIso(new Date()));
-  const periodInvoices = filterToPeriod(invoices, (row) => row.date, period);
+  // Sales that happened: parked drafts and cancelled bills are not sales (lib/sales-types.ts).
+  const salesInvoices = invoices.filter(isCountedSale);
+  const periodInvoices = filterToPeriod(salesInvoices, (row) => row.date, period);
   const periodPurchaseOrders = filterToPeriod(purchaseOrders, (row) => row.date, period);
   const periodExpenses = filterToPeriod(expenses, (row) => row.date, period);
 
@@ -238,7 +241,7 @@ export default function ReportsPage() {
   // rather than against nothing. Equal-length on purpose: comparing 31 days with 28 and calling the
   // difference a trend is how a report misleads. Null for All time, which has no "before".
   const comparison = previousPeriod(period);
-  const priorInvoices = comparison ? filterToPeriod(invoices, (row) => row.date, comparison) : [];
+  const priorInvoices = comparison ? filterToPeriod(salesInvoices, (row) => row.date, comparison) : [];
   const priorRevenue = comparison ? priorInvoices.reduce((t, i) => t + Number(i.total || 0), 0) : null;
   const priorExpenses = comparison
     ? filterToPeriod(expenses, (row) => row.date, comparison).reduce((t, e) => t + Number(e.amount || 0), 0)

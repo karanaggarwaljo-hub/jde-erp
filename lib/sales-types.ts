@@ -62,6 +62,11 @@ export type Invoice = {
   gst_mode?: string | null;
   /** GST state code of the place of supply, chosen on the bill (lib/gst-supply.ts). */
   place_of_supply?: string | null;
+  /** Set when the invoice was cancelled (scripts/cancel-sales-invoice.sql). */
+  cancelled_at?: string | null;
+  cancel_reason?: string | null;
+  /** The invoice as issued, kept when it was cancelled. */
+  cancelled_copy?: { invoice?: { total?: number | string | null } & Record<string, unknown>; items?: unknown[] } | null;
 };
 
 export type InvoiceItem = {
@@ -112,6 +117,15 @@ export type PaymentAllocation = {
  *  Shared with quotations, where a draft is a quote still being worked on: it is not ready to
  *  give to the customer and cannot be turned into an invoice until it is confirmed. */
 export const DRAFT_STATUS = 'draft';
+
+/** A cancelled invoice keeps its number but bills nothing (scripts/cancel-sales-invoice.sql). */
+export const CANCELLED_STATUS = 'cancelled';
+
+/** Whether an invoice is a sale that happened: not a parked draft, not a cancelled bill. Every
+ *  count, average and total of sales goes through this, so neither is ever counted as a sale. */
+export function isCountedSale(invoice: { status?: string | null }): boolean {
+  return invoice.status !== DRAFT_STATUS && invoice.status !== CANCELLED_STATUS;
+}
 
 /** A quotation the owner has confirmed as finished. Only from here can it be turned into an
  *  invoice — which is the moment it costs stock and puts money on a customer's account. The
