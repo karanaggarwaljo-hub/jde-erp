@@ -178,10 +178,18 @@ export function multipartBody(metadata: Record<string, unknown>, mimeType: strin
 
 export type DriveFile = { id: string; webViewLink: string };
 
-/** Saves a new file into a folder. */
-export async function uploadFile(accessToken: string, input: { name: string; parentId: string; mimeType: string; bytes: Uint8Array; description?: string }): Promise<DriveFile> {
+/** Labels the ERP puts on a file it saves (Drive "appProperties", private to the ERP), so it can
+ *  tell later which part a photo belongs to without keeping its own list. */
+export type FileLabels = Record<string, string>;
+
+/** Saves a new file into a folder. `saveAs` turns it into a Google file on the way in (a CSV
+ *  saved as a Google Sheet). */
+export async function uploadFile(accessToken: string, input: { name: string; parentId: string; mimeType: string; bytes: Uint8Array; description?: string; labels?: FileLabels; saveAs?: string }): Promise<DriveFile> {
   const boundary = `jde-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-  const body = multipartBody({ name: input.name, parents: [input.parentId], description: input.description }, input.mimeType, input.bytes, boundary);
+  const metadata: Record<string, unknown> = { name: input.name, parents: [input.parentId], description: input.description };
+  if (input.labels) metadata.appProperties = input.labels;
+  if (input.saveAs) metadata.mimeType = input.saveAs;
+  const body = multipartBody(metadata, input.mimeType, input.bytes, boundary);
   const response = await fetch(`${UPLOAD_URL}?uploadType=multipart&fields=id,webViewLink`, {
     method: 'POST',
     headers: { ...auth(accessToken), 'Content-Type': `multipart/related; boundary=${boundary}` },
@@ -193,9 +201,9 @@ export async function uploadFile(accessToken: string, input: { name: string; par
 
 /** Replaces a file's contents (and name) in place, so it keeps its place and link in the Drive and
  *  no second copy appears. */
-export async function replaceFile(accessToken: string, fileId: string, input: { name: string; mimeType: string; bytes: Uint8Array }): Promise<DriveFile> {
+export async function replaceFile(accessToken: string, fileId: string, input: { name: string; mimeType: string; bytes: Uint8Array; labels?: FileLabels }): Promise<DriveFile> {
   const boundary = `jde-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-  const body = multipartBody({ name: input.name }, input.mimeType, input.bytes, boundary);
+  const body = multipartBody(input.labels ? { name: input.name, appProperties: input.labels } : { name: input.name }, input.mimeType, input.bytes, boundary);
   const response = await fetch(`${UPLOAD_URL}/${encodeURIComponent(fileId)}?uploadType=multipart&fields=id,webViewLink`, {
     method: 'PATCH',
     headers: { ...auth(accessToken), 'Content-Type': `multipart/related; boundary=${boundary}` },
@@ -203,6 +211,29 @@ export async function replaceFile(accessToken: string, fileId: string, input: { 
   });
   if (!response.ok) throw await googleError(response, 'Could not update the file in Google Drive');
   return (await response.json()) as DriveFile;
+}
+
+export type DriveListed = { id: string; name: string; mimeType: string; labels: FileLabels };
+
+/** Every file the ERP saved directly inside a folder (not in the Bin), with its labels. */
+export async function listFolder(accessToken: string, parentId: string): Promise<DriveListed[]> {
+  const out: DriveListed[] = [];
+  let pageToken = '';
+  do {
+    const params = new URLSearchParams({
+      q: `${driveQuoted(parentId)} in parents and trashed = false`,
+      fields: 'nextPageToken, files(id, name, mimeType, appProperties)',
+      pageSize: '1000',
+      spaces: 'drive',
+    });
+    if (pageToken) params.set('pageToken', pageToken);
+    const response = await fetch(`${FILES_URL}?${params}`, { headers: auth(accessToken) });
+    if (!response.ok) throw await googleError(response, 'Could not list a folder in Google Drive');
+    const page = (await response.json()) as { nextPageToken?: string; files?: Array<{ id: string; name: string; mimeType: string; appProperties?: FileLabels }> };
+    for (const entry of page.files ?? []) out.push({ id: entry.id, name: entry.name, mimeType: entry.mimeType, labels: entry.appProperties ?? {} });
+    pageToken = page.nextPageToken ?? '';
+  } while (pageToken);
+  return out;
 }
 
 /** A file's bytes, or null when it is gone from the Drive (deleted, or emptied from the Bin). */

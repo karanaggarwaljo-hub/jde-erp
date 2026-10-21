@@ -2,6 +2,33 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-21 — Backups kept in Google Drive, a parts catalogue in Drive, and an easy way to add part photos
+
+**Every night, a backup into your Google Drive, kept for good.** All of Jai Durga Enterprises'
+records are saved compressed in your Drive, under **Backups / year / month**, one file a night.
+They're small (about 70 KB each today, roughly 25 MB a year), so years of them use almost none of your 5 TB. The ERP's own
+backup is still kept for 7 days as before; this one never expires.
+
+**A parts catalogue in your Drive.** Your Drive now has a **Parts catalogue** folder with:
+
+- **Parts list**, a Google Sheet with every part: part number, OEM number, name, brand,
+  category, what it fits, sale price, MRP, cost price, stock, minimum stock, location, HSN, and a
+  link to its photo. It's rewritten every night when anything has changed. Edit parts in the ERP,
+  not in the sheet.
+- **Photos**, every part's photo named by part number and name (e.g. "911-12400 - bkt main
+  pin.jpg"). A new photo goes in the moment you add it. A changed photo replaces the old one, and a
+  removed photo goes to the Drive's Bin.
+
+The 30 parts that already had pictures, and the sheet, are already there.
+
+**Add Photos** (new button on the Inventory page). It goes through your parts one by one, parts in
+stock first, showing each part's details:
+
+- Tap **Take photo** to open the phone camera, or **From gallery**.
+- Check the picture, then tap **Save & next**. **Skip** and **Back** move without saving.
+- A bar at the top shows how many parts have a photo. **Without a photo** shows just those still
+  missing; **All parts** lets you change any photo.
+
 ## 2026-10-19 — "When can I date a cheque?" fixed and made plain
 
 You said its dates were too late, its sales figure looked wrong, and it was confusing. It now

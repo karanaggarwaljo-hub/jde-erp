@@ -1,7 +1,15 @@
+import { after } from 'next/server';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { dbErrorMessage, isSupportedCatalogImageType, removeStoredPartPhoto, setPartPhoto, uploadPartPhoto } from '@/lib/db';
 import { recordAudit } from '@/lib/audit-log';
 import { ownPhotoPath } from '@/lib/part-photos';
+import { sendPartPhotoToDrive } from '@/lib/parts-drive';
+
+/** The photo follows into the company's Google Drive (Parts catalogue/Photos) after the answer is
+ *  sent, so saving one never waits on Google. Tonight's job catches anything that fails here. */
+function followInDrive(companyId: string, productId: string) {
+  after(() => sendPartPhotoToDrive(companyId, productId).catch((error) => console.error('Copying a part photo to Google Drive failed; the nightly job will retry:', error)));
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +59,7 @@ export async function POST(request: Request) {
       summary: `${result.previous ? 'Changed' : 'Added'} the photo of ${String(result.row.name ?? 'a part')}`,
       details: { image_url: stored.url, previous: result.previous },
     });
+    followInDrive(companyId, productId);
     return Response.json(result.row);
   } catch (error) {
     console.error('POST /api/inventory/part-photo failed:', error);
@@ -81,6 +90,7 @@ export async function DELETE(request: Request) {
         details: { previous: result.previous },
       });
     }
+    followInDrive(companyId, productId);
     return Response.json(result.row);
   } catch (error) {
     console.error('DELETE /api/inventory/part-photo failed:', error);
