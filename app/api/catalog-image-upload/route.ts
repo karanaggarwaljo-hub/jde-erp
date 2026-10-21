@@ -1,5 +1,6 @@
 import { isSupportedCatalogImageType, updateRow, uploadCatalogImage } from '@/lib/db';
 import { recordAudit } from '@/lib/audit-log';
+import { requireOwnCompanyRow } from '@/lib/auth/dal';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +9,10 @@ export async function POST(request: Request) {
   if (typeof catalogId !== 'string' || !catalogId) {
     return Response.json({ error: 'catalogId is required' }, { status: 400 });
   }
+  // Only a listing id came with this request — without this, any signed-in staff member could
+  // replace another company's catalogue photo by sending its id.
+  const access = await requireOwnCompanyRow('catalog_products', catalogId);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
   if (typeof base64 !== 'string' || !base64 || typeof mimeType !== 'string' || !mimeType) {
     return Response.json({ error: 'Missing file data.' }, { status: 400 });
   }
