@@ -82,10 +82,9 @@ export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
         <div className="g-head">
           <div className="g-co">{doc.seller.name}</div>
           {doc.seller.lines.length > 0 && <div>{doc.seller.lines.join(', ')}</div>}
-          {(doc.seller.phone || doc.seller.email) && (
-            <div>{[doc.seller.phone && `Phone: ${doc.seller.phone}`, doc.seller.email && `E-mail: ${doc.seller.email}`].filter(Boolean).join('   |   ')}</div>
-          )}
-          {doc.seller.gstin && <div style={{ fontWeight: 700, marginTop: 2 }}>GSTIN/UIN: {doc.seller.gstin}{doc.seller.state ? `   |   ${doc.seller.state} (${doc.seller.stateCode})` : ''}</div>}
+          {doc.letterhead.contact && <div>{doc.letterhead.contact}</div>}
+          {doc.letterhead.gstin && <div style={{ fontWeight: 700, marginTop: 2 }}>{doc.letterhead.gstin}</div>}
+          {doc.letterhead.registrations && <div>{doc.letterhead.registrations}</div>}
         </div>
 
         <div className="g-row">

@@ -93,3 +93,19 @@ test('a cancelled invoice prints as issued, stamped, with no payment line', asyn
   const live = asIssued({ id: 'INV-1', status: 'paid' } as Record<string, unknown>, [1, 2]);
   assert.deepEqual(live.items, [1, 2], 'an invoice never cancelled prints as it is');
 });
+
+/** After the owner's reference bill: the letterhead carries the website, the MSME (Udyam) number
+ *  and the IE Code, each only when filled in. PAN stays off. */
+test('the letterhead shows phone, e-mail, website, GSTIN, Udyam No. and IE Code, leaving out what is blank', () => {
+  const full = buildTallyInvoice({
+    invoice: invoice(), items: [item()], customer: null,
+    company: { ...COMPANY, contact_email: 'jde@example.com', website: 'www.jde.example', udyam_no: 'udyam-ch-01-0001234', iec_code: '0312345678' },
+  });
+  assert.equal(full.letterhead.contact, 'Phone: 98140 00000   |   E-mail: jde@example.com   |   Website: www.jde.example');
+  assert.equal(full.letterhead.gstin, 'GSTIN/UIN: 03ABCDE1234F1Z5   |   Punjab (03)');
+  assert.equal(full.letterhead.registrations, 'MSME (Udyam) No.: UDYAM-CH-01-0001234   |   IE Code: 0312345678');
+  assert.ok(!JSON.stringify(full.letterhead).includes('PAN'));
+
+  const bare = buildTallyInvoice({ invoice: invoice(), items: [item()], customer: null, company: { name: 'Jai Durga Enterprises', udyam_no: '  ' } });
+  assert.deepEqual(bare.letterhead, { contact: '', gstin: '', registrations: '' });
+});
