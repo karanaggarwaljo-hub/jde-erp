@@ -2,6 +2,24 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-21 — The invoice, in the layout you showed
+
+Based on the Ganpati Auto Traders bill you sent, every invoice, printed and as its PDF, now has:
+
+- **"Tax Invoice (Invoice Under Rule 46 of the GST Tax Rules, 2017)"** at the top, then your name
+  large across the page, with address, phone, email, and GSTIN with your state.
+- **Bill To | Ship To | invoice details** side by side. The details are Invoice No., Date
+  (21-Oct-2026), Payment Terms, Disp Through, Terms of Delivery, Destination, Other Reference and
+  E-Way Bill No.
+- **Goods:** Sr. No., Description of Goods (part number underneath), HSN, Qty, Price, Unit (Pcs) and
+  Amount, with a Disc. % column only when a line has a discount. Then the **Total**.
+- **Amount in words** beside the returns, discount and GST lines, then a shaded **GRAND TOTAL**.
+- **HSN/SAC tax summary**, the tax amount in words, **Terms & Declaration**, and **For, JAI DURGA
+  ENTERPRISES / Authorised Signatory**.
+
+As you asked, **PAN, IRN, Ack No., Narration and bank details are not printed**. The bank fields
+have gone from Settings too. Amount received and balance due still show under the invoice.
+
 ## 2026-10-21 — Invoices now print in Tally style
 
 Every sales invoice, printed and as its saved PDF, now looks like a Tally GST **Tax Invoice**:
