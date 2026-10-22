@@ -87,6 +87,9 @@ export type TallyInvoice = {
   localTaxColumn: 'State Tax' | 'UT Tax';
   /** The figures are GST-inclusive: the item amounts already contain the tax. */
   inclusive: boolean;
+  /** The HSN-wise tax summary and the tax in words. Worked out but not printed: the owner found the
+   *  table too much, and the tax lines above the grand total already carry the tax. HSN codes stay
+   *  on each line of goods, which is what GST asks of an invoice. */
   taxRows: TaxRow[];
   taxTotal: TaxRow;
   taxInWords: string;
@@ -230,6 +233,10 @@ export function buildTallyInvoice(source: {
   const halfOne = round2(tax / 2);
   const halfTwo = round2(tax - halfOne);
   if (items.length > 0 && tax > 0) {
+    // What the tax is charged on, where the goods total above does not already say it: after a
+    // discount or a return, or when the prices include GST. (The HSN-wise table that used to show
+    // it is no longer printed: the owner found it too much.)
+    if (f.gstInclusive || charges.length > 0) charges.push({ label: 'Taxable value', rate: '', amount: indianAmount(f.netTaxableValue) });
     const suffix = f.gstInclusive ? ' (included)' : '';
     if (interState) charges.push({ label: `IGST${suffix}`, rate: percentText(rate), amount: indianAmount(tax) });
     else {

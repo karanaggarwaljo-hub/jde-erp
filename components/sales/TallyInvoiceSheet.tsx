@@ -46,18 +46,13 @@ const CSS = `
 .gst .g-sub { font-size:9.5px; color:#333; }
 .gst .g-charges td { padding:2px 6px; }
 .gst .g-grand { display:flex; justify-content:flex-end; align-items:center; gap:24px; padding:6px 7px; background:#f0f0f0; border-bottom:1px solid #000; font-weight:700; font-size:13px; }
-.gst .g-tax th, .gst .g-tax td { border:1px solid #000; font-size:10px; }
-.gst .g-tax thead th { background:#f0f0f0; text-align:center; }
-.gst .g-tax tr > :first-child { border-left:0; }
-.gst .g-tax tr > :last-child { border-right:0; }
-.gst .g-tax thead tr:first-child th { border-top:0; }
 .gst .g-sign { display:flex; flex-direction:column; justify-content:space-between; min-height:86px; text-align:right; }
 .gst .g-foot { text-align:center; font-size:9.5px; margin-top:4px; }
 .gst .g-void { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
 .gst .g-void span { transform:rotate(-28deg); font-size:84px; font-weight:800; letter-spacing:6px; color:rgba(200,0,0,.28); border:6px solid rgba(200,0,0,.28); padding:4px 24px; }
 .gst .g-void-note { text-align:center; color:#c00; font-weight:700; margin:2px 0 4px; }
 @page { size:A4; margin:10mm; }
-@media print { .gst { max-width:none; aspect-ratio:auto; min-height:272mm; } .gst .g-items thead th, .gst .g-grand, .gst .g-tax thead th { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+@media print { .gst { max-width:none; aspect-ratio:auto; min-height:272mm; } .gst .g-items thead th, .gst .g-grand { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
 `;
 
 function PartyBox({ caption, party }: { caption: string; party: Party }) {
@@ -77,7 +72,6 @@ function PartyBox({ caption, party }: { caption: string; party: Party }) {
 }
 
 export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
-  const intra = !doc.interState;
   const showDiscount = doc.items.some((item) => item.discount);
   // The goods columns' widths; the description takes what is left. Shared by the goods, the empty
   // space beneath them and the total line, so their column lines meet.
@@ -178,36 +172,6 @@ export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
         </div>
 
         <div className="g-grand"><span>GRAND TOTAL</span><span>₹ {doc.total}</span></div>
-
-        <table className="g-tax">
-          <thead>
-            <tr>
-              <th rowSpan={2}>HSN/SAC</th>
-              <th rowSpan={2}>Taxable Value</th>
-              {intra ? <><th colSpan={2}>Central Tax</th><th colSpan={2}>{doc.localTaxColumn}</th></> : <th colSpan={2}>Integrated Tax</th>}
-              <th rowSpan={2}>Total Tax Amount</th>
-            </tr>
-            <tr><th>Rate</th><th>Amount</th>{intra && <><th>Rate</th><th>Amount</th></>}</tr>
-          </thead>
-          <tbody>
-            {[...doc.taxRows, doc.taxTotal].map((row, index) => {
-              const isTotal = index === doc.taxRows.length;
-              return (
-                <tr key={`${row.hsn}-${index}`} style={isTotal ? { fontWeight: 700 } : undefined}>
-                  <td className={isTotal ? 'r' : ''}>{row.hsn}</td>
-                  <td className="r">{row.taxable}</td>
-                  {intra
-                    ? <><td className="r">{row.cgstRate}</td><td className="r">{row.cgst}</td><td className="r">{row.sgstRate}</td><td className="r">{row.sgst}</td></>
-                    : <><td className="r">{row.igstRate}</td><td className="r">{row.igst}</td></>}
-                  <td className="r">{row.totalTax}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <div style={{ padding: '4px 7px', borderBottom: '1px solid #000' }}>
-          Tax Amount (in words): <b>{doc.taxInWords}</b>{doc.inclusive && <span className="g-sub"> · Prices include GST.</span>}
-        </div>
 
         <div className="g-row" style={{ borderBottom: 0 }}>
           <div className="g-col" style={{ flex: '1.3 1 0' }}>

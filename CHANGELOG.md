@@ -2,6 +2,18 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-22 — Less tax detail on invoices
+
+The invoice no longer prints the HSN-wise tax table (HSN/SAC, Taxable Value, Rate, Amount, Total
+Tax Amount) or the "Tax Amount (in words)" line under the grand total. They repeated what the tax
+lines already show.
+
+- The **tax** still shows beside the amount in words: CGST + SGST/UTGST, or IGST, with the rate.
+- **Each item still has its HSN code** in the goods list, which is what GST requires on a bill.
+- Where the goods total doesn't already show what the tax is charged on, a **Taxable value** line
+  is added above the tax. That's after a discount or return, or when prices include GST.
+- **Saved PDFs** are redrawn this way the next time they're opened.
+
 ## 2026-10-22 — Stock Planning is now a simple requirement sheet
 
 Stock Planning was hard to use: three day settings, and no way to add a part or change how many to
