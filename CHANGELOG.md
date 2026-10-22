@@ -2,6 +2,19 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-22 — Invoices fill a full A4 page
+
+A bill now fills the whole A4 sheet, like a Tally invoice, instead of stopping halfway down. The goods
+columns run down the page, and the totals, tax summary and signature sit at the bottom.
+
+- **Print** is set to A4 automatically. On screen the invoice is shown in the shape of an A4 page,
+  so what you see is what prints.
+- **The saved PDF** is a full A4 page too. Older bills' PDFs are redrawn this way the next time
+  they're opened.
+- **A long bill** still continues onto more pages, as before.
+- **On a phone**, the invoice keeps its A4 shape and scrolls sideways instead of squashing its
+  columns.
+
 ## 2026-10-21 — Fuller letterhead on invoices
 
 The top of every tax invoice can now also carry your **website**, your **MSME (Udyam) number**

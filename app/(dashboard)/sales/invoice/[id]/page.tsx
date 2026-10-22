@@ -77,7 +77,7 @@ export default function SalesInvoicePrintPage() {
           </button>
         </div>
       </div>
-      <div className="invoice-sheet" style={{ background: '#fff', padding: 24 }}>
+      <div className="invoice-sheet" style={{ background: '#fff', padding: 24, overflowX: 'auto' }}>
         <TallyInvoiceSheet doc={doc} />
       </div>
     </div>

@@ -5,6 +5,8 @@
  * Built-in fonts only, nothing embedded, so each invoice stays a few kilobytes (see
  * pdfSafe below: the rupee sign is written "Rs."). A long bill carries its goods on to
  * further pages, each with the column headings again; the summary boxes follow the last goods.
+ * The bill fills the whole A4 sheet, as Tally prints it: the goods columns run down the page so the
+ * signatory sits at its foot (the owner asked for a full-page A4 bill).
  */
 
 import { degrees, PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
@@ -19,6 +21,10 @@ const BOTTOM = 34;
 const BLACK = rgb(0, 0, 0);
 const GREY = rgb(0.35, 0.35, 0.35);
 const RED = rgb(0.78, 0, 0);
+
+/** Part of every saved PDF's fingerprint (lib/invoice-archive.ts): changing how the bill is drawn
+ *  changes it, so PDFs saved in the old layout are drawn again the next time they are wanted. */
+export const PDF_LAYOUT = 'a4-full-page-1';
 
 // The extra characters the built-in fonts' WinAnsi encoding has beyond Latin-1.
 const WIN_ANSI_EXTRA = new Set(Array.from('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'));
@@ -174,8 +180,19 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   const showDiscount = doc.items.some((item) => item.discount);
   const { columns, x: colX } = goodsColumns(showDiscount);
   const amountCol = columns.length - 1;
-  // What must still fit after the goods on their last page.
-  const after = 16 + 70 + 22 + 26 + (doc.taxRows.length + 1) * 12 + 16 + 96 + 24;
+  // Everything under the goods, measured first: it must fit after the goods on their last page,
+  // and the goods stretch down to meet it so the bill ends at the foot of the sheet.
+  const split = LEFT + WIDTH * 0.565;
+  const words = wrap(doc.amountInWords, fonts.bold, 8.5, split - LEFT - 10);
+  const charges = doc.charges.length ? doc.charges : [{ label: 'No tax charged', rate: '', amount: '' }];
+  const sumHeight = Math.max(18 + words.length * 11, 8 + charges.length * 12);
+  const taxHead = 24;
+  const taxRows = [...doc.taxRows, doc.taxTotal];
+  const taxHeight = taxHead + taxRows.length * 12;
+  const declaration = wrap(doc.declaration, fonts.regular, 7.5, split - LEFT - 10);
+  const footHeight = Math.max(80, 22 + declaration.length * 9);
+  const footNote = doc.payment ? 26 : 14;
+  const after = 16 + sumHeight + 20 + taxHeight + 16 + footHeight + footNote;
 
   let tableTop = y;
   const headings = () => {
@@ -229,6 +246,8 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   }
   y -= 10;
   if (y - after < BOTTOM) newPage();
+  // Full page: the empty goods columns run down to the summary, which ends at the foot of the sheet.
+  y = BOTTOM + after;
   line(LEFT, y, RIGHT, y);
   right('Total', colX[2] - 4, y - 11, 8, fonts.bold);
   cell(3, doc.totalQty, y - 11, fonts.bold);
@@ -238,10 +257,6 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   line(LEFT, y, RIGHT, y);
 
   // ── Amount in words | tax and deductions ────────────────────────────────────────────────
-  const split = LEFT + WIDTH * 0.565;
-  const words = wrap(doc.amountInWords, fonts.bold, 8.5, split - LEFT - 10);
-  const charges = doc.charges.length ? doc.charges : [{ label: 'No tax charged', rate: '', amount: '' }];
-  const sumHeight = Math.max(18 + words.length * 11, 8 + charges.length * 12);
   box(LEFT, y, WIDTH, sumHeight);
   line(split, y, split, y - sumHeight);
   text('AMOUNT IN WORDS', LEFT + 5, y - 9, 6.5, fonts.bold, GREY);
@@ -271,9 +286,6 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
     let x = LEFT;
     for (const column of taxCols) { taxX.push(x); x += column.w * WIDTH; }
   }
-  const taxHead = 24;
-  const taxRows = [...doc.taxRows, doc.taxTotal];
-  const taxHeight = taxHead + taxRows.length * 12;
   box(LEFT, y, WIDTH, taxHead, SHADE);
   box(LEFT, y, WIDTH, taxHeight);
   taxCols.forEach((column, index) => {
@@ -315,8 +327,6 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   y -= 16;
 
   // ── Declaration | signatory ──────────────────────────────────────────────────────────────
-  const declaration = wrap(doc.declaration, fonts.regular, 7.5, split - LEFT - 10);
-  const footHeight = Math.max(80, 22 + declaration.length * 9);
   box(LEFT, y, WIDTH, footHeight);
   line(split, y, split, y - footHeight);
   text('TERMS & DECLARATION', LEFT + 5, y - 9, 6.5, fonts.bold, GREY);
