@@ -19,6 +19,8 @@ const NOT_REACHABLE_AT_ALL = ['supplier_payments', 'supplier_payment_allocations
 /** Names, prices, contact details, catalogue copy. Here a plain edit really is the whole change. */
 const MASTER_DATA: TableName[] = [
   'companies', 'products', 'customers', 'suppliers', 'users', 'catalog_products', 'catalog_leads',
+  // A repair job's own details. Its parts are on its draft bill, written through Sales.
+  'job_cards',
 ];
 
 for (const table of TRANSACTION_TABLES) {

@@ -38,7 +38,7 @@ import {
   type InvoiceLine,
   type PartOption,
   type PaymentStatus,
-} from '@/lib/sales-types';
+} from '@/lib/sales-types';
 import { DISPATCH_FIELDS, hasDispatch, type InvoiceDispatch } from '@/lib/invoice-dispatch';
 
 export type InvoiceFormModalProps = {
@@ -88,6 +88,8 @@ export type InvoiceFormModalProps = {
   /** Dispatch details printed beside the invoice number (lib/invoice-dispatch.ts); all optional. */
   dispatch: InvoiceDispatch;
   setDispatch: Dispatch<SetStateAction<InvoiceDispatch>>;
+  /** A line at the top of the form saying what this bill is for, e.g. a job card's parts. */
+  notice?: string;
   /** What the selected customer last paid per part, keyed by part label. Empty for a walk-in. */
   lastSold: Map<string, LastSold>;
   setShowInvoiceModal: (open: boolean) => void;
@@ -104,7 +106,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
     totals, paidAmount, newOutstanding,
     editingInvoice, setEditingInvoice, editingDraft, invoiceError, savingInvoice, savingDraft,
     selectedCustomer, creditSaleNeedsCustomer, partOptions, customers, placeOfSupply, halfGstPercent, supplyKind, localTax,
-    placeOfSupplyCode, setPlaceOfSupplyChoice, dispatch, setDispatch,
+    placeOfSupplyCode, setPlaceOfSupplyChoice, dispatch, setDispatch, notice,
     lastSold, setShowInvoiceModal, setShowAddCustomer, saveInvoice, saveDraftInvoice,
   } = props;
 
@@ -149,6 +151,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
           <button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>✕</button>
         </div>
         <div className="modal-body flex flex-col gap-4">
+          {notice && <div className="alert alert-warning" role="status">{notice}</div>}
           {invoiceError && <div className="alert alert-danger" role="alert">{invoiceError}</div>}
 
           <div className="form-grid-2">

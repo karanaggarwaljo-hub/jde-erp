@@ -51,6 +51,7 @@ import SupplierBillsPanel from '@/components/purchases/SupplierBillsPanel';
 import PurchaseFormModal from '@/components/purchases/PurchaseFormModal';
 import RecordPaymentModal from '@/components/purchases/RecordPaymentModal';
 import SupplierReturnModal from '@/components/purchases/SupplierReturnModal';
+import { shopDay } from '@/lib/logbook';
 
 type PurchaseTab = 'purchases' | 'invoices';
 
@@ -96,8 +97,9 @@ function pageWindow(current: number, total: number): Array<number | 'gap'> {
   return shown;
 }
 
+/** Today in the shop (India time). The UTC date is still yesterday until 5:30 am. */
 function todayIso() {
-  return new Date().toISOString().split('T')[0];
+  return shopDay(new Date());
 }
 
 function isSpreadsheetFile(file: File) {

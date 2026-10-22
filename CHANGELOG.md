@@ -2,6 +2,27 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-23 — Job Cards for repair jobs
+
+For a machine in for repair over a few days, where the customer takes parts meanwhile and pays for
+everything at the end.
+
+- **Transactions → Job Cards → New job card:** the customer, the machine (e.g. JCB 3DX), its number,
+  the complaint and the date it came in.
+- **Add parts** each time the customer takes something. The bill form opens with that job's own
+  bill, kept as a **draft**: the parts come off your free stock, but nothing is billed yet. Every
+  day's parts go on the same bill.
+- **Repair done** marks the machine as ready.
+- **Bill & take payment** opens the same bill. Add the labour if you charge it, set Payment
+  Received, and confirm. That makes one tax invoice for the whole job, and the job moves to **Billed**.
+- The invoice shows the job in **Other Reference**, e.g. "Job JOB-1001, JCB 3DX PB65 AB 1234".
+- **In the shop** lists the machines still in, the longest-waiting first, with how many days
+  each has been in, its parts and their value so far.
+
+**Also fixed:** a bill, purchase, expense or payment recorded between midnight and 5:30 am was
+dated the day before, because the date was taken in UK time. It now uses India time on every
+screen, and the Dashboard's "today" does too.
+
 ## 2026-10-23 — Payment Terms shows what was paid
 
 "Payment Terms" on every invoice said **Credit**, even on a bill paid in full, because the bill form

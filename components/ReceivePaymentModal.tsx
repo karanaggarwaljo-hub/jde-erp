@@ -8,13 +8,15 @@ import { useCompanyTable } from '@/lib/useCompanyTable';
 import { receiveCustomerPayment, writeOffInvoiceBalance } from '@/lib/client-sales';
 import { invoiceBalanceDue, isInvoiceOpen } from '@/lib/invoice-balance';
 import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
+import { shopDay } from '@/lib/logbook';
 
 type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
 type Invoice = { id: string; company_id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; };
 type Payment = { id: string; company_id: string; customer_id: string; customer: string; date: string; amount: number; note: string; created_at: string };
 
+/** Today in the shop (India time), not the UTC date. */
 function todayIso() {
-  return new Date().toISOString().split('T')[0];
+  return shopDay(new Date());
 }
 
 function money(value: number) {

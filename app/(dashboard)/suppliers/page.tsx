@@ -9,6 +9,7 @@ import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
 import MoneyPicker from '@/components/money/MoneyPicker';
 import type { MoneyChoice } from '@/lib/money-book';
+import { shopDay } from '@/lib/logbook';
 
 type Supplier = { id: string; company_id: string; name: string; category: string; phone: string; email: string; gstin: string; terms: number; balance: number };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string };
@@ -126,7 +127,7 @@ export default function SuppliersPage() {
         body: JSON.stringify({
           companyId: activeCompany.id,
           supplierId: paymentSupplier.id,
-          date: new Date().toISOString().slice(0, 10),
+          date: shopDay(new Date()),
           amount: paid,
           note: '',
           reference: paymentReference,

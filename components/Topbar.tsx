@@ -21,6 +21,7 @@ const searchTargets = [
   { label: 'Customers', detail: 'Customer accounts and receivables', href: '/customers', keywords: 'customer receivable dealer garage' },
   { label: 'Suppliers', detail: 'Vendors and payables', href: '/suppliers', keywords: 'supplier vendor payable' },
   { label: 'Expenses', detail: 'Operating costs', href: '/expenses', keywords: 'expense rent salary transport utilities' },
+  { label: 'Job Cards', detail: 'Machines in for repair and the parts they take', href: '/jobs', keywords: 'job card repair machine service workshop mechanic parts taken' },
   { label: 'Bills & Invoices', detail: 'Invoices issued and supplier bills uploaded', href: '/documents', keywords: 'bill invoice pdf document supplier bill upload download print' },
   { label: 'Reports', detail: 'Financial and operational reports', href: '/reports', keywords: 'report profit loss gst stock valuation' },
   { label: 'Analytics', detail: 'Demand forecast and trends', href: '/analytics', keywords: 'analytics ai forecast demand' },

@@ -9,7 +9,7 @@
 export type LogKind = 'sales' | 'purchases' | 'stock' | 'expenses' | 'files' | 'website' | 'access' | 'data' | 'money';
 
 export const LOG_KINDS: Array<{ key: LogKind; label: string; subjects: string[] }> = [
-  { key: 'sales', label: 'Sales & customers', subjects: ['invoice', 'invoices', 'quotation', 'quotations', 'sales', 'sales_returns', 'payment', 'payments_received', 'invoice_writeoffs', 'customers'] },
+  { key: 'sales', label: 'Sales & customers', subjects: ['invoice', 'invoices', 'quotation', 'quotations', 'sales', 'sales_returns', 'payment', 'payments_received', 'invoice_writeoffs', 'customers', 'job_cards'] },
   { key: 'purchases', label: 'Purchases & suppliers', subjects: ['purchase', 'purchase_orders', 'purchase_returns', 'supplier', 'supplier_payments', 'suppliers'] },
   { key: 'stock', label: 'Parts & stock', subjects: ['products', 'stock_layers', 'inventory'] },
   { key: 'expenses', label: 'Expenses', subjects: ['expense', 'expenses'] },
@@ -37,7 +37,7 @@ const SUBJECT_NAMES: Record<string, string> = {
   suppliers: 'Supplier', products: 'Part', stock_layers: 'Stock', inventory: 'Inventory', expense: 'Expense',
   expenses: 'Expense', bill: 'Supplier bill', invoice_pdf: 'Bill PDF', drive: 'Google Drive',
   catalog_products: 'Website listing', catalog: 'Website', catalog_leads: 'Website enquiry', auth: 'Sign-in',
-  users: 'Staff', company: 'Company', companies: 'Company', backup: 'Backup', money: 'Cash & bank', cheque: 'Cheque',
+  users: 'Staff', company: 'Company', companies: 'Company', backup: 'Backup', money: 'Cash & bank', cheque: 'Cheque', job_cards: 'Job card',
 };
 
 const VERB_NAMES: Record<string, string> = {

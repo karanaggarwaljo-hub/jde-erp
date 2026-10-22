@@ -9,6 +9,7 @@ import { useEntryIntent } from '@/lib/use-entry-intent';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import MoneyPicker from '@/components/money/MoneyPicker';
 import type { MoneyChoice } from '@/lib/money-book';
+import { shopDay } from '@/lib/logbook';
 
 type Expense = { id: string; company_id: string; category: string; description: string; amount: number; date: string; paid_by: string; mode: string };
 
@@ -115,7 +116,7 @@ export default function ExpensesPage() {
         category: newExp.category,
         description: newExp.description,
         amount: Number(newExp.amount),
-        date: new Date().toISOString().split('T')[0],
+        date: shopDay(new Date()),
         paidBy: newExp.paid_by,
         mode: newExp.mode,
         // Paid by cheque: its number, date and bank go into the cheque register.
