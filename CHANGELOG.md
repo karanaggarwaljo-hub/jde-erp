@@ -2,6 +2,23 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-23 — Payment Terms shows what was paid
+
+"Payment Terms" on every invoice said **Credit**, even on a bill paid in full, because the bill form
+saved every sale as Credit. It now follows what was received on the bill:
+
+- **Paid** when it is paid in full (or how, such as Cash or UPI, on older bills that recorded it);
+- **Part paid** when some was received;
+- **Credit** when nothing was received yet.
+
+When a credit bill is paid later, its printed copy says Paid from then on.
+
+## 2026-10-23 — A bigger tax box on invoices
+
+The box beside the amount in words (discount, taxable value, CGST/SGST or IGST) now has larger
+text and more room around each line, on the printed invoice and in its PDF. Saved PDFs are
+redrawn this way the next time they're opened.
+
 ## 2026-10-22 — "GST included" bills now add up on paper
 
 A bill whose prices include GST printed the goods total with the tax already inside it (₹12,000.00),

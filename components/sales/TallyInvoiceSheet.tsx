@@ -44,7 +44,8 @@ const CSS = `
 .gst .r { text-align:right; white-space:nowrap; }
 .gst .c { text-align:center; }
 .gst .g-sub { font-size:9.5px; color:#333; }
-.gst .g-charges td { padding:2px 6px; }
+/* The deductions and tax beside the amount in words, a size up from the rest so they read at a glance. */
+.gst .g-charges td { padding:5px 8px; font-size:12.5px; }
 .gst .g-grand { display:flex; justify-content:flex-end; align-items:center; gap:24px; padding:6px 7px; background:#f0f0f0; border-bottom:1px solid #000; font-weight:700; font-size:13px; }
 .gst .g-sign { display:flex; flex-direction:column; justify-content:space-between; min-height:86px; text-align:right; }
 .gst .g-foot { text-align:center; font-size:9.5px; margin-top:4px; }
@@ -156,7 +157,7 @@ export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
             <div className="g-cap">Amount in words</div>
             <div style={{ fontWeight: 700 }}>{doc.amountInWords}</div>
           </div>
-          <div className="g-col" style={{ padding: '3px 0' }}>
+          <div className="g-col" style={{ padding: '6px 0', minHeight: 70 }}>
             <table className="g-charges">
               <tbody>
                 {doc.charges.map((charge) => (

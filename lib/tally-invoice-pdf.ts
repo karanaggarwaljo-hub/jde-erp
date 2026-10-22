@@ -24,7 +24,7 @@ const RED = rgb(0.78, 0, 0);
 
 /** Part of every saved PDF's fingerprint (lib/invoice-archive.ts): changing how the bill is drawn
  *  changes it, so PDFs saved in the old layout are drawn again the next time they are wanted. */
-export const PDF_LAYOUT = 'a4-full-page-2-no-hsn-table';
+export const PDF_LAYOUT = 'a4-full-page-3-bigger-tax-box';
 
 // The extra characters the built-in fonts' WinAnsi encoding has beyond Latin-1.
 const WIN_ANSI_EXTRA = new Set(Array.from('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'));
@@ -187,7 +187,8 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   const split = LEFT + WIDTH * 0.565;
   const words = wrap(doc.amountInWords, fonts.bold, 8.5, split - LEFT - 10);
   const charges = doc.charges.length ? doc.charges : [{ label: 'No tax charged', rate: '', amount: '' }];
-  const sumHeight = Math.max(18 + words.length * 11, 8 + charges.length * 12);
+  // The tax lines a size up from the rest, with room around them (the owner asked for a bigger box).
+  const sumHeight = Math.max(18 + words.length * 11, 44, 12 + charges.length * 15);
   const declaration = wrap(doc.declaration, fonts.regular, 7.5, split - LEFT - 10);
   const footHeight = Math.max(80, 22 + declaration.length * 9);
   const footNote = doc.payment ? 26 : 14;
@@ -261,11 +262,11 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   text('AMOUNT IN WORDS', LEFT + 5, y - 9, 6.5, fonts.bold, GREY);
   at = y - 20;
   for (const piece of words) { text(piece, LEFT + 5, at, 8.5, fonts.bold); at -= 11; }
-  at = y - 11;
+  at = y - 14;
   for (const charge of charges) {
-    text(`${charge.label}${charge.rate ? ` @ ${charge.rate}` : ''}`, split + 5, at, 8);
-    right(charge.amount, RIGHT - 5, at, 8);
-    at -= 12;
+    text(`${charge.label}${charge.rate ? ` @ ${charge.rate}` : ''}`, split + 6, at, 9.5);
+    right(charge.amount, RIGHT - 6, at, 9.5);
+    at -= 15;
   }
   y -= sumHeight;
 
