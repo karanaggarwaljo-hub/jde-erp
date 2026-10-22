@@ -68,7 +68,8 @@ test('returns and the bill discount come off before the tax, and odd paise land 
     items: [item({ line_total: 333.33, hsn: 'A' }), item({ line_total: 333.33, hsn: 'B' }), item({ line_total: 333.34, hsn: 'C' })],
     company: COMPANY, customer: null, returns: [],
   });
-  assert.deepEqual(doc.charges.map((c) => c.label), ['Less: Discount', 'CGST', 'SGST']);
+  assert.deepEqual(doc.charges.map((c) => c.label), ['Less: Discount', 'Taxable value', 'CGST', 'SGST']);
+  assert.equal(doc.charges[1].amount, '950.00');
   const sum = doc.taxRows.reduce((total, row) => total + Number(row.totalTax.replace(/,/g, '')), 0);
   assert.equal(Math.round(sum * 100) / 100, 153.02);
   const withReturn = buildTallyInvoice({ invoice: invoice({ total: 590, gst_amount: 90 }), items: [item()], company: COMPANY, customer: null, returns: [{ id: 'SRN-1001', subtotal: 500 }] });
@@ -118,4 +119,13 @@ test('a bill from a company with no GSTIN but a state set prints IGST to another
   assert.equal(doc.interState, true);
   assert.deepEqual(doc.charges.map((c) => c.label), ['IGST']);
   assert.equal(doc.seller.state, 'Chandigarh');
+});
+
+/** The owner found the HSN-wise tax table too much. The tax lines above the grand total carry the
+ *  tax; "Taxable value" is added there only where the goods total does not already say it. */
+test('the taxable value shows above the tax only after deductions or when prices include GST', () => {
+  const plain = buildTallyInvoice({ invoice: invoice(), items: [item()], company: COMPANY, customer: null });
+  assert.deepEqual(plain.charges.map((c) => c.label), ['CGST', 'SGST']);
+  const inclusive = buildTallyInvoice({ invoice: invoice({ total: 1000, gst_amount: 152.54, gst_mode: 'inclusive' }), items: [item()], company: COMPANY, customer: null });
+  assert.deepEqual(inclusive.charges.map((c) => [c.label, c.amount]), [['Taxable value', '847.46'], ['CGST (included)', '76.27'], ['SGST (included)', '76.27']]);
 });

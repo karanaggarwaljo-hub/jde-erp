@@ -24,7 +24,7 @@ const RED = rgb(0.78, 0, 0);
 
 /** Part of every saved PDF's fingerprint (lib/invoice-archive.ts): changing how the bill is drawn
  *  changes it, so PDFs saved in the old layout are drawn again the next time they are wanted. */
-export const PDF_LAYOUT = 'a4-full-page-1';
+export const PDF_LAYOUT = 'a4-full-page-2-no-hsn-table';
 
 // The extra characters the built-in fonts' WinAnsi encoding has beyond Latin-1.
 const WIN_ANSI_EXTRA = new Set(Array.from('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'));
@@ -188,13 +188,10 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   const words = wrap(doc.amountInWords, fonts.bold, 8.5, split - LEFT - 10);
   const charges = doc.charges.length ? doc.charges : [{ label: 'No tax charged', rate: '', amount: '' }];
   const sumHeight = Math.max(18 + words.length * 11, 8 + charges.length * 12);
-  const taxHead = 24;
-  const taxRows = [...doc.taxRows, doc.taxTotal];
-  const taxHeight = taxHead + taxRows.length * 12;
   const declaration = wrap(doc.declaration, fonts.regular, 7.5, split - LEFT - 10);
   const footHeight = Math.max(80, 22 + declaration.length * 9);
   const footNote = doc.payment ? 26 : 14;
-  const after = 16 + sumHeight + 20 + taxHeight + 16 + footHeight + footNote;
+  const after = 16 + sumHeight + 20 + footHeight + footNote;
 
   let tableTop = y;
   const headings = () => {
@@ -277,56 +274,6 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   right(`Rs. ${doc.total}`, RIGHT - 5, y - 14, 11, fonts.bold);
   right('GRAND TOTAL', RIGHT - 5 - fonts.bold.widthOfTextAtSize(pdfSafe(`Rs. ${doc.total}`), 11) - 24, y - 14, 10, fonts.bold);
   y -= 20;
-
-  // ── HSN-wise tax summary ─────────────────────────────────────────────────────────────────
-  const intra = !doc.interState;
-  const taxCols = intra
-    ? [{ w: 0.18, label: 'HSN/SAC' }, { w: 0.18, label: 'Taxable Value' }, { w: 0.09, label: 'Rate', group: 'Central Tax' }, { w: 0.13, label: 'Amount', group: 'Central Tax' }, { w: 0.09, label: 'Rate', group: doc.localTaxColumn }, { w: 0.13, label: 'Amount', group: doc.localTaxColumn }, { w: 0.2, label: 'Total Tax Amount' }]
-    : [{ w: 0.22, label: 'HSN/SAC' }, { w: 0.24, label: 'Taxable Value' }, { w: 0.12, label: 'Rate', group: 'Integrated Tax' }, { w: 0.18, label: 'Amount', group: 'Integrated Tax' }, { w: 0.24, label: 'Total Tax Amount' }];
-  const taxX: number[] = [];
-  {
-    let x = LEFT;
-    for (const column of taxCols) { taxX.push(x); x += column.w * WIDTH; }
-  }
-  box(LEFT, y, WIDTH, taxHead, SHADE);
-  box(LEFT, y, WIDTH, taxHeight);
-  taxCols.forEach((column, index) => {
-    const x = taxX[index];
-    const width = column.w * WIDTH;
-    if (index > 0) line(x, y - (column.group && taxCols[index - 1].group === column.group ? 12 : 0), x, y - taxHeight);
-    if (column.group) {
-      if (taxCols[index - 1]?.group !== column.group) {
-        center(column.group, x, width + taxCols[index + 1].w * WIDTH, y - 9, 7, fonts.bold);
-        line(x, y - 12, x + width + taxCols[index + 1].w * WIDTH, y - 12);
-      }
-      center(column.label, x, width, y - 21, 7, fonts.bold);
-    } else {
-      center(column.label, x, width, y - 15, 7, fonts.bold);
-    }
-  });
-  line(LEFT, y - taxHead, RIGHT, y - taxHead);
-  at = y - taxHead - 9;
-  taxRows.forEach((row, index) => {
-    const isTotal = index === taxRows.length - 1;
-    const font = isTotal ? fonts.bold : fonts.regular;
-    const values = intra
-      ? [row.hsn, row.taxable, row.cgstRate, row.cgst, row.sgstRate, row.sgst, row.totalTax]
-      : [row.hsn, row.taxable, row.igstRate, row.igst, row.totalTax];
-    values.forEach((value, column) => {
-      const x = taxX[column];
-      const width = taxCols[column].w * WIDTH;
-      if (column === 0 && !isTotal) text(value, x + 4, at, 7.5, font);
-      else right(value, x + width - 4, at, 7.5, font);
-    });
-    if (isTotal) line(LEFT, at + 9, RIGHT, at + 9);
-    at -= 12;
-  });
-  y -= taxHeight;
-
-  const taxWords = `Tax Amount (in words): ${doc.taxInWords}${doc.inclusive ? '  (prices include GST)' : ''}`;
-  box(LEFT, y, WIDTH, 16);
-  text(wrap(taxWords, fonts.regular, 7.5, WIDTH - 10)[0], LEFT + 5, y - 11, 7.5);
-  y -= 16;
 
   // ── Declaration | signatory ──────────────────────────────────────────────────────────────
   box(LEFT, y, WIDTH, footHeight);
