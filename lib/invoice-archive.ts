@@ -12,7 +12,7 @@
 
 import { createHash } from 'node:crypto';
 import { buildTallyInvoice, type TallyInvoice } from './tally-invoice';
-import { renderTallyInvoicePdf } from './tally-invoice-pdf';
+import { PDF_LAYOUT, renderTallyInvoicePdf } from './tally-invoice-pdf';
 import {
   getInvoiceFileRecord,
   getInvoicePdfSource,
@@ -25,7 +25,7 @@ import {
 export type InvoicePdf = { bytes: Uint8Array | null; sizeBytes: number; savedAt: string; redrawn: boolean };
 
 export function invoiceFingerprint(doc: TallyInvoice): string {
-  return createHash('sha256').update(JSON.stringify(doc)).digest('hex').slice(0, 32);
+  return createHash('sha256').update(JSON.stringify({ layout: PDF_LAYOUT, doc })).digest('hex').slice(0, 32);
 }
 
 /** The invoice's saved PDF, redrawn and saved again first if the invoice has changed since. Null

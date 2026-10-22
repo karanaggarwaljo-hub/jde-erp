@@ -3,17 +3,23 @@
  * across the top, Bill To / Ship To beside the invoice details, the goods, the tax and grand total,
  * the HSN summary, and the signatory. Black on white in every theme: it is a paper document, and
  * what is on screen is what prints. lib/tally-invoice-pdf.ts draws the same for the saved PDF.
+ *
+ * A full A4 sheet, as Tally prints it (the owner asked for a full-page A4 bill): the empty goods
+ * columns run down the page so the signatory sits at its foot. On screen the sheet keeps the A4
+ * shape; a longer bill simply grows and prints over more pages.
  */
 
 import type { Party, TallyInvoice } from '@/lib/tally-invoice';
 
 const CSS = `
-.gst { position:relative; background:#fff; color:#000; font-family: Arial, Helvetica, sans-serif; font-size:11px; line-height:1.4; max-width:800px; margin:0 auto; }
+.gst { position:relative; background:#fff; color:#000; font-family: Arial, Helvetica, sans-serif; font-size:11px; line-height:1.4; max-width:800px; min-width:640px; margin:0 auto;
+  display:flex; flex-direction:column; aspect-ratio:210 / 297; }
 .gst * { box-sizing:border-box; }
 .gst .g-top { text-align:center; margin-bottom:4px; }
 .gst .g-top b { font-size:13px; letter-spacing:.3px; }
 .gst .g-top span { display:block; font-size:9px; }
-.gst .g-box { border:1px solid #000; }
+.gst .g-box { border:1px solid #000; flex:1 1 auto; display:flex; flex-direction:column; }
+.gst .g-box > * { flex:0 0 auto; }
 .gst .g-head { text-align:center; padding:8px 8px 6px; border-bottom:1px solid #000; }
 .gst .g-co { font-size:20px; font-weight:700; letter-spacing:1px; text-transform:uppercase; }
 .gst .g-row { display:flex; border-bottom:1px solid #000; }
@@ -25,10 +31,15 @@ const CSS = `
 .gst .g-kv dt { color:#333; white-space:nowrap; }
 .gst .g-kv dd { margin:0; font-weight:700; min-height:15px; }
 .gst table { width:100%; border-collapse:collapse; }
+.gst .g-items { table-layout:fixed; }
 .gst th, .gst td { padding:4px 6px; vertical-align:top; }
 .gst .g-items thead th { background:#f0f0f0; border-bottom:1px solid #000; font-size:10px; text-align:center; font-weight:700; }
 .gst .g-items th + th, .gst .g-items td + td { border-left:1px solid #000; }
-.gst .g-items .g-pad td { height:22px; }
+/* The empty space under the goods, carrying their column lines down to the totals: it takes
+   whatever height the A4 sheet has left. Its widths are the goods columns' own. */
+.gst .g-box > .g-fill { flex:1 1 auto; display:flex; min-height:22px; }
+.gst .g-fill > span { display:block; }
+.gst .g-fill > span + span { border-left:1px solid #000; }
 .gst .g-items tr.g-total td { border-top:1px solid #000; font-weight:700; }
 .gst .r { text-align:right; white-space:nowrap; }
 .gst .c { text-align:center; }
@@ -45,7 +56,8 @@ const CSS = `
 .gst .g-void { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
 .gst .g-void span { transform:rotate(-28deg); font-size:84px; font-weight:800; letter-spacing:6px; color:rgba(200,0,0,.28); border:6px solid rgba(200,0,0,.28); padding:4px 24px; }
 .gst .g-void-note { text-align:center; color:#c00; font-weight:700; margin:2px 0 4px; }
-@media print { .gst { max-width:none; } .gst .g-items thead th, .gst .g-grand, .gst .g-tax thead th { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+@page { size:A4; margin:10mm; }
+@media print { .gst { max-width:none; aspect-ratio:auto; min-height:272mm; } .gst .g-items thead th, .gst .g-grand, .gst .g-tax thead th { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
 `;
 
 function PartyBox({ caption, party }: { caption: string; party: Party }) {
@@ -67,7 +79,11 @@ function PartyBox({ caption, party }: { caption: string; party: Party }) {
 export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
   const intra = !doc.interState;
   const showDiscount = doc.items.some((item) => item.discount);
-  const columns = showDiscount ? 8 : 7;
+  // The goods columns' widths; the description takes what is left. Shared by the goods, the empty
+  // space beneath them and the total line, so their column lines meet.
+  const widths: Array<number | null> = [34, null, 72, 46, 76, 40, ...(showDiscount ? [44] : []), 92];
+  const columns = widths.length;
+  const colgroup = <colgroup>{widths.map((width, index) => <col key={index} style={width ? { width } : undefined} />)}</colgroup>;
   return (
     <div className="gst">
       <style>{CSS}</style>
@@ -100,16 +116,17 @@ export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
         </div>
 
         <table className="g-items">
+          {colgroup}
           <thead>
             <tr>
-              <th style={{ width: 34 }}>Sr. No.</th>
+              <th>Sr. No.</th>
               <th>Description of Goods</th>
-              <th style={{ width: 72 }}>HSN</th>
-              <th style={{ width: 46 }}>Qty</th>
-              <th style={{ width: 76 }}>Price</th>
-              <th style={{ width: 40 }}>Unit</th>
-              {showDiscount && <th style={{ width: 44 }}>Disc. %</th>}
-              <th style={{ width: 92 }}>Amount</th>
+              <th>HSN</th>
+              <th>Qty</th>
+              <th>Price</th>
+              <th>Unit</th>
+              {showDiscount && <th>Disc. %</th>}
+              <th>Amount</th>
             </tr>
           </thead>
           <tbody>
@@ -126,7 +143,14 @@ export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
               </tr>
             ))}
             {doc.emptyNote && <tr><td /><td colSpan={columns - 2}><em>{doc.emptyNote}</em></td><td /></tr>}
-            <tr className="g-pad">{Array.from({ length: columns }, (_, index) => <td key={index} />)}</tr>
+          </tbody>
+        </table>
+        <div className="g-fill" aria-hidden="true">
+          {widths.map((width, index) => <span key={index} style={width ? { flex: `0 0 ${width}px` } : { flex: '1 1 0', minWidth: 0 }} />)}
+        </div>
+        <table className="g-items">
+          {colgroup}
+          <tbody>
             <tr className="g-total">
               <td /><td className="r">Total</td><td /><td className="r">{doc.totalQty}</td><td /><td />{showDiscount && <td />}<td className="r">{doc.itemsTotal}</td>
             </tr>
