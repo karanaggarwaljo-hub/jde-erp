@@ -46,6 +46,9 @@ export const TABLES: Record<string, TableSchema> = {
   // Read-only for the Sales screen, so it can grey out Edit on an invoice that already has
   // goods back against it and say why, rather than letting the owner hit a database refusal.
   sales_returns: { primaryKey: 'id', companyScoped: true },
+  // Machines in for repair (lib/job-cards.ts). Plain details only: the parts a job takes live on its
+  // draft bill, which Sales writes through its own route, so a job card edit moves no stock or money.
+  job_cards: { primaryKey: 'id', companyScoped: true, writable: true },
 };
 
 /**

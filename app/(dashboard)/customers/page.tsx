@@ -20,6 +20,7 @@ import {
   type CustomerTier,
   type CustomerFlag,
 } from '@/lib/customer-insights';
+import { shopDay } from '@/lib/logbook';
 
 type Customer = {
   id: string;
@@ -95,7 +96,7 @@ export default function CustomersPage() {
   // Recomputed from the loaded rows rather than stored: a grade that went stale against the
   // sales it was derived from would be worse than no grade at all.
   const insightsByCustomerId = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = shopDay(new Date());
     const rows = buildCustomerInsights({
       customers,
       invoices,

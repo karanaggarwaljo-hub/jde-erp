@@ -24,6 +24,7 @@ import { invoiceBalanceDue, isInvoiceOpen } from '@/lib/invoice-balance';
 import { useCompany } from '@/components/CompanyProvider';
 import ActivityCalendar from '@/components/ActivityCalendar';
 import type { ActivityEvent } from '@/lib/activity-calendar';
+import { shopDay } from '@/lib/logbook';
 
 type Product = { id: string; part_number: string; name: string; brand: string; category: string; cost_price: number; current_stock: number; min_stock: number; location: string };
 type Customer = { id: string; balance: number };
@@ -34,8 +35,9 @@ type Grn = { id: string; po_number: string; supplier: string; received_at: strin
 type Quotation = { id: string; customer: string; date: string; total: number };
 type Expense = { id: string; date: string };
 
+/** The shop's day for a moment (India time), not the UTC one, which is a day behind until 5:30 am. */
 function isoDate(d: Date) {
-  return d.toISOString().split('T')[0];
+  return shopDay(d);
 }
 
 function daysAgoDate(n: number) {

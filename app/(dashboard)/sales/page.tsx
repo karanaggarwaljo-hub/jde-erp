@@ -4,7 +4,7 @@ import type { MoneyChoice } from '@/lib/money-book';
 import { checkBillCredit } from '@/lib/credit';
 import MoneyPicker from '@/components/money/MoneyPicker';
 
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   Plus,
   Printer,
@@ -69,6 +69,9 @@ import {
 } from '@/lib/sales-types';
 import { EMPTY_DISPATCH, dispatchOf, type InvoiceDispatch } from '@/lib/invoice-dispatch';
 import { supplyTax } from '@/lib/gst-supply';
+import { jobReference, readJobLink, type JobCard } from '@/lib/job-cards';
+import { useRouter } from 'next/navigation';
+import { shopDay } from '@/lib/logbook';
 
 type SalesTab = 'invoices' | 'quotations' | 'credits' | 'ledger';
 type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid' | 'drafts' | 'cancelled';
@@ -79,8 +82,10 @@ type PaymentFilter = 'all' | 'paid' | 'partial' | 'unpaid' | 'drafts' | 'cancell
 // The status the atomic save is given for a sale the owner wants to park and finish later. It
 // reserves stock like any other invoice, but nothing is billed and nothing is owed yet.
 
+/** Today in the shop (India time). The UTC date is still yesterday until 5:30 am, which dated a
+ *  bill made just after midnight the day before. */
 function todayIso() {
-  return new Date().toISOString().split('T')[0];
+  return shopDay(new Date());
 }
 
 // How many invoice rows are painted at once. Every invoice is already in memory — this changes
@@ -129,12 +134,17 @@ function formatDateTime(timestamp: string): string {
 const SALES_ENTRY_KINDS = ['sale', 'payment'] as const;
 
 export default function SalesPage() {
-  const { rows: products, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
+  const { rows: products, loading: productsLoading, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
   const photoFor = usePartPhotos();
   const { rows: customers, create: createCustomer, reload: reloadCustomers } = useCompanyTable<Customer>('customers');
   const { rows: invoices, loading: invoicesLoading, reload: reloadInvoices } = useCompanyTable<Invoice>('invoices');
   const { rows: quotations, loading: quotationsLoading, reload: reloadQuotations } = useCompanyTable<Quotation>('quotations');
-  const { rows: invoiceItems, reload: reloadInvoiceItems } = useCompanyTable<InvoiceItem>('invoice_items');
+  const { rows: invoiceItems, loading: invoiceItemsLoading, reload: reloadInvoiceItems } = useCompanyTable<InvoiceItem>('invoice_items');
+  // Job cards (lib/job-cards.ts): a repair job's parts live on one draft bill, opened from Job Cards.
+  const { rows: jobCards, loading: jobCardsLoading, update: updateJobCard } = useCompanyTable<JobCard & Record<string, unknown>>('job_cards');
+  const router = useRouter();
+  const [jobLink, setJobLink] = useState<ReturnType<typeof readJobLink>>(null);
+  const [activeJob, setActiveJob] = useState<{ job: JobCard; purpose: 'parts' | 'bill' } | null>(null);
   const { rows: payments, reload: reloadPayments } = useCompanyTable<Payment>('payments_received');
   const { rows: paymentAllocations } = useCompanyTable<PaymentAllocation>('payment_allocations');
   // Only to grey out Edit and Delete on an invoice goods have already come back against.
@@ -424,6 +434,7 @@ export default function SalesPage() {
   );
 
   const openInvoice = (presetCustomer?: string) => {
+    setActiveJob(null);
     setEditingInvoice(null);
     setCustomer(presetCustomer ?? '');
     // Starts empty on purpose: the part picker adds the first line the moment something is
@@ -442,6 +453,7 @@ export default function SalesPage() {
   };
 
   const openEditInvoice = (invoice: Invoice) => {
+    setActiveJob(null);
     const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
     setEditingInvoice(invoice);
     setCustomer(invoice.customer === WALK_IN_CUSTOMER ? '' : invoice.customer);
@@ -487,8 +499,8 @@ export default function SalesPage() {
 
   const openQuotation = () => {
     const date = todayIso();
-    const validity = new Date(`${date}T00:00:00`);
-    validity.setDate(validity.getDate() + 30);
+    const validity = new Date(`${date}T00:00:00Z`);
+    validity.setUTCDate(validity.getUTCDate() + 30);
     setEditingQuotation(null);
     setQuoteCustomer('');
     setQuoteDate(date);
@@ -718,6 +730,57 @@ export default function SalesPage() {
   // Invoice — so the FIFO stock is reserved there and then, which is what the owner asked for —
   // with nothing received and nothing added to the customer's balance, because nothing is owed
   // until the sale is confirmed.
+  // A job card's "Add parts" / "Bill & take payment" open its one bill here: the draft it already
+  // has, or a new one for its customer with the job named in Other Reference. Read once on arrival.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const link = readJobLink(window.location.search);
+      if (!link) return;
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+      setJobLink(link);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+  useEffect(() => {
+    if (!jobLink || jobCardsLoading || invoicesLoading || invoiceItemsLoading || productsLoading) return;
+    const timer = setTimeout(() => {
+      setJobLink(null);
+      const job = jobCards.find((row) => row.id === jobLink.jobId);
+      if (!job) { setFeedback('That job card was not found in this company.'); return; }
+      const bill = job.invoice_id ? invoices.find((invoice) => invoice.id === job.invoice_id) : undefined;
+      if (bill && bill.status !== DRAFT_STATUS) {
+        setFeedback(`${job.job_no} is already billed as ${bill.id}.`);
+        return;
+      }
+      if (bill) openEditInvoice(bill);
+      else {
+        openInvoice(job.customer);
+        setDispatch({ ...EMPTY_DISPATCH, other_reference: jobReference(job) });
+      }
+      setActiveJob({ job, purpose: jobLink.purpose });
+    }, 0);
+    return () => clearTimeout(timer);
+  });
+
+  /** After a save made for a job card: the bill is linked to the job, and Job Cards opens again.
+   *  True when it handled the save, so the caller stops there. */
+  const finishJob = async (invoiceId: string): Promise<boolean> => {
+    if (!activeJob) return false;
+    const { job } = activeJob;
+    try {
+      if (job.invoice_id !== invoiceId) await updateJobCard(job.id, { invoice_id: invoiceId }, { reload: false });
+    } catch (error) {
+      // The bill is saved either way; only the link is missing, and it says so.
+      setInvoiceError(`${invoiceId} is saved, but linking it to ${job.job_no} failed: ${error instanceof Error ? error.message : 'unknown error'}. Note the bill number on the job card.`);
+      return true;
+    }
+    setShowInvoiceModal(false);
+    setEditingInvoice(null);
+    setActiveJob(null);
+    router.push('/jobs');
+    return true;
+  };
+
   const saveDraftInvoice = async () => {
     // A live invoice is the one case that cannot be parked: it has already been billed and is
     // already on a customer's account, so turning it back into a draft would silently erase a
@@ -775,6 +838,7 @@ export default function SalesPage() {
       const draftId = String(invoice.id);
       // No customer reload: parking a draft leaves every balance exactly as it was.
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadProducts()]);
+      if (await finishJob(draftId)) return;
       setShowInvoiceModal(false);
       setEditingInvoice(null);
       setActiveTab('invoices');
@@ -864,6 +928,7 @@ Save it anyway?`,
         });
 
         await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
+        if (await finishJob(editingInvoice.id)) return;
         setShowInvoiceModal(false);
         setEditingInvoice(null);
         if (wasDraft) {
@@ -905,6 +970,7 @@ Save it anyway?`,
 
       const createdId = String(invoice.id);
       await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
+      if (await finishJob(createdId)) return;
       setShowInvoiceModal(false);
       setActiveTab('invoices');
       setFeedback(`${createdId} generated for ${customerLabel}.`);
@@ -2054,6 +2120,11 @@ ${stockLine}`)) return;
           halfGstPercent={halfGstPercent} supplyKind={supplyKind} localTax={supply.localTax}
           placeOfSupplyCode={supply.placeCode} setPlaceOfSupplyChoice={setPlaceOfSupplyChoice}
           dispatch={dispatch} setDispatch={setDispatch}
+          notice={activeJob
+            ? activeJob.purpose === 'bill'
+              ? `${activeJob.job.job_no} · ${activeJob.job.machine || 'repair job'}: add any last parts and the labour, set Payment Received, then press ${activeJob.job.invoice_id ? 'Confirm Invoice' : 'Create Invoice'} to bill the whole job.`
+              : `${activeJob.job.job_no} · ${activeJob.job.machine || 'repair job'}: add the parts taken, then press ${activeJob.job.invoice_id ? 'Save & Keep as Draft' : 'Save as Draft'}. Nothing is billed until the job is finished.`
+            : undefined}
           setShowInvoiceModal={setShowInvoiceModal} setShowAddCustomer={setShowAddCustomer}
           saveInvoice={saveInvoice} saveDraftInvoice={saveDraftInvoice}
         />

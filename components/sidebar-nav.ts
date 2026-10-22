@@ -17,6 +17,7 @@ import {
   Users,
   Wallet,
   FolderOpen,
+  Wrench,
 } from 'lucide-react';
 
 export type NavItem = { name: string; href: string; icon: LucideIcon };
@@ -67,6 +68,8 @@ export const navGroups: NavGroup[] = [
         icon: ArrowLeftRight,
         items: [
           { name: 'Sales', href: '/sales', icon: ShoppingCart },
+          // Machines in for repair, whose parts are billed once when the job is done.
+          { name: 'Job Cards', href: '/jobs', icon: Wrench },
           { name: 'Purchases', href: '/purchases', icon: Truck },
           { name: 'Expenses', href: '/expenses', icon: Wallet },
           { name: 'Bills & Invoices', href: '/documents', icon: FolderOpen },
