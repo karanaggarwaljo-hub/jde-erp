@@ -9,6 +9,7 @@
  *
  * react-dom/server is already a dependency of the app, so this adds nothing to install.
  */
+import { EMPTY_DISPATCH } from '../lib/invoice-dispatch';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
@@ -80,6 +81,7 @@ function renderForm(lines: InvoiceLine[], overrides: Record<string, unknown> = {
     selectedCustomer: CUSTOMER, creditSaleNeedsCustomer: false,
     partOptions: PARTS, customers: [CUSTOMER],
     placeOfSupply: 'Punjab', halfGstPercent: 9, supplyKind: 'intra' as const,
+    dispatch: EMPTY_DISPATCH, setDispatch: () => {},
     lastSold: new Map(),
     setShowInvoiceModal: () => {}, setShowAddCustomer: () => {},
     saveInvoice: () => {}, saveDraftInvoice: () => {},

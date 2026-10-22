@@ -1518,6 +1518,12 @@ export async function setInvoicePlaceOfSupply(companyId: string, invoiceId: stri
   if (error) throw error;
 }
 
+/** Records a sale's dispatch details (lib/invoice-dispatch.ts), already cleaned. */
+export async function setInvoiceDispatch(companyId: string, invoiceId: string, dispatch: Record<string, string | null>): Promise<void> {
+  const { error } = await getClient().from('jde_invoices').update(dispatch).eq('company_id', companyId).eq('id', invoiceId);
+  if (error) throw error;
+}
+
 export async function getInvoiceFileRecord(invoiceId: string): Promise<InvoiceFileRecord | undefined> {
   const { data, error } = await getClient().from('jde_invoice_files').select('*').eq('invoice_id', invoiceId).maybeSingle();
   if (error) throw error;

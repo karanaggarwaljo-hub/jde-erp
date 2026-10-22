@@ -2,6 +2,18 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-22 — Dispatch details on invoices
+
+The boxes beside the invoice number used to print empty: Disp Through, Terms of Delivery,
+Destination, Other Reference and E-Way Bill No. You can now fill them in.
+
+- **Where:** on the bill form, open **Dispatch details** (optional, folded away until you need it).
+  Fill in any of the five; anything left blank stays blank on the invoice.
+- **Changing them later:** edit the bill on the Sales page. On a bill that already has some, the
+  section opens by itself.
+- **Printing:** they appear on the printed invoice and in its PDF. A long "Terms of delivery" wraps
+  onto more lines.
+
 ## 2026-10-22 — IGST for a company without a GSTIN
 
 A bill to another state showed **CGST + SGST** instead of **IGST** when the company had no GSTIN

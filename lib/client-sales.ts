@@ -39,6 +39,8 @@ export type SaveSalesInvoiceInput = {
   gstMode: 'inclusive' | 'exclusive';
   /** Where the goods are supplied to, as a GST state code (lib/gst-supply.ts): decides IGST. */
   placeOfSupply?: string | null;
+  /** Dispatch details printed beside the invoice number (lib/invoice-dispatch.ts). */
+  dispatch?: import('./invoice-dispatch').InvoiceDispatch;
 };
 
 async function sendJson<T>(method: 'POST' | 'DELETE', url: string, body: unknown): Promise<T> {
