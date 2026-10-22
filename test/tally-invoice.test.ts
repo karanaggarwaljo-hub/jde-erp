@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { amountInWords, buildTallyInvoice, indianAmount, rupeesInWords, stateOfGstin, tallyDate, type TallyItemInput, type TallyInvoiceInput } from '../lib/tally-invoice';
+import { amountInWords, buildTallyInvoice, paymentTerms, indianAmount, rupeesInWords, stateOfGstin, tallyDate, type TallyItemInput, type TallyInvoiceInput } from '../lib/tally-invoice';
 
 const COMPANY = { name: 'Jai Durga Enterprises', address: 'Shop 12, Industrial Area, Mohali', gstin: '03ABCDE1234F1Z5', contact_phone: '98140 00000' };
 const invoice = (overrides: Partial<TallyInvoiceInput> = {}): TallyInvoiceInput => ({
@@ -46,7 +46,7 @@ test('a sale inside the state splits the tax into CGST and SGST, and the HSN sum
   assert.equal(doc.taxTotal.totalTax, '270.00');
   assert.equal(doc.itemsTotal, '1,500.00');
   assert.equal(doc.details[2][0], 'Payment Terms');
-  assert.equal(doc.details[2][1], 'Cash');
+  assert.equal(doc.details[2][1], 'Credit');
   assert.ok(!('bank' in doc) && !('pan' in doc.seller), 'no PAN or bank details: the owner left them off');
 });
 
@@ -155,4 +155,16 @@ test('a bill whose prices include GST is printed before GST and adds up to its g
   const taxes = mixed.charges.filter((c) => /GST/.test(c.label)).reduce((sum, c) => sum + money(c.amount), 0);
   assert.equal(Math.round((money(mixed.itemsTotal) - discount + taxes) * 100) / 100, 950);
   assert.equal(mixed.charges.find((c) => c.label === 'Taxable value')!.amount, '805.08');
+});
+
+/** Every bill printed "Payment Terms: Credit", because the bill form saved every sale as Credit. */
+test('payment terms follow what was received: Paid, Part paid or Credit', () => {
+  assert.equal(paymentTerms('Credit', 12000, 0), 'Paid');
+  assert.equal(paymentTerms('cash', 500, 0), 'Cash');
+  assert.equal(paymentTerms('upi', 500, 0), 'UPI');
+  assert.equal(paymentTerms('Credit', 7000, 974), 'Part paid');
+  assert.equal(paymentTerms('Credit', 0, 7974), 'Credit');
+  assert.equal(paymentTerms('cash', 0, 500), 'Credit');
+  const paidBill = buildTallyInvoice({ invoice: invoice({ mode: 'Credit', paid: 1180 }), items: [item()], company: COMPANY, customer: null });
+  assert.deepEqual(paidBill.details[2], ['Payment Terms', 'Paid']);
 });
