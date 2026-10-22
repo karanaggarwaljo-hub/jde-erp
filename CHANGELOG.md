@@ -2,6 +2,13 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-23 — One-off lines (like labour) can be saved
+
+"Bill it as a one-off line", for something not in Inventory such as repair labour, added the line
+but then refused to save the bill with "doesn't match a part in Inventory". A one-off line is now
+marked as one when it's added, or when a bill that has one is opened again, so bills, drafts and
+quotations with labour or other one-off lines save. They move no stock.
+
 ## 2026-10-23 — Job Cards for repair jobs
 
 For a machine in for repair over a few days, where the customer takes parts meanwhile and pays for

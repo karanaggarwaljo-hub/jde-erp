@@ -52,7 +52,7 @@ export function addPartToLines(lines: InvoiceLine[], part: PartOption, qty = 1):
  *  supported it (product_id null, no stock movement), and losing it would remove a real
  *  capability rather than tidy one up. */
 export function addCustomLine(lines: InvoiceLine[], description: string): AddPartResult {
-  return { lines: [...lines, { part: description, qty: 1, price: 0, discount: 0 }], index: lines.length, merged: false };
+  return { lines: [...lines, { part: description, qty: 1, price: 0, discount: 0, custom: true }], index: lines.length, merged: false };
 }
 
 export type SoldInvoice = { id: string; customer: string; date: string; status: string };
