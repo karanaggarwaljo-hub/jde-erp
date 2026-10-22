@@ -2,6 +2,25 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-22 — Stock Planning is now a simple requirement sheet
+
+Stock Planning was hard to use: three day settings, and no way to add a part or change how many to
+order. It's now one list, the **Requirement sheet**.
+
+- **It starts filled in** with what is out of stock or running low, and how many of each to order.
+- **Add any part** by typing its name or number. Change a quantity with − and +, or type it. Remove
+  a line with ×. Fill in or change who it comes from.
+- **One setting:** how long the suggested amounts should last (2 weeks, 1 month or 2 months).
+- **Use it:** **Print** it as a plain sheet (part no., description, qty, remarks), send it on
+  **WhatsApp**, **Copy** it into a message, or **Make purchase** to open a purchase from that
+  supplier with everything filled in.
+- **Show** picks one supplier's parts when the sheet has several.
+- **It's remembered** on this computer until you clear it. **Add what is running low** brings in
+  anything new that has run low since.
+
+The **Not selling** tab (formerly Dead stock) still shows parts that haven't sold, now picked by
+2, 3 or 6 months.
+
 ## 2026-10-22 — Dispatch details on invoices
 
 The boxes beside the invoice number used to print empty: Disp Through, Terms of Delivery,
