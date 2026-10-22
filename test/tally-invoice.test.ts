@@ -123,9 +123,36 @@ test('a bill from a company with no GSTIN but a state set prints IGST to another
 
 /** The owner found the HSN-wise tax table too much. The tax lines above the grand total carry the
  *  tax; "Taxable value" is added there only where the goods total does not already say it. */
-test('the taxable value shows above the tax only after deductions or when prices include GST', () => {
+test('the taxable value shows above the tax only after deductions', () => {
   const plain = buildTallyInvoice({ invoice: invoice(), items: [item()], company: COMPANY, customer: null });
   assert.deepEqual(plain.charges.map((c) => c.label), ['CGST', 'SGST']);
-  const inclusive = buildTallyInvoice({ invoice: invoice({ total: 1000, gst_amount: 152.54, gst_mode: 'inclusive' }), items: [item()], company: COMPANY, customer: null });
-  assert.deepEqual(inclusive.charges.map((c) => [c.label, c.amount]), [['Taxable value', '847.46'], ['CGST (included)', '76.27'], ['SGST (included)', '76.27']]);
+});
+
+/** The owner's GST-inclusive bill read wrong: goods 12,000.00, then 10,169.49 and 1,830.51 under it,
+ *  then a grand total of 12,000.00. Tally prints such a bill before GST, so it adds up downwards. */
+test('a bill whose prices include GST is printed before GST and adds up to its grand total', () => {
+  const doc = buildTallyInvoice({
+    invoice: invoice({ total: 12000, gst_amount: 1830.51, gst_mode: 'inclusive' }),
+    items: [item({ qty: 1, unit_price: 12000, line_total: 12000 })],
+    company: COMPANY, customer: { gstin: '06AAAAA1111A1Z1' },
+  });
+  assert.equal(doc.items[0].rate, '10,169.49');
+  assert.equal(doc.items[0].amount, '10,169.49');
+  assert.equal(doc.itemsTotal, '10,169.49');
+  assert.deepEqual(doc.charges.map((c) => [c.label, c.rate, c.amount]), [['IGST', '18%', '1,830.51']]);
+  assert.equal(doc.total, '12,000.00');
+
+  // With a discount and several lines, the paise still meet: goods - discount + tax = total.
+  const mixed = buildTallyInvoice({
+    invoice: invoice({ total: 950, discount_percent: 5, discount_amount: 50, gst_amount: 144.92, gst_mode: 'inclusive' }),
+    items: [item({ qty: 1, unit_price: 333.33, line_total: 333.33 }), item({ qty: 1, unit_price: 333.33, line_total: 333.33 }), item({ qty: 1, unit_price: 333.34, line_total: 333.34 })],
+    company: COMPANY, customer: null,
+  });
+  const money = (value: string) => Number(value.replace(/[,-]/g, ''));
+  const goods = mixed.items.reduce((sum, line) => sum + money(line.amount), 0);
+  assert.equal(Math.round(goods * 100) / 100, money(mixed.itemsTotal));
+  const discount = money(mixed.charges.find((c) => c.label === 'Less: Discount')!.amount);
+  const taxes = mixed.charges.filter((c) => /GST/.test(c.label)).reduce((sum, c) => sum + money(c.amount), 0);
+  assert.equal(Math.round((money(mixed.itemsTotal) - discount + taxes) * 100) / 100, 950);
+  assert.equal(mixed.charges.find((c) => c.label === 'Taxable value')!.amount, '805.08');
 });
