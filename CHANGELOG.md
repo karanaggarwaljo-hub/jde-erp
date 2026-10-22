@@ -2,6 +2,19 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-22 — IGST for a company without a GSTIN
+
+A bill to another state showed **CGST + SGST** instead of **IGST** when the company had no GSTIN
+in Settings. The app reads the shop's own state from its GSTIN, so with no GSTIN it couldn't tell
+the sale was going out of state.
+
+- **Settings → Companies → Edit** now has a **State** box (where "Currency" used to be). With a
+  GSTIN it fills in by itself; without one, you choose it.
+- **The bill form** now says "Add your GSTIN or state in Settings" when it can't decide.
+
+The test company (bkgkj) now has its state set to Chandigarh, so its bill INV-1019 to Himachal
+Pradesh shows IGST @ 18%. Jai Durga Enterprises has a GSTIN, so its bills were always right.
+
 ## 2026-10-22 — Invoices fill a full A4 page
 
 A bill now fills the whole A4 sheet, like a Tally invoice, instead of stopping halfway down. The goods

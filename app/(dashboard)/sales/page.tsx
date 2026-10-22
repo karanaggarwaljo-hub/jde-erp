@@ -330,7 +330,7 @@ export default function SalesPage() {
   // customer's GSTIN state, else the shop's own state. Another state means IGST; the same state
   // means CGST + SGST, or CGST + UTGST in a Union Territory without a legislature (Chandigarh).
   // The total is the same either way; only how the tax is split and printed changes.
-  const supply = supplyTax(activeCompany?.gstin, selectedCustomer?.gstin, placeOfSupplyChoice || null);
+  const supply = supplyTax(activeCompany?.gstin, selectedCustomer?.gstin, placeOfSupplyChoice || null, activeCompany?.state_code);
   const placeOfSupply = supply.placeName ? `${supply.placeName} (${supply.placeCode})` : '';
   const supplyKind = supply.kind;
   const halfGstPercent = Number((gstPercent / 2).toFixed(3));

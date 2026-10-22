@@ -410,7 +410,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                       ? `Same state · CGST + ${localTax}`
                       : supplyKind === 'inter'
                         ? 'Another state · IGST'
-                        : 'Add your GSTIN in Settings to split the tax'}
+                        : 'Add your GSTIN or state in Settings (Companies → Edit) to know IGST from CGST'}
                   </span>
                 </div>
               </div>
