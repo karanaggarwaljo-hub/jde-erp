@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addPartToLines, buildLastSoldIndex, lineWarnings, partLabel, partsWithoutRate } from '../lib/sale-entry';
+import { addCustomLine, addPartToLines, buildLastSoldIndex, lineWarnings, partLabel, partsWithoutRate } from '../lib/sale-entry';
 import type { InvoiceLine, PartOption } from '../lib/sales-types';
 
 function part(partNumber: string, name: string, extra: Partial<PartOption> = {}): PartOption {
@@ -155,4 +155,11 @@ test('the parts holding up a sale are the ones with a quantity and no rate', () 
   ];
   assert.deepEqual(partsWithoutRate(lines), ['SP-003 - filter kit']);
   assert.deepEqual(partsWithoutRate([{ part: 'a', qty: 1, price: 10 }]), []);
+});
+
+/** "Bill it as a one-off line" (labour, a part not stocked) added a line the save then refused as
+ *  "doesn't match a part in Inventory". The line is now marked one-off, and the save lets it by. */
+test('a one-off line is marked as one-off, so the save does not take it for an unknown part', () => {
+  const { lines } = addCustomLine([], 'Repair labour - JCB 3DX');
+  assert.deepEqual(lines, [{ part: 'Repair labour - JCB 3DX', qty: 1, price: 0, discount: 0, custom: true }]);
 });

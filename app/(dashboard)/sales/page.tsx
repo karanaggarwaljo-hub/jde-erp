@@ -465,7 +465,7 @@ export default function SalesPage() {
     setGstInclusive(invoice.gst_mode === 'inclusive');
     setPlaceOfSupplyChoice(invoice.place_of_supply ?? '');
     setDispatch(dispatchOf(invoice));
-    setLines(items.map((item) => ({ part: savedLineLabel(item, productsById), qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
+    setLines(items.map((item) => ({ part: savedLineLabel(item, productsById), qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0), custom: !item.product_id })));
     const paid = Number(invoice.paid);
     const invoiceTotal = Number(invoice.total);
     setPaymentStatus(paid >= invoiceTotal && invoiceTotal > 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid');
@@ -535,7 +535,7 @@ export default function SalesPage() {
       );
       setQuoteDate(detail.date);
       setQuoteValidity(detail.validity);
-      setQuoteLines(detail.items.map((item) => ({ part: savedLineLabel(item, productsById), qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
+      setQuoteLines(detail.items.map((item) => ({ part: savedLineLabel(item, productsById), qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0), custom: !item.product_id })));
       setQuoteDiscountPercent(Number(detail.discount_percent ?? 0));
       setQuoteGstPercent(Number(detail.gst_percent ?? 18));
       setQuoteGstInclusive(detail.gst_mode === 'inclusive');
@@ -568,7 +568,7 @@ export default function SalesPage() {
     // button is not offered either, and the database refuses it as well.
     if (status === DRAFT_STATUS && editingQuotation && editingQuotation.status !== DRAFT_STATUS) return;
 
-    const unmatchedLine = quoteLines.find((line) => line.part.trim() && !partOptions.some((part) => part.value === line.part));
+    const unmatchedLine = quoteLines.find((line) => line.part.trim() && !line.custom && !partOptions.some((part) => part.value === line.part));
     if (unmatchedLine) {
       setQuotationError(`"${unmatchedLine.part}" doesn't match a part in Inventory — pick one from the dropdown list.`);
       return;
@@ -787,7 +787,7 @@ export default function SalesPage() {
     // real debt. A brand-new sale and an existing draft can both be parked.
     if (!activeCompany || (editingInvoice && !editingDraft)) return;
 
-    const unmatchedLine = lines.find((line) => line.part.trim() && !partOptions.some((part) => part.value === line.part));
+    const unmatchedLine = lines.find((line) => line.part.trim() && !line.custom && !partOptions.some((part) => part.value === line.part));
     if (unmatchedLine) {
       setInvoiceError(`"${unmatchedLine.part}" doesn't match a part in Inventory — pick one from the dropdown list.`);
       return;
@@ -860,7 +860,7 @@ export default function SalesPage() {
     event.preventDefault();
     if (!activeCompany) return;
 
-    const unmatchedLine = lines.find((line) => line.part.trim() && !partOptions.some((part) => part.value === line.part));
+    const unmatchedLine = lines.find((line) => line.part.trim() && !line.custom && !partOptions.some((part) => part.value === line.part));
     if (unmatchedLine) {
       setInvoiceError(`"${unmatchedLine.part}" doesn't match a part in Inventory — pick one from the dropdown list.`);
       return;

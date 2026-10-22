@@ -151,7 +151,9 @@ export type PaymentStatus = 'paid' | 'partial' | 'unpaid';
 /** One typed line on an invoice or a quotation. `discount` is a percentage off THIS line only,
  *  kept separate from the bill-wide discount. Optional because quotations reuse this shape and do
  *  not offer one — absent means none. */
-export type InvoiceLine = { part: string; qty: number; price: number; discount?: number };
+/** `custom` marks a one-off line, typed in rather than picked from Inventory (labour, a part not
+ *  stocked): it is billed as typed and moves no stock. */
+export type InvoiceLine = { part: string; qty: number; price: number; discount?: number; custom?: boolean };
 
 /** A part as offered in the "type a part" datalist: the label the owner picks, plus everything
  *  the form fills in behind it once picked. */
