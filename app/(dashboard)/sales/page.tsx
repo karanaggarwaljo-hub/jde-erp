@@ -54,7 +54,7 @@ import { amountReceived, billTotals, lineDiscountAmount, lineDiscountPercent, li
 import {
   DRAFT_STATUS,
   CANCELLED_STATUS,
-  QUOTATION_FINAL_STATUS,
+  QUOTATION_FINAL_STATUS,
   WALK_IN_CUSTOMER,
   type Customer,
   type Invoice,
@@ -67,6 +67,7 @@ import {
   type Product,
   type Quotation,
 } from '@/lib/sales-types';
+import { EMPTY_DISPATCH, dispatchOf, type InvoiceDispatch } from '@/lib/invoice-dispatch';
 import { supplyTax } from '@/lib/gst-supply';
 
 type SalesTab = 'invoices' | 'quotations' | 'credits' | 'ledger';
@@ -228,6 +229,7 @@ export default function SalesPage() {
   const [gstPercent, setGstPercent] = useState(18);
   // The place of supply picked on the bill; '' follows the customer's GSTIN, else the shop's state.
   const [placeOfSupplyChoice, setPlaceOfSupplyChoice] = useState('');
+  const [dispatch, setDispatch] = useState<InvoiceDispatch>(EMPTY_DISPATCH);
   // Whether the rates typed on the lines are before GST (tax added on top) or already include it
   // (tax carved out of them). Only ever changes how the same typed numbers are read.
   const [gstInclusive, setGstInclusive] = useState(false);
@@ -431,6 +433,7 @@ export default function SalesPage() {
     setGstPercent(18);
     setGstInclusive(false);
     setPlaceOfSupplyChoice('');
+    setDispatch(EMPTY_DISPATCH);
     setInvoiceDate(todayIso());
     setPaymentStatus('unpaid');
     setAmountPaid(0);
@@ -449,6 +452,7 @@ export default function SalesPage() {
     setGstPercent(invoice.gst_percent == null ? 18 : Number(invoice.gst_percent));
     setGstInclusive(invoice.gst_mode === 'inclusive');
     setPlaceOfSupplyChoice(invoice.place_of_supply ?? '');
+    setDispatch(dispatchOf(invoice));
     setLines(items.map((item) => ({ part: savedLineLabel(item, productsById), qty: Number(item.qty), price: Number(item.unit_price), discount: Number(item.discount_percent ?? 0) })));
     const paid = Number(invoice.paid);
     const invoiceTotal = Number(invoice.total);
@@ -765,6 +769,7 @@ export default function SalesPage() {
         gstAmount,
         gstMode: gstInclusive ? 'inclusive' : 'exclusive',
         placeOfSupply: supply.placeCode || null,
+        dispatch,
       });
 
       const draftId = String(invoice.id);
@@ -855,6 +860,7 @@ Save it anyway?`,
           gstAmount,
           gstMode: gstInclusive ? 'inclusive' : 'exclusive',
           placeOfSupply: supply.placeCode || null,
+          dispatch,
         });
 
         await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
@@ -894,6 +900,7 @@ Save it anyway?`,
         gstAmount,
         gstMode: gstInclusive ? 'inclusive' : 'exclusive',
         placeOfSupply: supply.placeCode || null,
+        dispatch,
       });
 
       const createdId = String(invoice.id);
@@ -2046,6 +2053,7 @@ ${stockLine}`)) return;
           partOptions={partOptions} customers={customers} placeOfSupply={placeOfSupply} lastSold={lastSold}
           halfGstPercent={halfGstPercent} supplyKind={supplyKind} localTax={supply.localTax}
           placeOfSupplyCode={supply.placeCode} setPlaceOfSupplyChoice={setPlaceOfSupplyChoice}
+          dispatch={dispatch} setDispatch={setDispatch}
           setShowInvoiceModal={setShowInvoiceModal} setShowAddCustomer={setShowAddCustomer}
           saveInvoice={saveInvoice} saveDraftInvoice={saveDraftInvoice}
         />

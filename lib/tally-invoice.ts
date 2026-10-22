@@ -11,6 +11,7 @@
 
 import { invoiceFigures, type FigureInvoice, type FigureItem, type FigureReturn } from './invoice-figures';
 import { GST_STATES, sellerStateCode, supplyTax } from './gst-supply';
+import { DISPATCH_FIELDS, type DispatchKey } from './invoice-dispatch';
 
 export { GST_STATES };
 
@@ -31,7 +32,8 @@ export type TallyCompany = {
 
 export type TallyCustomer = { address?: string | null; phone?: string | null; gstin?: string | null } | null;
 
-export type TallyInvoiceInput = FigureInvoice & {
+/** With the dispatch details typed on the bill (lib/invoice-dispatch.ts). */
+export type TallyInvoiceInput = FigureInvoice & Partial<Record<DispatchKey, string | null>> & {
   id: string;
   date: string;
   customer: string;
@@ -299,11 +301,7 @@ export function buildTallyInvoice(source: {
       ['Invoice No.', text(invoice.id)],
       ['Date', tallyDate(invoice.date)],
       ['Payment Terms', MODE_LABELS[text(invoice.mode).toLowerCase()] ?? text(invoice.mode)],
-      ['Disp Through', ''],
-      ['Terms of Delivery', ''],
-      ['Destination', ''],
-      ['Other Reference', ''],
-      ['E-Way Bill No.', ''],
+      ...DISPATCH_FIELDS.map(({ key, printed }): [string, string] => [printed, text(invoice[key])]),
     ],
     items: tallyItems,
     totalQty: `${items.reduce((sum, item) => sum + num(item.qty), 0)}`,

@@ -157,7 +157,10 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   };
   const buyer = partyLines(doc.buyer);
   const detailLabelWidth = Math.max(...doc.details.map(([label]) => fonts.regular.widthOfTextAtSize(label, 8))) + 6;
-  const partyHeight = Math.max(18 + buyer.length * 10.5, 10 + doc.details.length * 11.5);
+  // A long detail (terms of delivery run to 200 characters) wraps inside its column.
+  const detailLines = doc.details.map(([label, value]) => [label, wrap(`: ${value}`, fonts.bold, 8, third - detailLabelWidth - 10)] as const);
+  const detailCount = detailLines.reduce((sum, [, pieces]) => sum + pieces.length, 0);
+  const partyHeight = Math.max(18 + buyer.length * 10.5, 10 + detailCount * 11.5);
   box(LEFT, y, WIDTH, partyHeight);
   line(LEFT + third, y, LEFT + third, y - partyHeight);
   line(LEFT + 2 * third, y, LEFT + 2 * third, y - partyHeight);
@@ -168,11 +171,10 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
     for (const [value, font, size] of buyer) { text(wrap(value, font, size, third - 10)[0], x, lineAt, size, font); lineAt -= 10.5; }
   }
   at = y - 11;
-  for (const [label, value] of doc.details) {
+  for (const [label, pieces] of detailLines) {
     const x = LEFT + 2 * third + 5;
     text(label, x, at, 8, fonts.regular, GREY);
-    text(`: ${value}`, x + detailLabelWidth, at, 8, fonts.bold);
-    at -= 11.5;
+    for (const piece of pieces) { text(piece, x + detailLabelWidth, at, 8, fonts.bold); at -= 11.5; }
   }
   y -= partyHeight;
 

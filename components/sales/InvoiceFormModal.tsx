@@ -38,7 +38,8 @@ import {
   type InvoiceLine,
   type PartOption,
   type PaymentStatus,
-} from '@/lib/sales-types';
+} from '@/lib/sales-types';
+import { DISPATCH_FIELDS, hasDispatch, type InvoiceDispatch } from '@/lib/invoice-dispatch';
 
 export type InvoiceFormModalProps = {
   lines: InvoiceLine[];
@@ -84,6 +85,9 @@ export type InvoiceFormModalProps = {
   /** The place of supply in effect, as a GST state code, and a way to pick another. */
   placeOfSupplyCode: string;
   setPlaceOfSupplyChoice: (code: string) => void;
+  /** Dispatch details printed beside the invoice number (lib/invoice-dispatch.ts); all optional. */
+  dispatch: InvoiceDispatch;
+  setDispatch: Dispatch<SetStateAction<InvoiceDispatch>>;
   /** What the selected customer last paid per part, keyed by part label. Empty for a walk-in. */
   lastSold: Map<string, LastSold>;
   setShowInvoiceModal: (open: boolean) => void;
@@ -100,7 +104,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
     totals, paidAmount, newOutstanding,
     editingInvoice, setEditingInvoice, editingDraft, invoiceError, savingInvoice, savingDraft,
     selectedCustomer, creditSaleNeedsCustomer, partOptions, customers, placeOfSupply, halfGstPercent, supplyKind, localTax,
-    placeOfSupplyCode, setPlaceOfSupplyChoice,
+    placeOfSupplyCode, setPlaceOfSupplyChoice, dispatch, setDispatch,
     lastSold, setShowInvoiceModal, setShowAddCustomer, saveInvoice, saveDraftInvoice,
   } = props;
 
@@ -432,6 +436,23 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                 <MoneyPicker companyId={companyId} direction="in" value={moneyChoice} onChange={setMoneyChoice} />
               )}
             </div>
+
+            {/* Printed beside the invoice number, as on a Tally invoice. Folded away until wanted:
+                most counter sales have none. Open by itself on a bill that already has some. */}
+            <details className="card" open={hasDispatch(dispatch) || undefined}>
+              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                Dispatch details <span className="text-muted text-sm" style={{ fontWeight: 400 }}>· optional · printed on the invoice</span>
+              </summary>
+              <div className="form-grid-2" style={{ marginTop: 10 }}>
+                {DISPATCH_FIELDS.map((field) => (
+                  <div className="form-group" key={field.key}>
+                    <label className="form-label" htmlFor={`dispatch-${field.key}`}>{field.label}</label>
+                    <input id={`dispatch-${field.key}`} className="form-input" maxLength={field.max} placeholder={field.placeholder}
+                      value={dispatch[field.key]} onChange={(event) => { const value = event.target.value; setDispatch((current) => ({ ...current, [field.key]: value })); }} />
+                  </div>
+                ))}
+              </div>
+            </details>
 
             {/* Every figure below is read straight from the totals computed above — nothing
                 here is recalculated, and the CGST/SGST or IGST breakdown is a presentation

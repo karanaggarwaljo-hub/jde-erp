@@ -1,4 +1,5 @@
-import { dbErrorMessage, getRow, saveSalesInvoice, setInvoicePlaceOfSupply } from '@/lib/db';
+import { dbErrorMessage, getRow, saveSalesInvoice, setInvoiceDispatch, setInvoicePlaceOfSupply } from '@/lib/db';
+import { cleanDispatch } from '@/lib/invoice-dispatch';
 import { isStateCode } from '@/lib/gst-supply';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { money, recordAudit } from '@/lib/audit-log';
@@ -13,7 +14,7 @@ export async function POST(request: Request) {
   const {
     companyId, invoiceId, isEdit, customerLabel, oldCustomerId, newCustomerId,
     oldOutstanding, newOutstanding, date, items, total, paid, status, mode,
-    discountPercent, discountAmount, gstPercent, gstAmount, gstMode, placeOfSupply,
+    discountPercent, discountAmount, gstPercent, gstAmount, gstMode, placeOfSupply, dispatch,
   } = body ?? {};
 
   if (typeof companyId !== 'string' || !companyId) {
@@ -62,6 +63,17 @@ export async function POST(request: Request) {
     // Where the goods go (a GST state code), which decides IGST on the invoice. Its own column, set
     // straight after the save transaction; anything that is not a state code is stored as none.
     await setInvoicePlaceOfSupply(companyId, savedId, isStateCode(placeOfSupply) ? placeOfSupply : null);
+    // Dispatch details printed beside the invoice number; left as they were when none are sent.
+    // The sale is already saved by now, so a failure here must not report the whole save as
+    // failed (a second click would bill it twice): it is logged, and the bill can be edited again.
+    const dispatchRow = cleanDispatch(dispatch);
+    if (dispatchRow) {
+      try {
+        await setInvoiceDispatch(companyId, savedId, dispatchRow);
+      } catch (error) {
+        console.error(`Saving the dispatch details of ${savedId} failed:`, error);
+      }
+    }
     const newTotal = Number(invoice.total ?? 0);
     await recordAudit({
       companyId,

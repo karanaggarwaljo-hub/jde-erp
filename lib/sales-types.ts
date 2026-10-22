@@ -62,6 +62,12 @@ export type Invoice = {
   gst_mode?: string | null;
   /** GST state code of the place of supply, chosen on the bill (lib/gst-supply.ts). */
   place_of_supply?: string | null;
+  /** Dispatch details printed beside the invoice number (lib/invoice-dispatch.ts). */
+  dispatched_through?: string | null;
+  delivery_terms?: string | null;
+  destination?: string | null;
+  other_reference?: string | null;
+  eway_bill_no?: string | null;
   /** Set when the invoice was cancelled (scripts/cancel-sales-invoice.sql). */
   cancelled_at?: string | null;
   cancel_reason?: string | null;
