@@ -2,6 +2,17 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-22 — "GST included" bills now add up on paper
+
+A bill whose prices include GST printed the goods total with the tax already inside it (₹12,000.00),
+then the taxable value and the tax under it (₹10,169.49 and ₹1,830.51), then a grand total of
+₹12,000.00 again. The figures were right, but it read as if the tax was added on top.
+
+Such bills now print as Tally does: each price and amount **before GST**, so the page adds up
+downwards. Goods ₹10,169.49, plus IGST @ 18% ₹1,830.51, makes the Grand Total ₹12,000.00. The
+total, the tax and what the customer owes are unchanged. Saved PDFs are redrawn this way the next
+time they're opened.
+
 ## 2026-10-22 — Less tax detail on invoices
 
 The invoice no longer prints the HSN-wise tax table (HSN/SAC, Taxable Value, Rate, Amount, Total

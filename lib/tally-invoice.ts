@@ -210,6 +210,25 @@ export function buildTallyInvoice(source: {
   const storedRate = num(invoice.gst_percent);
   const rate = storedRate > 0 ? storedRate
     : f.gstAmount > 0.005 && f.netTaxableValue > 0 ? Math.round((f.gstAmount / f.netTaxableValue) * 10000) / 100 : 0;
+  const tax = f.gstAmount > 0.005 ? f.gstAmount : 0;
+
+  // Prices that include GST are printed as Tally prints them: every rate and amount before GST, so
+  // the page adds up downwards (goods, less deductions, plus the tax, makes the grand total). Printed
+  // as charged, the goods total already held the tax and the tax lines under it read as added on
+  // top (the owner: "this is wrong"). Each figure is scaled by taxable value / amount charged.
+  const charged = f.subtotal - f.returnedValue - f.discountAmount;
+  const exTax = f.gstInclusive && tax > 0 && charged > 0 ? f.netTaxableValue / charged : 1;
+  const returnedShown = round2(f.returnedValue * exTax);
+  const discountShown = round2(f.discountAmount * exTax);
+  const amounts = items.map((item) => round2(num(item.line_total) * exTax));
+  if (exTax !== 1 && amounts.length > 0) {
+    // The last line takes the paisa left by rounding, so the goods less deductions are exactly the
+    // taxable value and the page still adds up to the grand total.
+    const gap = round2(f.netTaxableValue + returnedShown + discountShown - amounts.reduce((sum, value) => sum + value, 0));
+    amounts[amounts.length - 1] = round2(amounts[amounts.length - 1] + gap);
+  }
+  const itemsShown = round2(amounts.reduce((sum, value) => sum + value, 0));
+
   const tallyItems: TallyItem[] = items.map((item, index) => {
     const lineDiscount = num(item.discount_percent);
     return {
@@ -219,29 +238,27 @@ export function buildTallyInvoice(source: {
       hsn: text(item.hsn),
       qty: String(num(item.qty)),
       unit: 'Pcs',
-      rate: indianAmount(num(item.unit_price)),
+      rate: indianAmount(round2(num(item.unit_price) * exTax)),
       discount: lineDiscount > 0 ? percentText(lineDiscount) : '',
-      amount: indianAmount(num(item.line_total)),
+      amount: indianAmount(amounts[index]),
     };
   });
 
   // Under the goods: what was returned, the bill discount, then the tax, as Tally lists them.
   const charges: TallyCharge[] = [];
-  if (f.returnedValue > 0) charges.push({ label: `Less: Goods returned (${f.returnIds.join(', ')})`, rate: '', amount: `-${indianAmount(f.returnedValue)}` });
-  if (f.discountAmount > 0) charges.push({ label: 'Less: Discount', rate: percentText(num(invoice.discount_percent)), amount: `-${indianAmount(f.discountAmount)}` });
-  const tax = f.gstAmount > 0.005 ? f.gstAmount : 0;
+  if (f.returnedValue > 0) charges.push({ label: `Less: Goods returned (${f.returnIds.join(', ')})`, rate: '', amount: `-${indianAmount(returnedShown)}` });
+  if (f.discountAmount > 0) charges.push({ label: 'Less: Discount', rate: percentText(num(invoice.discount_percent)), amount: `-${indianAmount(discountShown)}` });
   const halfOne = round2(tax / 2);
   const halfTwo = round2(tax - halfOne);
   if (items.length > 0 && tax > 0) {
     // What the tax is charged on, where the goods total above does not already say it: after a
-    // discount or a return, or when the prices include GST. (The HSN-wise table that used to show
-    // it is no longer printed: the owner found it too much.)
-    if (f.gstInclusive || charges.length > 0) charges.push({ label: 'Taxable value', rate: '', amount: indianAmount(f.netTaxableValue) });
-    const suffix = f.gstInclusive ? ' (included)' : '';
-    if (interState) charges.push({ label: `IGST${suffix}`, rate: percentText(rate), amount: indianAmount(tax) });
+    // discount or a return. (The HSN-wise table that used to show it is no longer printed: the
+    // owner found it too much.)
+    if (charges.length > 0) charges.push({ label: 'Taxable value', rate: '', amount: indianAmount(f.netTaxableValue) });
+    if (interState) charges.push({ label: 'IGST', rate: percentText(rate), amount: indianAmount(tax) });
     else {
-      charges.push({ label: `CGST${suffix}`, rate: percentText(rate / 2), amount: indianAmount(halfOne) });
-      charges.push({ label: `${supply.localTax}${suffix}`, rate: percentText(rate / 2), amount: indianAmount(halfTwo) });
+      charges.push({ label: 'CGST', rate: percentText(rate / 2), amount: indianAmount(halfOne) });
+      charges.push({ label: supply.localTax, rate: percentText(rate / 2), amount: indianAmount(halfTwo) });
     }
   }
 
@@ -312,7 +329,7 @@ export function buildTallyInvoice(source: {
     ],
     items: tallyItems,
     totalQty: `${items.reduce((sum, item) => sum + num(item.qty), 0)}`,
-    itemsTotal: indianAmount(f.subtotal),
+    itemsTotal: indianAmount(itemsShown),
     charges,
     total: indianAmount(total),
     amountInWords: amountInWords(total),
