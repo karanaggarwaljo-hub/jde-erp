@@ -10,7 +10,7 @@
  */
 
 import { invoiceFigures, type FigureInvoice, type FigureItem, type FigureReturn } from './invoice-figures';
-import { GST_STATES, supplyTax } from './gst-supply';
+import { GST_STATES, sellerStateCode, supplyTax } from './gst-supply';
 
 export { GST_STATES };
 
@@ -18,6 +18,8 @@ export type TallyCompany = {
   name: string;
   address?: string | null;
   gstin?: string | null;
+  /** The shop's state when it has no GSTIN (Settings); the GSTIN's own state wins. */
+  state_code?: string | null;
   contact_phone?: string | null;
   contact_email?: string | null;
   invoice_declaration?: string | null;
@@ -191,10 +193,11 @@ export function buildTallyInvoice(source: {
   const total = num(invoice.total);
   const paid = num(invoice.paid);
 
-  const sellerState = stateOfGstin(company.gstin);
+  const sellerCode = sellerStateCode(company.gstin, company.state_code);
+  const sellerState = { code: sellerCode, name: GST_STATES[sellerCode] ?? '' };
   // Where the goods go decides the tax (lib/gst-supply.ts): IGST to another state, else CGST plus
   // SGST, or UTGST when the seller is in a Union Territory without a legislature (Chandigarh).
-  const supply = supplyTax(company.gstin, customer?.gstin, invoice.place_of_supply);
+  const supply = supplyTax(company.gstin, customer?.gstin, invoice.place_of_supply, company.state_code);
   const interState = supply.kind === 'inter';
 
   // Older bills stored the tax but not its rate; it is worked back out from the tax and what it was

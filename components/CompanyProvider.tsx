@@ -8,6 +8,8 @@ export type Company = {
   id: string;
   name: string;
   gstin: string;
+  /** The shop's state when it has no GSTIN (scripts/company-state.sql). */
+  state_code?: string | null;
   invoice_prefix: string;
   po_prefix: string;
   address: string;
@@ -23,7 +25,7 @@ export type Company = {
   iec_code?: string | null;
 };
 
-type NewCompanyInput = { name: string; gstin: string; invoice_prefix: string; po_prefix: string; address: string; contact_email?: string; contact_phone?: string; invoice_declaration?: string; udyam_no?: string; website?: string; iec_code?: string };
+type NewCompanyInput = { name: string; gstin: string; state_code?: string | null; invoice_prefix: string; po_prefix: string; address: string; contact_email?: string; contact_phone?: string; invoice_declaration?: string; udyam_no?: string; website?: string; iec_code?: string };
 
 type CompanyContextValue = {
   companies: Company[];

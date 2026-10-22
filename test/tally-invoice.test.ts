@@ -109,3 +109,13 @@ test('the letterhead shows phone, e-mail, website, GSTIN, Udyam No. and IE Code,
   const bare = buildTallyInvoice({ invoice: invoice(), items: [item()], customer: null, company: { name: 'Jai Durga Enterprises', udyam_no: '  ' } });
   assert.deepEqual(bare.letterhead, { contact: '', gstin: '', registrations: '' });
 });
+
+test('a bill from a company with no GSTIN but a state set prints IGST to another state', () => {
+  const doc = buildTallyInvoice({
+    invoice: invoice({ place_of_supply: '02', total: 1180, gst_amount: 180 }), items: [item()], customer: null,
+    company: { name: 'bkgkj', gstin: '', state_code: '04' },
+  });
+  assert.equal(doc.interState, true);
+  assert.deepEqual(doc.charges.map((c) => c.label), ['IGST']);
+  assert.equal(doc.seller.state, 'Chandigarh');
+});

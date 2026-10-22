@@ -43,3 +43,15 @@ test('the invoice prints UTGST and a UT Tax column for Chandigarh, and IGST for 
   assert.deepEqual(away.charges.map((c) => [c.label, c.amount]), [['IGST', '180.00']]);
   assert.equal(away.buyer.state, 'Punjab');
 });
+
+/** The owner's test bill to Himachal Pradesh printed CGST + SGST: the company had no GSTIN, so the
+ *  shop's own state was unknown. A company without a GSTIN now has its state chosen in Settings. */
+test('a company with no GSTIN uses the state chosen in Settings, and its GSTIN wins when it has one', () => {
+  assert.equal(supplyTax('', null, '02').kind, 'unknown');
+  const himachal = supplyTax('', null, '02', '04');
+  assert.equal(himachal.kind, 'inter');
+  assert.equal(supplyTax('', null, null, '04').kind, 'intra');
+  assert.equal(supplyTax('', null, null, '04').localTax, 'UTGST');
+  assert.equal(supplyTax('03AAAAA1111A1Z1', null, '03', '04').kind, 'intra');
+  assert.equal(supplyTax('', null, '02', 'XX').kind, 'unknown');
+});

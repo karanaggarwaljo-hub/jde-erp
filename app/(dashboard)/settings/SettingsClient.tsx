@@ -16,6 +16,7 @@ import DrivePanel from '@/components/settings/DrivePanel';
 import BackupsPanel from '@/components/BackupsPanel';
 import StartFreshCard from '@/components/settings/StartFreshCard';
 import { useCompany, type Company } from '@/components/CompanyProvider';
+import { GST_STATES, PLACE_OF_SUPPLY_OPTIONS, stateCodeOfGstin } from '@/lib/gst-supply';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { inviteUser as sendInvite } from '@/lib/client-auth';
 import { ROLE_LABELS, isRole } from '@/lib/authTypes';
@@ -27,7 +28,7 @@ type UserAccount = { email: string; company_id: string; name: string; role: stri
 // nothing about who has access, and adds no request.
 type UserFilter = 'all' | 'active' | 'invited';
 
-const emptyCompanyForm = { name: '', gstin: '', invoice_prefix: 'INV', po_prefix: 'PO', address: '', contact_email: '', contact_phone: '', invoice_declaration: '', udyam_no: '', website: '', iec_code: '' };
+const emptyCompanyForm = { name: '', gstin: '', state_code: '', invoice_prefix: 'INV', po_prefix: 'PO', address: '', contact_email: '', contact_phone: '', invoice_declaration: '', udyam_no: '', website: '', iec_code: '' };
 
 // Categorical dot colours for the role chip — the dot only tells roles apart, it carries no
 // status meaning, so green / amber / rose are deliberately absent here: on this screen those
@@ -130,7 +131,7 @@ export default function SettingsClient({ initialTab = 'users', driveOutcome = nu
 
   const openEditCompany = (company: Company) => {
     setEditingCompanyId(company.id);
-    setCompanyForm({ name: company.name, gstin: company.gstin, invoice_prefix: company.invoice_prefix, po_prefix: company.po_prefix, address: company.address, contact_email: company.contact_email || '', contact_phone: company.contact_phone || '', invoice_declaration: company.invoice_declaration || '', udyam_no: company.udyam_no || '', website: company.website || '', iec_code: company.iec_code || '' });
+    setCompanyForm({ name: company.name, gstin: company.gstin, state_code: company.state_code || '', invoice_prefix: company.invoice_prefix, po_prefix: company.po_prefix, address: company.address, contact_email: company.contact_email || '', contact_phone: company.contact_phone || '', invoice_declaration: company.invoice_declaration || '', udyam_no: company.udyam_no || '', website: company.website || '', iec_code: company.iec_code || '' });
     setCompanyError('');
     setCompanyModalOpen(true);
   };
@@ -140,11 +141,13 @@ export default function SettingsClient({ initialTab = 'users', driveOutcome = nu
     setCompanyError('');
     setCompanySubmitting(true);
     try {
+      // The state is the GSTIN's own when there is one; otherwise the one chosen, or none.
+      const form = { ...companyForm, state_code: stateCodeOfGstin(companyForm.gstin) || companyForm.state_code || null };
       if (editingCompanyId) {
-        await updateCompany(editingCompanyId, companyForm);
+        await updateCompany(editingCompanyId, form);
         setFeedback(`${companyForm.name} updated.`);
       } else {
-        await addCompany(companyForm);
+        await addCompany(form);
         setFeedback(`${companyForm.name} added with no data of its own yet. Click "Set Active" when you're ready to switch to it.`);
       }
       setCompanyModalOpen(false);
@@ -460,7 +463,16 @@ export default function SettingsClient({ initialTab = 'users', driveOutcome = nu
         <div className="form-group"><label className="form-label">Company Business Name *</label><input className="form-input" required value={companyForm.name} onChange={(event) => setCompanyForm({ ...companyForm, name: event.target.value })} /></div>
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">GSTIN</label><input className="form-input" value={companyForm.gstin} onChange={(event) => setCompanyForm({ ...companyForm, gstin: event.target.value })} /></div>
-          <div className="form-group"><label className="form-label">Currency</label><input className="form-input" value="INR (₹)" disabled /></div>
+          {/* Where the shop is decides IGST against CGST + SGST on every bill (lib/gst-supply.ts).
+              A GSTIN states it; a company without one picks it here. */}
+          <div className="form-group"><label className="form-label">State</label>
+            {stateCodeOfGstin(companyForm.gstin)
+              ? <input className="form-input" value={`${GST_STATES[stateCodeOfGstin(companyForm.gstin)]} (from GSTIN)`} disabled />
+              : <select className="form-input form-select" value={companyForm.state_code} onChange={(event) => setCompanyForm({ ...companyForm, state_code: event.target.value })}>
+                  <option value="">Choose your state</option>
+                  {PLACE_OF_SUPPLY_OPTIONS.map((option) => <option key={option.code} value={option.code}>{option.name} ({option.code})</option>)}
+                </select>}
+          </div>
         </div>
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">Invoice Prefix</label><input className="form-input" value={companyForm.invoice_prefix} onChange={(event) => setCompanyForm({ ...companyForm, invoice_prefix: event.target.value })} /></div>

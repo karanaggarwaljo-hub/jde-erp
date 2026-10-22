@@ -52,11 +52,18 @@ export type SupplyTax = {
   localTaxColumn: 'State Tax' | 'UT Tax';
 };
 
+/** The shop's own state: from its GSTIN, else the state chosen for it in Settings (a company
+ *  without a GSTIN still has a state, and IGST cannot be worked out without it). */
+export function sellerStateCode(sellerGstin: string | null | undefined, sellerState?: string | null): string {
+  return stateCodeOfGstin(sellerGstin) || (isStateCode(sellerState) ? sellerState : '');
+}
+
 /** What a sale from `sellerGstin` to a buyer with `buyerGstin` is charged, with `chosenPlace` (a
- *  state code picked on the bill) taking precedence over the buyer's GSTIN. With no seller GSTIN
- *  there is nothing to compare against, so the kind is unknown. */
-export function supplyTax(sellerGstin: string | null | undefined, buyerGstin: string | null | undefined, chosenPlace?: string | null): SupplyTax {
-  const sellerCode = stateCodeOfGstin(sellerGstin);
+ *  state code picked on the bill) taking precedence over the buyer's GSTIN. `sellerState` is the
+ *  shop's state from Settings, used when it has no GSTIN. With neither there is nothing to compare
+ *  against, so the kind is unknown. */
+export function supplyTax(sellerGstin: string | null | undefined, buyerGstin: string | null | undefined, chosenPlace?: string | null, sellerState?: string | null): SupplyTax {
+  const sellerCode = sellerStateCode(sellerGstin, sellerState);
   const placeCode = isStateCode(chosenPlace) ? chosenPlace : stateCodeOfGstin(buyerGstin) || sellerCode;
   const kind = sellerCode && placeCode ? (sellerCode === placeCode ? 'intra' : 'inter') : 'unknown';
   const ut = UTGST_CODES.has(sellerCode);
