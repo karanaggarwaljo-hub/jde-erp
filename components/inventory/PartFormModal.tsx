@@ -12,7 +12,7 @@
  * what the dialog reads from the page, and it is the map for later moving that state in here.
  */
 
-import type { Dispatch, FormEvent, RefObject, SetStateAction } from 'react';
+import type { Dispatch, FormEvent, ReactNode, RefObject, SetStateAction } from 'react';
 import { Plus, Sparkles } from 'lucide-react';
 import { money, wholeMoney } from '@/lib/money';
 import { compatibilitySuggestions } from '@/lib/product-search';
@@ -45,6 +45,8 @@ export type PartFormModalProps = {
   /** Same brand always gets the same dot. Passed in rather than redefined so a brand reads
    *  identically here and in the table behind it. */
   brandChipColor: (brand: string) => string;
+  /** The part's photo and the buttons to change it, when an existing part is being edited. */
+  photoEditor?: ReactNode;
 };
 
 export default function PartFormModal(props: PartFormModalProps) {
@@ -52,7 +54,7 @@ export default function PartFormModal(props: PartFormModalProps) {
     formData, setFormData, editingProduct, products, categoryOptions, possibleDuplicate, duplicatePartNumbers,
     draft, draftMargin, saveError, savingProduct, savedThisSession,
     suggesting, suggestFailed, suggestPartDetails,
-    addAnotherRef, handleSave, setShowModal, brandChipColor,
+    addAnotherRef, handleSave, setShowModal, brandChipColor, photoEditor,
   } = props;
 
   return (
@@ -90,6 +92,12 @@ export default function PartFormModal(props: PartFormModalProps) {
                   <div className="alert alert-warning" role="alert">
                     <strong>{formData.part_number.trim()}</strong> is already on {duplicatePartNumbers.length === 1 ? 'another part' : `${duplicatePartNumbers.length} other parts`}:{' '}
                     {duplicatePartNumbers.map((p) => p.name).join(', ')}. A part number has to name one part, so this will not save as it stands. Give this one its own number, or clear the box and one will be made for it.
+                  </div>
+                )}
+                {photoEditor && (
+                  <div className="form-section">
+                    <div className="form-section-head"><h4>Photo</h4><small>Changes save straight away</small></div>
+                    {photoEditor}
                   </div>
                 )}
                 {/* ── What the part is ───────────────────────────────────────── */}

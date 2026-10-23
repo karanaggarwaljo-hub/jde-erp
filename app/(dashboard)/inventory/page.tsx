@@ -36,6 +36,7 @@ import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { fifoCostLookup, totalStockValue } from '@/lib/stock-value';
 import { resizeImageForUpload, DOCUMENT_SCAN_DIMENSION } from '@/lib/imageResize';
 import PartFormModal from '@/components/inventory/PartFormModal';
+import PartPhotoEditor from '@/components/inventory/PartPhotoEditor';
 import DeletePartModal from '@/components/inventory/DeletePartModal';
 import MergePartModal from '@/components/inventory/MergePartModal';
 import PartDetailModal from '@/components/inventory/PartDetailModal';
@@ -493,10 +494,11 @@ export default function InventoryPage() {
     setPhotoTarget(null);
     if (!file || !productId || !activeCompany) return;
     setPhotoSaving(productId);
+    const hadPhoto = Boolean(products.find((product) => product.id === productId)?.image_url);
     try {
       const saved = await savePartPhoto(activeCompany.id, productId, file);
       await reload();
-      setFeedback(`Photo added to ${String(saved.name ?? 'the part')}.`);
+      setFeedback(hadPhoto ? `Photo of ${String(saved.name ?? 'the part')} changed.` : `Photo added to ${String(saved.name ?? 'the part')}.`);
     } catch (error) {
       setPhotoError(error instanceof Error ? error.message : 'The photo was not saved.');
     } finally {
@@ -856,8 +858,8 @@ export default function InventoryPage() {
             <Upload size={16} /> {importing ? 'Reading…' : 'Import from File'}
             <input type="file" accept={`${SPREADSHEET_ACCEPT},${SCANNABLE_IMPORT_ACCEPT}`} hidden disabled={importing} onChange={handleFileImport} />
           </label>
-          <Link href="/inventory/photos" className="btn btn-secondary" title="Go through your parts and add a photo to each">
-            <Camera size={16} /> Add Photos
+          <Link href="/inventory/photos" className="btn btn-secondary" title="Go through your parts and add or change their photos">
+            <Camera size={16} /> Part Photos
           </Link>
           <button className="btn btn-primary" onClick={handleOpenAdd}>
             <Plus size={16} /> Add New Part
@@ -1071,6 +1073,11 @@ export default function InventoryPage() {
                       <button className="btn btn-ghost btn-sm" aria-label={`Edit ${p.name}`} onClick={() => handleEdit(p)}>
                         <Edit size={14} />
                       </button>
+                      {/* Change (or add) the photo straight from the row; the owner could not find how. */}
+                      <button className="btn btn-ghost btn-sm" aria-label={`${p.image_url ? 'Change' : 'Add'} the photo of ${p.name}`}
+                        title={p.image_url ? 'Change photo' : 'Add photo'} disabled={photoSaving === p.id} onClick={() => pickPhotoFor(p.id)}>
+                        <Camera size={14} />
+                      </button>
                       <button className="btn btn-ghost btn-sm" aria-label={`Merge ${p.name} with another part`} title="Same part entered twice? Merge it with the other entry" onClick={() => setMergeCandidate(p)}>
                         <Merge size={14} />
                       </button>
@@ -1113,6 +1120,14 @@ export default function InventoryPage() {
           suggesting={suggesting} suggestFailed={suggestFailed} suggestPartDetails={suggestPartDetails}
           addAnotherRef={addAnotherRef} handleSave={handleSave} setShowModal={setShowModal}
           brandChipColor={brandChipColor}
+          photoEditor={editingProduct && activeCompany ? (() => {
+            // The part as it is now, so a photo changed here shows at once.
+            const current = products.find((product) => product.id === editingProduct.id) ?? editingProduct;
+            return (
+              <PartPhotoEditor companyId={activeCompany.id} productId={current.id} name={current.name} photo={photoFor(current)}
+                onChanged={(message) => { void reload(); setFeedback(message); }} />
+            );
+          })() : undefined}
         />
       )}
 
