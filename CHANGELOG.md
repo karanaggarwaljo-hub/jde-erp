@@ -2,6 +2,17 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-24 — Change a part's photo from where you'd look for it
+
+Changing a part's photo was possible, but only from inside the part's detail window or the photos
+screen. Now:
+
+- **Edit** on a part has a **Photo** section at the top: **Take new photo**, **From gallery**, or
+  **Remove**. It saves straight away, and the old photo file is deleted.
+- Every part's row in **Inventory** has a **camera** button beside Edit, to add or change its photo.
+- The **Part Photos** screen (formerly Add Photos) says how to change a photo: choose **All parts** and
+  find the part.
+
 ## 2026-10-23 — One-off lines (like labour) can be saved
 
 "Bill it as a one-off line", for something not in Inventory such as repair labour, added the line
