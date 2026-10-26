@@ -11,6 +11,15 @@ test('each kind of entry links to the screen that records it', () => {
   assert.equal(entryLink('expense'), '/expenses?record=expense&back=daybook');
 });
 
+/** Home's big buttons open the same forms and bring the owner back to Home once they are saved. */
+test('an entry started from Home returns to Home', () => {
+  assert.equal(entryLink('sale', 'home'), '/sales?record=sale&back=home');
+  assert.deepEqual(
+    parseEntryIntent('?record=expense&back=home', ['expense'] as const),
+    { record: 'expense', returnTo: '/dashboard' }
+  );
+});
+
 test('a screen reads the form it was asked to open and where to return', () => {
   assert.deepEqual(
     parseEntryIntent('?record=sale&back=daybook', ['sale', 'payment'] as const),

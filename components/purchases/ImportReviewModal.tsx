@@ -152,7 +152,7 @@ export default function ImportReviewModal(props: ImportReviewModalProps) {
 
         <div style={{ overflowX: 'auto', maxHeight: '330px', overflowY: 'auto' }}>
           <table className="erp-table">
-            <thead><tr><th>Item</th><th className="text-right">Qty</th><th className="text-right">Unit cost (₹)</th><th className="text-right">Amount (₹)</th><th>Inventory match / review</th></tr></thead>
+            <thead><tr><th>Item</th><th className="text-right">Qty</th><th className="text-right">Unit cost (₹)</th><th className="text-right">Amount (₹)</th><th>Match in Stock / review</th></tr></thead>
             <tbody>{importPreview.lines.map((line, index) => {
               const review = importReviews[index];
               const suggestion = review?.match.kind === 'suggested' ? review.match.product : null;
@@ -266,7 +266,7 @@ export default function ImportReviewModal(props: ImportReviewModalProps) {
       </div>
 
       <p className="text-muted" style={{ fontSize: '12px' }}>
-        Anything here that isn&apos;t already in Inventory is added as a new part when you record this purchase.
+        Anything here that isn&apos;t already in Stock is added as a new part when you record this purchase.
         {importFillCount > 0 && ' Blank details on parts you already stock will be filled in from this invoice; anything you entered yourself is left alone.'}
       </p>
     </div>

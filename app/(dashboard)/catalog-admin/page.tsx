@@ -38,7 +38,7 @@ const TAB_TEXT: Record<CatalogTab, { label: string; title: string; help: string;
   'not-added': {
     label: 'Not added yet',
     title: 'Not in the catalog yet',
-    help: 'Parts in Inventory with no website listing. Add one to start a draft.',
+    help: 'Parts in Stock with no website listing. Add one to start a draft.',
     search: 'Search parts not yet in the catalog…',
   },
 };
@@ -109,7 +109,7 @@ export default function CatalogAdminPage() {
     if (search.trim()) return { title: 'Nothing matches your search', desc: 'Try another word, or check the other tabs.' };
     if (tab === 'live') return { title: catalogLoading ? 'Loading catalog…' : 'Nothing is live on your website yet', desc: 'Publish a draft from the Not live tab to put it on the website.' };
     if (tab === 'not-live') return { title: catalogLoading ? 'Loading catalog…' : 'Every catalog entry is live', desc: 'Nothing is waiting to be finished.' };
-    return { title: productsLoading ? 'Loading inventory…' : 'Nothing left to add', desc: productsLoading ? '' : 'Every part in Inventory already has a catalog entry.' };
+    return { title: productsLoading ? 'Loading parts…' : 'Nothing left to add', desc: productsLoading ? '' : 'Every part in Stock already has a catalog entry.' };
   };
 
   return (
@@ -117,14 +117,14 @@ export default function CatalogAdminPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Website Catalog</h1>
-          <p className="page-subtitle">Turn approved Inventory parts into public website listings — nothing goes live until you publish it</p>
+          <p className="page-subtitle">Put your parts on your website. Nothing shows there until you publish it.</p>
         </div>
         <div className="flex gap-2">
           <Link href="/catalog-admin/leads" className="btn btn-secondary">
             <Inbox size={16} /> Leads
           </Link>
           <Link href="/catalog-admin/recheck" className="btn btn-secondary">
-            <RefreshCw size={16} /> Recheck Inventory
+            <RefreshCw size={16} /> Recheck against Stock
           </Link>
           <Link href="/catalog" target="_blank" className="btn btn-secondary" title="Preview only — this app's own catalog pages, not jd-enterprise.com. Not deployed anywhere public yet.">
             <ExternalLink size={16} /> Preview Catalog Pages

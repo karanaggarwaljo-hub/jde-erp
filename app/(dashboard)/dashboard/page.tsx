@@ -1,212 +1,183 @@
 'use client';
 
+/**
+ * Home: the first screen after signing in.
+ *
+ * The owner found the ERP cluttered and asked for it to be easy enough for a school child to use.
+ * Home now starts with one big button for each everyday job. Each button opens its form straight
+ * away on the screen that owns it, and that screen comes back here once the entry is saved. Below
+ * the buttons are the four figures that matter at the counter, then what needs attention, then the
+ * activity calendar the owner asked to keep big.
+ *
+ * What it used to show and where that went: eight figure boxes became the four below (the rest are
+ * on Reports); the long low-stock list is on Stock and What to Order; the recent-activity table is
+ * the Day Book's job.
+ */
+
 import Link from 'next/link';
 import { useMemo } from 'react';
 import {
-  TrendingUp,
   ShoppingCart,
-  ShoppingBag,
-  PackageCheck,
+  HandCoins,
+  Truck,
+  Banknote,
+  Wallet,
+  Search,
   PackageX,
   AlertTriangle,
-  Users,
   Clock,
-  Wallet,
-  Plus,
-  IndianRupee,
-  ArrowUpRight,
-  ArrowDownRight,
   ArrowRight,
+  type LucideIcon,
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
-import { totalStockValue, type StockLayerLike } from '@/lib/stock-value';
 import { invoiceBalanceDue, isInvoiceOpen } from '@/lib/invoice-balance';
 import { isCountedSale } from '@/lib/sales-types';
+import { entryLink } from '@/lib/entry-intent';
+import { wholeMoney } from '@/lib/money';
 import { useCompany } from '@/components/CompanyProvider';
 import ActivityCalendar from '@/components/ActivityCalendar';
 import type { ActivityEvent } from '@/lib/activity-calendar';
 import { shopDay } from '@/lib/logbook';
 
-type Product = { id: string; part_number: string; name: string; brand: string; category: string; cost_price: number; current_stock: number; min_stock: number; location: string };
+type Product = { id: string; part_number: string; name: string; current_stock: number; min_stock: number };
 type Customer = { id: string; balance: number };
 type Supplier = { id: string; name: string; balance: number };
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; settlement_write_off: number; status: string };
-type PurchaseOrder = { id: string; supplier: string; date: string; total: number };
-type Grn = { id: string; po_number: string; supplier: string; received_at: string };
-type Quotation = { id: string; customer: string; date: string; total: number };
-type Expense = { id: string; date: string };
+type Dated = { id: string; date: string };
 
-/** The shop's day for a moment (India time), not the UTC one, which is a day behind until 5:30 am. */
-function isoDate(d: Date) {
+/** In the order a counter day usually runs: selling and taking money first, then buying and paying.
+ *  "in" and "out" colour the button the same way the Day Book colours money in and money out. */
+const HOME_ACTIONS: Array<{ label: string; hint: string; href: string; icon: LucideIcon; tone: 'in' | 'out' | 'find' }> = [
+  { label: 'Make a bill', hint: 'Sell parts to a customer', href: entryLink('sale', 'home'), icon: ShoppingCart, tone: 'in' },
+  { label: 'Money received', hint: 'A customer paid you', href: entryLink('payment-in', 'home'), icon: HandCoins, tone: 'in' },
+  { label: 'Buy stock', hint: 'Parts came in from a supplier', href: entryLink('purchase', 'home'), icon: Truck, tone: 'out' },
+  { label: 'Pay a supplier', hint: 'You paid for stock', href: entryLink('supplier-payment', 'home'), icon: Banknote, tone: 'out' },
+  { label: 'Add an expense', hint: 'Rent, salary, freight', href: entryLink('expense', 'home'), icon: Wallet, tone: 'out' },
+  { label: 'Find a part', hint: 'Check its stock and price', href: '/inventory?find=1', icon: Search, tone: 'find' },
+];
+
+/** The shop's day (India time), not the UTC one, which is a day behind until 5:30 am. */
+function daysAgo(n: number) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
   return shopDay(d);
 }
 
-function daysAgoDate(n: number) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d;
-}
-
-function sumInRange(rows: Array<{ date: string; total: number }>, from: string, to: string) {
-  return rows.filter((r) => r.date >= from && r.date <= to).reduce((t, r) => t + Number(r.total || 0), 0);
-}
-
-function pctChange(current: number, previous: number): { label: string; positive: boolean } {
-  if (previous === 0) {
-    return current > 0 ? { label: 'new activity', positive: true } : { label: 'no change', positive: true };
-  }
-  const change = ((current - previous) / previous) * 100;
-  return { label: `${change >= 0 ? '+' : ''}${change.toFixed(1)}%`, positive: change >= 0 };
-}
-
-export default function DashboardPage() {
+export default function HomePage() {
   const { configError, activeCompany } = useCompany();
   const { rows: products, error: productsError } = useCompanyTable<Product>('products');
   const { rows: customers, error: customersError } = useCompanyTable<Customer>('customers');
   const { rows: suppliers, error: suppliersError } = useCompanyTable<Supplier>('suppliers');
   const { rows: invoices, error: invoicesError } = useCompanyTable<Invoice>('invoices');
-  const { rows: purchaseOrders, error: purchaseOrdersError } = useCompanyTable<PurchaseOrder>('purchase_orders');
-  const { rows: grns, error: grnsError } = useCompanyTable<Grn>('grns');
-  const { rows: quotations, error: quotationsError } = useCompanyTable<Quotation>('quotations');
-  // Only for the activity calendar — an expense is a day's work recorded like any other.
-  const { rows: expenses, error: expensesError } = useCompanyTable<Expense>('expenses');
-  // Needed to value stock the same way every other screen does — each purchase batch at what that
-  // batch cost, rather than one cost for every unit. See lib/stock-value.ts.
-  const { rows: stockLayers, error: stockLayersError } = useCompanyTable<StockLayerLike>('stock_layers');
+  // Only for the activity calendar: a purchase, an expense or a quotation is a day's work too.
+  const { rows: purchaseOrders, error: purchaseOrdersError } = useCompanyTable<Dated>('purchase_orders');
+  const { rows: quotations, error: quotationsError } = useCompanyTable<Dated>('quotations');
+  const { rows: expenses, error: expensesError } = useCompanyTable<Dated>('expenses');
 
-  // Every figure on this screen is summed from the tables above. If any of them failed to load,
-  // the sums are of whatever did arrive — and a smaller number reads exactly like a quieter month
-  // rather than like missing data. Say so instead of drawing them.
+  // Every figure on this screen is summed from the tables above. If any of them failed to load, the
+  // sums are of whatever did arrive, and a smaller number reads exactly like a quieter day rather
+  // than like missing data. Say so instead of drawing them.
   const dataError = productsError ?? customersError ?? suppliersError ?? invoicesError
-    ?? purchaseOrdersError ?? grnsError ?? quotationsError ?? expensesError ?? stockLayersError;
+    ?? purchaseOrdersError ?? quotationsError ?? expensesError;
 
-  const today = isoDate(new Date());
-  const yesterday = isoDate(daysAgoDate(1));
-
-  // Header subline: the calendar date plus whichever company is active. The mockup names a
-  // physical location — the closest real field is the company's own address, so that is what
-  // is shown; nothing is printed when the company hasn't loaded yet.
+  const today = shopDay(new Date());
   const headerDate = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const headerSubline = [headerDate, activeCompany?.name, activeCompany?.address].filter(Boolean).join(' · ');
 
   // Sales that happened: a parked draft (a job card's bill while the machine is in) and a cancelled
   // bill are not sales.
-  const sales = invoices.filter(isCountedSale);
-  const todaySales = sumInRange(sales, today, today);
-  const yesterdaySales = sumInRange(sales, yesterday, yesterday);
-  const todayPurchases = sumInRange(purchaseOrders, today, today);
-  const yesterdayPurchases = sumInRange(purchaseOrders, yesterday, yesterday);
-
-  const revenue30 = sumInRange(sales, isoDate(daysAgoDate(29)), today);
-  const revenuePrev30 = sumInRange(sales, isoDate(daysAgoDate(59)), isoDate(daysAgoDate(30)));
-  const spend30 = sumInRange(purchaseOrders, isoDate(daysAgoDate(29)), today);
-  const spendPrev30 = sumInRange(purchaseOrders, isoDate(daysAgoDate(59)), isoDate(daysAgoDate(30)));
-
-  const lowStockProducts = products.filter((p) => Number(p.min_stock) > 0 && Number(p.current_stock) <= Number(p.min_stock));
-  const inventoryValue = totalStockValue(products, stockLayers);
-  const totalReceivables = customers.reduce((t, c) => t + Number(c.balance || 0), 0);
-  const totalPayables = suppliers.reduce((t, s) => t + Number(s.balance || 0), 0);
-  const overdueCustomerCount = customers.filter((c) => Number(c.balance) > 0).length;
-  const payableSupplierCount = suppliers.filter((s) => Number(s.balance) > 0).length;
-
-  const salesChange = pctChange(todaySales, yesterdaySales);
-  const purchasesChange = pctChange(todayPurchases, yesterdayPurchases);
-  const revenueChange = pctChange(revenue30, revenuePrev30);
-  const spendChange = pctChange(spend30, spendPrev30);
-
-  // Indian grouping (8,77,964 — not 905,934). Every other screen already formats money this
-  // way; the dashboard was calling toLocaleString() with no locale and following the browser.
-  const money = (value: number) => Math.round(Number(value) || 0).toLocaleString('en-IN');
-
-  const kpis = [
-    { title: "Today's Sales", value: `₹${money(todaySales)}`, change: salesChange.label, context: 'vs yesterday', positive: salesChange.positive, icon: ShoppingCart, color: 'var(--chart-amber)', colorBg: 'var(--amber-tint)' },
-    { title: "Today's Purchases", value: `₹${money(todayPurchases)}`, change: purchasesChange.label, context: 'vs yesterday', positive: purchasesChange.positive, icon: ShoppingBag, color: 'var(--chart-blue)', colorBg: 'var(--color-info-bg)' },
-    { title: 'Revenue (30 Days)', value: `₹${money(revenue30)}`, change: revenueChange.label, context: 'vs prior 30 days', positive: revenueChange.positive, icon: TrendingUp, color: 'var(--chart-green)', colorBg: 'var(--em-tint)' },
-    { title: 'Purchase Spend (30 Days)', value: `₹${money(spend30)}`, change: spendChange.label, context: 'vs prior 30 days', positive: spend30 <= spendPrev30, icon: ShoppingBag, color: 'var(--chart-violet)', colorBg: 'rgba(109,40,217,0.1)' },
-    { title: 'Inventory Value', value: `₹${money(inventoryValue)}`, change: `${products.length} parts`, context: 'at purchase-batch cost', positive: true, icon: PackageCheck, color: 'var(--chart-pink)', colorBg: 'rgba(190,24,93,0.1)' },
-    { title: 'Total Receivables', value: `₹${money(totalReceivables)}`, change: `${overdueCustomerCount} outstanding`, context: 'follow up soon', positive: overdueCustomerCount === 0, icon: Users, color: 'var(--chart-orange)', colorBg: 'rgba(194,65,12,0.1)' },
-    { title: 'Total Payables', value: `₹${money(totalPayables)}`, change: `${payableSupplierCount} outstanding`, context: 'to suppliers', positive: payableSupplierCount === 0, icon: Clock, color: 'var(--chart-teal)', colorBg: 'rgba(14,116,144,0.1)' },
-    { title: 'Low Stock Items', value: `${lowStockProducts.length} parts`, change: lowStockProducts.length > 0 ? 'Action required' : 'All stocked', context: `${lowStockProducts.length} at or below minimum`, positive: lowStockProducts.length === 0, icon: AlertTriangle, color: 'var(--chart-red)', colorBg: 'var(--rose-tint)' },
-  ];
-
-  // ── "Needs attention" ────────────────────────────────────────────────────────────────────
-  // Every item below is counted off rows this page has already loaded. Nothing here is
-  // estimated: there is no payment-terms or due-date column anywhere in this system, so an
-  // unpaid bill is described by how long it has been unpaid rather than as "past due", and the
-  // mockup's GST filing reminder is left out entirely because no filing dates are stored.
-  const unpaidAgeCutoff = isoDate(daysAgoDate(30));
-  const agedUnpaidInvoices = invoices
-    .filter((inv) => isInvoiceOpen(inv) && inv.date < unpaidAgeCutoff)
-    .sort((a, b) => a.date.localeCompare(b.date));
-  const agedUnpaidAmount = agedUnpaidInvoices.reduce((t, inv) => t + invoiceBalanceDue(inv), 0);
-  const agedUnpaidCustomers = Array.from(new Set(agedUnpaidInvoices.map((inv) => inv.customer).filter(Boolean)));
-  const outOfStockProducts = products.filter((p) => Number(p.current_stock || 0) <= 0);
-  // Parts that still have stock but have fallen to or under their own reorder level. Split out
-  // from the empty ones so a single part is never counted in two attention cards at once.
-  const reorderProducts = lowStockProducts.filter((p) => Number(p.current_stock || 0) > 0);
-  const largestPayable = suppliers
-    .filter((s) => Number(s.balance || 0) > 0)
-    .sort((a, b) => Number(b.balance || 0) - Number(a.balance || 0))[0];
+  const soldToday = invoices
+    .filter((invoice) => isCountedSale(invoice) && invoice.date === today)
+    .reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
+  // Only what is actually owed. A balance below zero is money paid in advance, and adding it in
+  // would show a supplier advance as "₹-4,000 to pay".
+  const owed = (balance: number) => Math.max(0, Number(balance || 0));
+  const ahead = (balance: number) => Math.max(0, -Number(balance || 0));
+  const toCollect = customers.reduce((sum, customer) => sum + owed(customer.balance), 0);
+  const toPay = suppliers.reduce((sum, supplier) => sum + owed(supplier.balance), 0);
+  const paidAheadToSuppliers = suppliers.reduce((sum, supplier) => sum + ahead(supplier.balance), 0);
+  const paidAheadByCustomers = customers.reduce((sum, customer) => sum + ahead(customer.balance), 0);
+  const owingCustomers = customers.filter((customer) => Number(customer.balance) > 0).length;
+  const owedSuppliers = suppliers.filter((supplier) => Number(supplier.balance) > 0).length;
+  const lowStock = products.filter((p) => Number(p.min_stock) > 0 && Number(p.current_stock) <= Number(p.min_stock));
 
   const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
   const nameList = (names: string[], shown = 2) =>
     names.length <= shown ? names.join(', ') : `${names.slice(0, shown).join(', ')} and ${names.length - shown} more`;
 
+  const figures = [
+    { label: 'Sold today', value: `₹${wholeMoney(soldToday)}`, note: 'Bills written today', href: '/daybook', tone: '' },
+    {
+      label: 'To collect',
+      value: `₹${wholeMoney(toCollect)}`,
+      note: owingCustomers > 0
+        ? `${plural(owingCustomers, 'customer')} ${owingCustomers === 1 ? 'owes' : 'owe'} you`
+        : paidAheadByCustomers > 0 ? `Nobody owes you · ₹${wholeMoney(paidAheadByCustomers)} paid ahead` : 'Nobody owes you',
+      href: '/customers',
+      tone: toCollect > 0 ? 'warn' : '',
+    },
+    {
+      label: 'To pay',
+      value: `₹${wholeMoney(toPay)}`,
+      note: owedSuppliers > 0
+        ? `You owe ${plural(owedSuppliers, 'supplier')}`
+        : paidAheadToSuppliers > 0 ? `You owe nobody · ₹${wholeMoney(paidAheadToSuppliers)} paid ahead` : 'You owe nobody',
+      href: '/suppliers',
+      tone: '',
+    },
+    { label: 'To reorder', value: plural(lowStock.length, 'part'), note: 'At or below their reorder level', href: '/stock-planning', tone: lowStock.length > 0 ? 'bad' : '' },
+  ];
+
+  // ── Needs attention ─────────────────────────────────────────────────────────────────────────
+  // Every item is counted off rows this page has already loaded. Nothing is estimated: there is no
+  // due date anywhere in this system, so an unpaid bill is described by how long it has been unpaid.
+  const unpaidAgeCutoff = daysAgo(30);
+  const oldUnpaid = invoices
+    .filter((invoice) => isInvoiceOpen(invoice) && invoice.date < unpaidAgeCutoff)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const oldUnpaidAmount = oldUnpaid.reduce((sum, invoice) => sum + invoiceBalanceDue(invoice), 0);
+  const oldUnpaidCustomers = Array.from(new Set(oldUnpaid.map((invoice) => invoice.customer).filter(Boolean)));
+  const outOfStock = products.filter((p) => Number(p.current_stock || 0) <= 0);
+  // Parts that still have some stock but have fallen to their own reorder level. Kept apart from the
+  // empty ones so a part is never counted in two items at once.
+  const runningLow = lowStock.filter((p) => Number(p.current_stock || 0) > 0);
+
   const attentionItems = [
-    agedUnpaidInvoices.length > 0
+    oldUnpaid.length > 0
       ? {
           key: 'unpaid-invoices',
           tone: 'danger',
-          severity: 'Urgent',
           icon: Clock,
-          title: `${plural(agedUnpaidInvoices.length, 'invoice')} unpaid for more than 30 days`,
-          detail: `₹${money(agedUnpaidAmount)} still to collect from ${nameList(agedUnpaidCustomers)} · oldest is #${agedUnpaidInvoices[0].id} dated ${agedUnpaidInvoices[0].date}`,
+          title: `${plural(oldUnpaid.length, 'bill')} unpaid for more than 30 days`,
+          detail: `₹${wholeMoney(oldUnpaidAmount)} to collect from ${nameList(oldUnpaidCustomers)}`,
           href: '/customers',
-          action: 'Follow up',
+          action: 'Collect',
         }
       : null,
-    outOfStockProducts.length > 0
+    outOfStock.length > 0
       ? {
           key: 'out-of-stock',
           tone: 'danger',
-          severity: 'Urgent',
           icon: PackageX,
-          title: `${plural(outOfStockProducts.length, 'part')} out of stock`,
-          detail: `Nothing on the shelf for ${nameList(outOfStockProducts.map((p) => `${p.name} (${p.part_number})`))}`,
-          href: '/purchases',
-          action: 'Reorder',
-        }
-      : null,
-    reorderProducts.length > 0
-      ? {
-          key: 'below-reorder',
-          tone: 'warning',
-          severity: 'Warning',
-          icon: AlertTriangle,
-          title: `${plural(reorderProducts.length, 'part')} at or below reorder level`,
-          detail: nameList(reorderProducts.map((p) => `${p.name} — ${p.current_stock} left of min ${p.min_stock}`)),
+          title: `${plural(outOfStock.length, 'part')} out of stock`,
+          detail: `None left of ${nameList(outOfStock.map((p) => p.name))}`,
           href: '/inventory',
-          action: 'Review',
+          action: 'See parts',
         }
       : null,
-    totalPayables > 0 && payableSupplierCount > 0
+    runningLow.length > 0
       ? {
-          key: 'payables',
-          tone: 'info',
-          severity: 'Outstanding',
-          icon: Wallet,
-          title: `₹${money(totalPayables)} owed to ${plural(payableSupplierCount, 'supplier')}`,
-          detail: largestPayable
-            ? `Largest balance is ${largestPayable.name} at ₹${money(Number(largestPayable.balance || 0))}`
-            : 'Supplier balances carried forward on the purchases ledger',
-          href: '/suppliers',
-          action: 'Ledger',
+          key: 'running-low',
+          tone: 'warning',
+          icon: AlertTriangle,
+          title: `${plural(runningLow.length, 'part')} running low`,
+          detail: nameList(runningLow.map((p) => `${p.name}: ${p.current_stock} left`)),
+          href: '/stock-planning',
+          action: 'What to order',
         }
       : null,
   ].filter((item): item is NonNullable<typeof item> => item !== null);
 
-  /** One entry per record actually entered, keyed on the date written on it. Drafts are left
-   *  out on purpose: a parked sale is not a day's trading. */
+  /** One entry per record actually entered, keyed on the date written on it. */
   const activityEvents = useMemo<ActivityEvent[]>(() => [
     ...invoices.filter((inv) => inv.date).map((inv) => ({ day: inv.date, kind: 'sale' as const })),
     ...purchaseOrders.filter((po) => po.date).map((po) => ({ day: po.date, kind: 'purchase' as const })),
@@ -214,29 +185,26 @@ export default function DashboardPage() {
     ...quotations.filter((quote) => quote.date).map((quote) => ({ day: quote.date, kind: 'quotation' as const })),
   ], [invoices, purchaseOrders, expenses, quotations]);
 
-  const recentActivities = useMemo(() => {
-    const events: Array<{ date: string; title: string; desc: string; type: string }> = [];
-    for (const inv of invoices) events.push({ date: inv.date, title: `Invoice #${inv.id} generated`, desc: `${inv.customer} - ₹${money(Number(inv.total))}`, type: 'sale' });
-    for (const grn of grns) events.push({ date: grn.received_at.split(' ')[0] || grn.received_at, title: `Goods Received Note #${grn.id}`, desc: `${grn.supplier} - Ref ${grn.po_number}`, type: 'purchase' });
-    for (const po of purchaseOrders) events.push({ date: po.date, title: `Purchase Order #${po.id} sent`, desc: `${po.supplier} - ₹${money(Number(po.total))}`, type: 'purchase' });
-    for (const q of quotations) events.push({ date: q.date, title: `Quotation #${q.id}`, desc: `${q.customer} - ₹${money(Number(q.total))}`, type: 'quotation' });
-    for (const p of lowStockProducts) events.push({ date: today, title: 'Low Stock Alert', desc: `${p.name} (${p.part_number}) - ${p.current_stock} units left`, type: 'alert' });
-    return events.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
-  }, [invoices, grns, purchaseOrders, quotations, lowStockProducts, today]);
-
   return (
     <div>
       <div className="page-header">
         <div>
-          <span className="eyebrow">Today at a glance</span>
-          <h1 className="page-title">Owner Dashboard</h1>
-          <p className="page-subtitle">{headerSubline}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link href="/customers" className="btn btn-secondary"><IndianRupee size={16} /> Record Payment</Link>
-          <Link href="/sales" className="btn btn-primary"><Plus size={16} /> New Invoice</Link>
+          <h1 className="page-title">Home</h1>
+          <p className="page-subtitle">{[headerDate, activeCompany?.name].filter(Boolean).join(' · ')}</p>
         </div>
       </div>
+
+      <section className="home-actions" aria-labelledby="home-actions-heading">
+        <h2 id="home-actions-heading" className="home-heading">What do you want to do?</h2>
+        <div className="home-action-grid">
+          {HOME_ACTIONS.map(({ label, hint, href, icon: Icon, tone }) => (
+            <Link key={label} href={href} prefetch={false} className={`home-action home-action-${tone}`}>
+              <span className="home-action-icon"><Icon size={26} aria-hidden="true" /></span>
+              <span className="home-action-text"><strong>{label}</strong><small>{hint}</small></span>
+            </Link>
+          ))}
+        </div>
+      </section>
 
       {configError && (
         <div className="alert alert-danger mb-4" role="alert">
@@ -246,136 +214,49 @@ export default function DashboardPage() {
 
       {!configError && dataError && (
         <div className="alert alert-danger mb-4" role="alert">
-          Some of this company&apos;s records could not be loaded, so nothing below would be the
+          Some of this company&apos;s records could not be loaded, so the figures below would not be the
           whole picture — {dataError}
         </div>
       )}
 
       {!configError && !dataError && (
-      <>
-      <div className="kpi-grid">
-        {kpis.map((kpi) => {
-          const Icon = kpi.icon;
-          return (
-            <div key={kpi.title} className="kpi-card" style={{ '--kpi-color': kpi.color, '--kpi-color-bg': kpi.colorBg } as React.CSSProperties}>
-              <div className="flex justify-between items-center">
-                <span className="kpi-label">{kpi.title}</span>
-                <div className="kpi-icon-wrap"><Icon size={18} /></div>
-              </div>
-              <div className="kpi-value">{kpi.value}</div>
-              <div className={`kpi-change ${kpi.positive ? 'positive' : 'negative'}`}>
-                {kpi.positive ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-                <span>{kpi.change}</span>
-              </div>
-              <span className="kpi-context">{kpi.context}</span>
-            </div>
-          );
-        })}
-      </div>
+        <>
+          <div className="home-figures">
+            {figures.map((figure) => (
+              <Link key={figure.label} href={figure.href} prefetch={false} className={`home-figure${figure.tone ? ` ${figure.tone}` : ''}`}>
+                <span className="home-figure-label">{figure.label}</span>
+                <strong className="home-figure-value">{figure.value}</strong>
+                <small>{figure.note}</small>
+              </Link>
+            ))}
+          </div>
 
-      {attentionItems.length > 0 ? (
-        <section className="attention-section" aria-label="Needs attention">
-          <div className="attention-heading">
-            <div>
-              <span className="eyebrow">Needs attention</span>
-              <h2>{plural(attentionItems.length, 'open item')} to clear</h2>
-            </div>
-            <Link href="/reports" className="btn btn-secondary btn-sm">Open reports <ArrowRight size={14} /></Link>
-          </div>
-          <div className="attention-grid">
-            {attentionItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <div key={item.key} className={`attention-item ${item.tone}`}>
-                  <div>
-                    <div className={`badge badge-${item.tone}`}><Icon size={12} />{item.severity}</div>
-                    <p className="mt-1">{item.title}</p>
-                    <span>{item.detail}</span>
-                  </div>
-                  <Link href={item.href} className="btn btn-secondary btn-sm">{item.action} <ArrowRight size={14} /></Link>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ) : (
-        <div className="card mb-6">
-          <div className="card-header">
-            <div>
-              <h3 className="card-title">Needs attention</h3>
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Unpaid bills, empty shelves, reorder levels and supplier balances</p>
-            </div>
-          </div>
-          <div className="empty-state">
-            <p className="empty-state-title">Nothing needs attention right now</p>
-            <p className="empty-state-desc">No invoice has gone unpaid for more than 30 days, every part has stock on the shelf, and no supplier balance is outstanding.</p>
-          </div>
-        </div>
-      )}
-
-      {/* Full width, where the Sales vs Purchases chart used to sit beside Critical Low Stock. The
-          owner asked for the chart to go and for this card to be the big one. */}
-      <ActivityCalendar events={activityEvents} today={today} />
-
-      <div className="card mb-6">
-        <div className="card-header">
-          <div>
-            <h3 className="card-title">Critical Low Stock</h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Below their minimum stock threshold</p>
-          </div>
-          <span className="badge badge-danger">{lowStockProducts.length} items</span>
-        </div>
-        <div className="low-stock-list">
-          {lowStockProducts.length === 0 && <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No parts are below their minimum stock.</p>}
-          {lowStockProducts.map((product) => (
-            <div key={product.id} className="low-stock-item">
-              <div className="flex justify-between items-center mb-1">
-                <span style={{ fontWeight: 600, fontSize: '13px' }}>{product.name}</span>
-                <span className="badge badge-info">{product.category}</span>
+          <section className="card mb-6" aria-labelledby="home-attention-heading">
+            <h2 id="home-attention-heading" className="home-heading">Needs attention</h2>
+            {attentionItems.length === 0 ? (
+              <p className="text-muted">Nothing right now. No bill has been unpaid for more than 30 days and every part has stock.</p>
+            ) : (
+              <div className="home-attention-list">
+                {attentionItems.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <div key={item.key} className={`home-attention ${item.tone}`}>
+                      <span className="home-attention-icon"><Icon size={18} aria-hidden="true" /></span>
+                      <div className="home-attention-text">
+                        <strong>{item.title}</strong>
+                        <small>{item.detail}</small>
+                      </div>
+                      <Link href={item.href} prefetch={false} className="btn btn-secondary btn-sm">{item.action} <ArrowRight size={14} /></Link>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="flex justify-between items-center" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                <span>Code: {product.part_number} ({product.brand}) · Loc: {product.location}</span>
-                <span className="text-danger font-semibold">{product.current_stock} / min {product.min_stock}</span>
-              </div>
-              <span className="reorder-quantity">Recommended reorder: {Math.max(0, product.min_stock * 2 - product.current_stock)} units</span>
-            </div>
-          ))}
-        </div>
-        {lowStockProducts.length > 0 && (
-          <Link href="/purchases" className="btn btn-secondary btn-sm w-full mt-4" style={{ justifyContent: 'center' }}>
-            Review reorder PO for {lowStockProducts.length} critical part(s) <ArrowRight size={14} />
-          </Link>
-        )}
-      </div>
+            )}
+          </section>
 
-      <div className="card">
-        <div className="card-header">
-          <div>
-            <h3 className="card-title">Recent Activity</h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Latest sales, stock, and purchase events</p>
-          </div>
-          <Link href="/reports" className="btn btn-ghost btn-sm">View reports <ArrowRight size={14} /></Link>
-        </div>
-        <div className="table-wrap">
-          <table className="erp-table">
-            <thead><tr><th>Date</th><th>Activity</th><th>Details</th><th>Status</th></tr></thead>
-            <tbody>
-              {recentActivities.map((activity, index) => (
-                <tr key={`${activity.date}-${activity.title}-${index}`}>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{activity.date}</td>
-                  <td style={{ fontWeight: 600 }}>{activity.title}</td>
-                  <td style={{ color: 'var(--text-secondary)' }}>{activity.desc}</td>
-                  <td><span className={`badge ${activity.type === 'sale' ? 'badge-success' : activity.type === 'purchase' ? 'badge-info' : activity.type === 'alert' ? 'badge-danger' : 'badge-warning'}`}>{activity.type.toUpperCase()}</span></td>
-                </tr>
-              ))}
-              {recentActivities.length === 0 && (
-                <tr><td colSpan={4}><div className="empty-state"><p className="empty-state-title">No activity yet</p><p className="empty-state-desc">Sales, purchases, and stock events will appear here.</p></div></td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      </>
+          {/* Full width and big, as the owner asked for it. */}
+          <ActivityCalendar events={activityEvents} today={today} />
+        </>
       )}
     </div>
   );

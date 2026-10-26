@@ -7,21 +7,20 @@ An ERP web app for an auto spare parts trading business: inventory, sales, purch
 - **Frontend/Backend**: Next.js 16 (App Router) + React 19 + TypeScript, single Next.js server handling both UI and API routes.
 - **Database**: Supabase (managed Postgres). All data access happens server-side through Next.js API routes using a service-role key — the browser never talks to Supabase directly.
 - **Auth**: Supabase Auth (email/password, via `@supabase/ssr`) gates the whole app in `proxy.ts`. A valid login isn't enough on its own — it must also match an active row in `jde_users` (role: owner/manager/salesman/accountant/warehouse), which is how staff are actually granted access. See "Authentication" below.
-- **AI**: Google Gemini (`@google/genai`) powers the Business Insights and Stock Reorder Forecast features on `/analytics`. These degrade gracefully (a plain error message, not a crash) if no API key is configured or the free-tier quota is exhausted.
+- **AI**: Google Gemini (`@google/genai`) powers the Business Insights on Reports → AI Advice (`/analytics` now redirects there). These degrade gracefully (a plain error message, not a crash) if no API key is configured or the free-tier quota is exhausted.
 - **Adaptive-platform integration**: a bearer-authenticated, company-scoped, read-only API projects audited inventory and purchasing data without exposing the ERP's generic table routes. New companies are available automatically from the live ERP registry. See [docs/adaptive-platform-integration.md](docs/adaptive-platform-integration.md).
 
 ## Modules
 
 | Module | Route | What it does |
 |---|---|---|
-| Executive Dashboard | `/dashboard` | Real per-company KPIs (sales, purchases, receivables, payables, low stock), a sales-vs-purchases chart, and a recent activity feed — all computed live from your data, not sample numbers. |
-| Spare Parts Inventory | `/inventory` | Catalog with part number, OEM number, brand, category, pricing, stock levels. Supports bulk import from a CSV/Excel file with flexible column-header matching. |
+| Home | `/dashboard` | One big button for each everyday job (make a bill, money received, buy stock, pay a supplier, add an expense, find a part), four live figures (sold today, to collect, to pay, to reorder), what needs attention, and the activity calendar. |
+| Stock | `/inventory` | Catalog with part number, OEM number, brand, category, pricing, stock levels. Supports bulk import from a CSV/Excel file with flexible column-header matching. Called Stock in the menu; the address is unchanged. |
 | Sales | `/sales` | Quotations and invoices against your real customer and inventory data. |
 | Purchases | `/purchases` | Purchase orders and goods-received notes, with CSV/Excel/PDF/photo import (Gemini extracts line items from scanned documents). |
 | Customers / Suppliers | `/customers`, `/suppliers` | Directories with credit limits, GSTIN, and outstanding balances. |
 | Expenses | `/expenses` | Operational expense log by category. |
-| Reports | `/reports` | P&L, sales summary, stock valuation, and a GST summary (assumes 18% inclusive tax unless your figures say otherwise). |
-| Analytics | `/analytics` | AI-generated business insights and reorder recommendations, plus real stock-value rankings. |
+| Reports | `/reports` | Profit & Loss, profit by part, sales, stock value, GST, unpaid bills, and AI Advice (AI business insights, the parts holding the most money, stock value by category). `/analytics` redirects to AI Advice. |
 | Settings | `/settings` | **Owner only.** Company management (create/switch/delete companies — each company's data is fully isolated), inviting/managing user roles, and local backup snapshots. |
 
 ## Multi-Company Data Isolation

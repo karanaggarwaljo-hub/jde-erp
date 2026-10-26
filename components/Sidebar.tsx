@@ -9,7 +9,7 @@ import {
   footerItems,
   isCurrentScreen,
   isMenu,
-  navGroups,
+  navItems,
   type NavItem,
   type NavMenu,
 } from '@/components/sidebar-nav';
@@ -105,19 +105,17 @@ export default function Sidebar({ mobileOpen = false, onNavigate }: SidebarProps
         </div>
       </div>
 
+      {/* One plain list, no headings: the owner asked for a menu a school child could use. */}
       <nav className="sidebar-nav" aria-label="Main">
-        {navGroups.map((group) => (
-          <div key={group.label} className="sidebar-group">
-            <div className="sidebar-section-label">{group.label}</div>
-            {group.items.map((entry) =>
-              isMenu(entry) ? (
-                <NavMenuRow key={entry.name} menu={entry} pathname={pathname} onNavigate={onNavigate} />
-              ) : (
-                <NavLink key={entry.href} {...entry} pathname={pathname} onNavigate={onNavigate} />
-              )
-            )}
-          </div>
-        ))}
+        <div className="sidebar-group">
+          {navItems.map((entry) =>
+            isMenu(entry) ? (
+              <NavMenuRow key={entry.name} menu={entry} pathname={pathname} onNavigate={onNavigate} />
+            ) : (
+              <NavLink key={entry.href} {...entry} pathname={pathname} onNavigate={onNavigate} />
+            )
+          )}
+        </div>
       </nav>
 
       <div className="sidebar-footer">

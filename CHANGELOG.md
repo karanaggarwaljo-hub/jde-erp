@@ -2,6 +2,67 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-26 — A simpler ERP: big buttons on Home, a short menu, plain words
+
+You said the ERP had become cluttered and asked for it to be easy enough for a school child. Nothing
+was removed that you use: every screen is still there, every figure is still worked out the same
+way, and no record was changed. Things were moved and renamed so the common jobs are obvious.
+
+**Home (the first screen)**
+- Opens with six big buttons: **Make a bill, Money received, Buy stock, Pay a supplier, Add an
+  expense, Find a part.** The first five open their form straight away and bring you back to Home
+  once you save. Find a part opens Stock with the cursor already in the search box.
+- Below the buttons are four figures: **Sold today, To collect, To pay, To reorder.** Click one to
+  open the screen behind it. To collect and To pay count only money actually owed; an advance paid
+  is shown on its own line, not as "₹-4,000".
+- Then **Needs attention** (bills unpaid for over 30 days, parts out of stock, parts running low),
+  then your activity calendar, kept big as you asked.
+- The eight number boxes, the long low-stock list and the recent-activity table are gone. The
+  low-stock list is still on Stock and What to Order, and the day's activity is in the Day Book.
+
+**The side menu**
+- One short list, no headings and nothing to open: Home, Day Book, Sales, Purchases, Expenses,
+  Stock, Customers, Suppliers, Reports.
+- The screens used now and then are together under **More**: Job Cards, Bills & Invoices, Cheques,
+  What to Order, Log Book, Website Catalog. More opens by itself when you are on one of them.
+- Rows are a little bigger and easier to click.
+- **Inventory is now called Stock**, and **Stock Planning is now What to Order**. Messages that
+  mentioned "Inventory" now say "Stock". The web addresses are unchanged, so old bookmarks work.
+
+**Every screen**
+- The three to five big number boxes at the top of Stock, Sales, Purchases, Expenses, Customers,
+  Suppliers, the Day Book and Supplier Bills are now **one short line under the title**, with the
+  same numbers. Point at a number to see how it is worked out. The warning strips that repeated
+  those numbers are gone.
+- Small grey labels above titles ("ACCOUNTS RECEIVABLE", "PROCUREMENT", "STOCK CONTROL" and so on)
+  are gone, and titles are plain: "Sales Management" is now Sales, "Expense Management" is
+  Expenses, "Supplier & Vendor Directory" is Suppliers, "System Settings & Administration" is
+  Settings.
+- The same words are used everywhere a job starts: Make a bill, Money received, Buy stock, Pay a
+  supplier, Add an expense. The Day Book's buttons use them too. On Purchases, "Import from File"
+  is now **Scan a bill**. On Sales, the "Credit Notes" tab is now **Returns**. On Suppliers, "Pay
+  Vendor" is now **Pay**.
+- On Customers, the "Collections to review" box is now called **Who owes you money**, and it only
+  appears when somebody does.
+
+**Rows with fewer icons**
+- A bill on Sales used to end in up to seven small icons. It now shows **View** and **Print**, plus a
+  **⋯** button that lists the rest in words: Edit, Return goods, Open the saved PDF, Cancel this bill,
+  Delete. If one of them can't be used, it is greyed out and says why (for example "Goods were
+  returned against it").
+- A part on Stock shows **Edit** and **Photo**. Merge with a duplicate and Delete are under **⋯**.
+- Stock's title row has one button, **Add a part**. Part photos, Import from a file and Download
+  parts worksheet are under **More**.
+
+**Analytics is now a tab on Reports**
+- As you chose, Analytics is no longer a screen of its own. Reports has a new **AI Advice** tab with
+  the AI business insights, the five parts holding the most money, and stock value by category.
+- The AI reorder box was dropped: What to Order already does that job, from your real sales.
+- Reports tabs have plainer names: Sales, Stock Value, GST, **Unpaid Bills** (was "Aging"), AI
+  Advice. Inside Unpaid Bills, "Receivables Aging" is now "Customers who owe you" and "Payables Aging"
+  is "Suppliers you owe".
+- The old Analytics address opens Reports on AI Advice.
+
 ## 2026-10-26 — Fixes from the full operation audit
 
 An audit of every part of the ERP found 22 real bugs. None had damaged the real company's data yet:

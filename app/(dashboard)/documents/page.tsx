@@ -78,9 +78,8 @@ export default function DocumentsPage() {
     <div>
       <div className="page-header">
         <div>
-          <div className="eyebrow">Transactions</div>
           <h1 className="page-title">Bills &amp; Invoices</h1>
-          <p className="page-subtitle">Every invoice you have issued and every supplier bill you have uploaded, to open, print or download.</p>
+          <p className="page-subtitle">Every bill you gave and every supplier bill you kept, to open, print or download.</p>
         </div>
       </div>
 

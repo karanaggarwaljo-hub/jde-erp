@@ -2,7 +2,8 @@
 
 import { Fragment, useState } from 'react';
 import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
-import { Plus, Sparkles, IndianRupee, PieChart, Receipt, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Sparkles, Receipt, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import SummaryLine from '@/components/SummaryLine';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { createExpense } from '@/lib/client-expenses';
 import { useEntryIntent } from '@/lib/use-entry-intent';
@@ -154,65 +155,32 @@ export default function ExpensesPage() {
     <div>
       <div className="page-header">
         <div>
-          <div className="eyebrow">Operating costs</div>
-          <h1 className="page-title">Expense Management</h1>
-          <p className="page-subtitle">Log operational costs, freight, salaries, rent &amp; utility expenditures</p>
+          <h1 className="page-title">Expenses</h1>
+          {/* The headline figures, as one line where three number boxes used to be. Every expense on
+              file is loaded, not a date range, so nothing here claims to be a month or a trend. */}
+          {expenses.length > 0 ? (
+            <SummaryLine facts={[
+              { value: String(expenses.length), label: expenses.length === 1 ? 'expense' : 'expenses', hint: categoryTotals.size > 0 ? `Across ${categoryTotals.size} ${categoryTotals.size === 1 ? 'category' : 'categories'}` : undefined },
+              { value: `₹${totalExpense.toLocaleString('en-IN')}`, label: 'spent', hint: 'Every expense on file for this company' },
+              ...(largestCategory ? [{ value: categoryLabel(largestCategory[0]), label: 'is the biggest', hint: `₹${largestCategory[1].toLocaleString('en-IN')} of ₹${totalExpense.toLocaleString('en-IN')}` }] : []),
+            ]} />
+          ) : (
+            <p className="page-subtitle">Money spent on running the shop: rent, salary, freight, electricity</p>
+          )}
         </div>
         <button className="btn btn-primary" onClick={() => { setCategorizeFailed(false); setShowModal(true); }}>
-          <Plus size={16} /> Log New Expense
+          <Plus size={16} /> Add an expense
         </button>
       </div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
 
-      {/* Headline figures, each one summed from the entries this page already loaded. The page
-          loads every expense on file for the company — not a date range — so nothing here claims
-          to be a month, a period or a trend. */}
-      {expenses.length > 0 && (
-        <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-          <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-red)', '--kpi-color-bg': 'var(--rose-tint)' } as React.CSSProperties}>
-            <div className="flex justify-between items-center">
-              <span className="kpi-label">Total logged</span>
-              <div className="kpi-icon-wrap"><IndianRupee size={18} /></div>
-            </div>
-            <div className="kpi-value">₹{totalExpense.toLocaleString()}</div>
-            <span className="kpi-context">Every expense on file for this company</span>
-          </div>
-
-          <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-violet)', '--kpi-color-bg': 'var(--panel-2)' } as React.CSSProperties}>
-            <div className="flex justify-between items-center">
-              <span className="kpi-label">Largest category</span>
-              <div className="kpi-icon-wrap"><PieChart size={18} /></div>
-            </div>
-            <div className="kpi-value" style={{ fontSize: '18px' }}>{largestCategory ? categoryLabel(largestCategory[0]) : '—'}</div>
-            <span className="kpi-context">
-              {largestCategory
-                ? `₹${largestCategory[1].toLocaleString()} of ₹${totalExpense.toLocaleString()} logged`
-                : 'No expenses logged yet'}
-            </span>
-          </div>
-
-          <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-blue)', '--kpi-color-bg': 'var(--color-info-bg)' } as React.CSSProperties}>
-            <div className="flex justify-between items-center">
-              <span className="kpi-label">Log entries</span>
-              <div className="kpi-icon-wrap"><Receipt size={18} /></div>
-            </div>
-            <div className="kpi-value">{expenses.length}</div>
-            <span className="kpi-context">
-              {categoryTotals.size > 0
-                ? `Across ${categoryTotals.size} ${categoryTotals.size === 1 ? 'category' : 'categories'}`
-                : 'No category recorded yet'}
-            </span>
-          </div>
-        </div>
-      )}
-
       {/* Expenses Table */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div className="tbl-toolbar">
           <div className="tbl-toolbar-title">
-            <strong>Expense log</strong>
-            <small>Every operational cost recorded for this company</small>
+            <strong>All expenses</strong>
+            <small>Every expense recorded for this company</small>
           </div>
           {presentCategories.length > 1 && (
             <div className="tbl-tools">

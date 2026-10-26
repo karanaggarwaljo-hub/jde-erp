@@ -199,8 +199,7 @@ export default function StockPlanning() {
       <div className="req-screen">
         <div className="page-header">
           <div>
-            <div className="eyebrow">Stock</div>
-            <h1 className="page-title">Stock Planning</h1>
+            <h1 className="page-title">What to Order</h1>
             <p className="page-subtitle">Make a requirement sheet: what to order, how many, and from whom. Then print it, send it on WhatsApp, or turn it into a purchase.</p>
           </div>
         </div>

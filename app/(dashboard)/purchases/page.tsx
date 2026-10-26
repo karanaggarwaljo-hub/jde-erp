@@ -7,22 +7,19 @@ import MoneyPicker from '@/components/money/MoneyPicker';
 import { PURCHASE_DRAFT_KEY, type PurchaseDraft } from '@/components/StockPlanning';
 import type { MoneyChoice } from '@/lib/money-book';
 import { useEntryIntent } from '@/lib/use-entry-intent';
+import SummaryLine, { type SummaryFact } from '@/components/SummaryLine';
 import {
   Plus,
   Upload,
   Undo2,
   Receipt,
   Wallet,
-  Truck,
-  Building2,
   PackageCheck,
-  AlertTriangle,
   CheckCircle2,
   Clock,
   Search,
   ChevronLeft,
   ChevronRight,
-  ArrowRight,
 } from 'lucide-react';
 import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_ACCEPT, isSpreadsheetFileName, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
 import { matchImportedLine, normalizeImportText, planFieldUpdates, type MatchableProduct } from '@/lib/import-matching';
@@ -350,7 +347,7 @@ export default function PurchasesPage() {
       setReturnError(`Cannot find ${returningOrder.supplier} in the supplier directory. Add or correct the supplier before returning stock.`);
       return;
     }
-    if (!window.confirm(`Record this supplier return for ₹${returnTotal.toLocaleString()}? Inventory will decrease and the supplier payable will decrease in the same transaction.`)) return;
+    if (!window.confirm(`Record this supplier return for ₹${returnTotal.toLocaleString()}? Stock will go down and the supplier payable will decrease in the same transaction.`)) return;
 
     setReturnError('');
     setSavingReturn(true);
@@ -528,7 +525,7 @@ export default function PurchasesPage() {
       setActiveTab('purchases');
       finishEntry();
     } catch (error) {
-      setPurchaseError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Inventory before retrying.');
+      setPurchaseError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Stock before retrying.');
     } finally {
       setSavingPurchase(false);
     }
@@ -760,14 +757,14 @@ export default function PurchasesPage() {
       await Promise.all([reloadPurchaseOrders(), reloadPoItems(), reloadGrns(), reloadSuppliers(), reloadProducts()]);
 
       const enrichedNote = enriched > 0 ? ` Filled in missing details on ${enriched} existing part${enriched === 1 ? '' : 's'}.` : '';
-      const failureNote = enrichFailures > 0 ? ` ${enrichFailures} part${enrichFailures === 1 ? '' : 's'} could not be updated — check them in Inventory.` : '';
+      const failureNote = enrichFailures > 0 ? ` ${enrichFailures} part${enrichFailures === 1 ? '' : 's'} could not be updated — check them in Stock.` : '';
       setFeedback(`${po.id} recorded from ${importPreview.fileName} — ${items.length} item(s), ₹${importedTotal.toLocaleString()} from ${supplierRow.name}.${enrichedNote}${failureNote}`);
       setImportPreview(null);
       setImportLinks({});
       setActiveTab('purchases');
       finishEntry();
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Inventory before retrying.');
+      setImportError(error instanceof Error ? error.message : 'Failed to record this purchase — please check Purchases and Stock before retrying.');
     } finally {
       setConfirmingImport(false);
     }
@@ -807,9 +804,36 @@ export default function PurchasesPage() {
   const orderDates = purchaseOrders.map((po) => po.date).filter((date) => typeof date === 'string' && ISO_DATE.test(date)).sort();
   const dateRangeLabel = orderDates.length > 0 ? `${formatDay(orderDates[0])} – ${formatDay(orderDates[orderDates.length - 1])}` : null;
 
-  const ledgerSummary = purchaseOrders.length > 0
-    ? ` · ${purchaseOrders.length} ${purchaseOrders.length === 1 ? 'order' : 'orders'}${supplierNames.size > 0 ? ` from ${supplierNames.size} ${supplierNames.size === 1 ? 'supplier' : 'suppliers'}` : ''}`
-    : '';
+  // The headline figures, as one line under the title where four number boxes and a warning strip
+  // used to be. What each box explained in small print is kept as the figure's hint.
+  const summaryFacts: SummaryFact[] = purchaseOrders.length === 0 ? [] : [
+    {
+      value: String(purchaseOrders.length),
+      label: purchaseOrders.length === 1 ? 'purchase' : 'purchases',
+      hint: [
+        supplierNames.size > 0 ? `From ${supplierNames.size} ${supplierNames.size === 1 ? 'supplier' : 'suppliers'}` : '',
+        topSupplier ? `most from ${topSupplier[0]} (₹${wholeMoney(topSupplier[1])})` : '',
+        dateRangeLabel ?? '',
+      ].filter(Boolean).join(', '),
+    },
+    { value: `₹${wholeMoney(totalPurchased)}`, label: 'bought' },
+    {
+      value: `₹${wholeMoney(payable)}`,
+      label: 'to pay',
+      tone: payable > 0 ? 'warn' : 'good',
+      hint: payable > 0
+        ? `Still owing on ${unpaidOrders.length} of ${purchaseOrders.length} ${purchaseOrders.length === 1 ? 'order' : 'orders'}`
+        : `₹${wholeMoney(totalPaidToSuppliers)} paid across every order on file`,
+    },
+    ...(pendingOrders.length > 0
+      ? [{
+          value: String(pendingOrders.length),
+          label: 'not yet arrived',
+          tone: overdueOrders.length > 0 ? 'bad' as const : 'warn' as const,
+          hint: `${pendingOrders.length} ${pendingOrders.length === 1 ? 'order' : 'orders'} worth ₹${wholeMoney(pendingValue)} not yet marked received${overdueOrders.length > 0 ? `; ${overdueOrders.length} past the expected date` : ''}`,
+        }]
+      : []),
+  ];
 
   /* ── Table view: search, status tabs, paging. All of it filters rows already in memory. ── */
   const searchTerm = orderSearch.trim().toLowerCase();
@@ -843,7 +867,6 @@ export default function PurchasesPage() {
   const pageTotal = pagedOrders.reduce((sum, po) => sum + Number(po.total || 0), 0);
   const pagePaid = pagedOrders.reduce((sum, po) => sum + Number(po.paid || 0), 0);
 
-  const awaitingSentence = `${pendingOrders.length} ${pendingOrders.length === 1 ? 'order' : 'orders'} worth ₹${wholeMoney(pendingValue)} ${pendingOrders.length === 1 ? 'is' : 'are'} still awaiting delivery${overdueOrders.length > 0 ? `, and ${overdueOrders.length} ${overdueOrders.length === 1 ? 'is' : 'are'} past the expected date on the order` : ''}.`;
 
   const importedPreviewTotal = importPreview ? importPreview.lines.reduce((sum, line) => sum + line.quantity * line.unit_price, 0) : 0;
   const importPaidAmount = amountReceived(importPaymentStatus, importedPreviewTotal, importAmountPaid);
@@ -852,118 +875,29 @@ export default function PurchasesPage() {
     <div>
       <div className="page-header">
         <div>
-          <div className="eyebrow">Procurement</div>
           <h1 className="page-title">Purchases</h1>
-          <p className="page-subtitle">Record what you bought — stock and what you owe the supplier update immediately{ledgerSummary}</p>
+          {summaryFacts.length > 0
+            ? <SummaryLine facts={summaryFacts} />
+            : <p className="page-subtitle">Stock you bought. Stock and what you owe the supplier change as soon as it is saved.</p>}
         </div>
         <div className="flex gap-2">
-          <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
-            <Upload size={16} /> {importing ? 'Reading file…' : 'Import from File'}
+          <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }} title="Read a supplier's bill from a photo, PDF or spreadsheet">
+            <Upload size={16} /> {importing ? 'Reading the bill…' : 'Scan a bill'}
             <input type="file" accept={`${SPREADSHEET_ACCEPT},.pdf,image/*`} hidden disabled={importing} onChange={handleImportFile} />
           </label>
-          <button className="btn btn-primary" onClick={openPurchaseModal}><Plus size={16} /> Record Purchase</button>
+          <button className="btn btn-primary" onClick={openPurchaseModal}><Plus size={16} /> Buy stock</button>
         </div>
       </div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
       {importError && <div className="alert alert-danger mb-4" role="alert">{importError}</div>}
 
-      <div className="kpi-grid">
-        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
-          <div className="flex justify-between items-center">
-            <span className="kpi-label">Total Purchased</span>
-            <div className="kpi-icon-wrap"><Receipt size={18} /></div>
-          </div>
-          <div className="kpi-value">₹{wholeMoney(totalPurchased)}</div>
-          <span className="kpi-context">
-            {purchaseOrders.length === 0
-              ? 'No purchases recorded yet'
-              : `Across ${purchaseOrders.length} ${purchaseOrders.length === 1 ? 'order' : 'orders'} on file${dateRangeLabel ? ` · ${dateRangeLabel}` : ''}`}
-          </span>
-        </div>
-
-        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-red)', '--kpi-color-bg': 'var(--rose-tint)' } as React.CSSProperties}>
-          <div className="flex justify-between items-center">
-            <span className="kpi-label">Payable</span>
-            <div className="kpi-icon-wrap"><Wallet size={18} /></div>
-          </div>
-          <div className="kpi-value">₹{wholeMoney(payable)}</div>
-          {purchaseOrders.length > 0 && (
-            <div className={`kpi-change ${payable > 0 ? 'negative' : 'positive'}`}>
-              {payable > 0 ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
-              <span>{payable > 0 ? 'Owed to suppliers' : 'All settled'}</span>
-            </div>
-          )}
-          <span className="kpi-context">
-            {purchaseOrders.length === 0
-              ? 'Nothing owed — no purchase orders on file'
-              : payable > 0
-                ? `Still owing on ${unpaidOrders.length} of ${purchaseOrders.length} ${purchaseOrders.length === 1 ? 'order' : 'orders'}`
-                : `₹${wholeMoney(totalPaidToSuppliers)} paid across every order on file`}
-          </span>
-        </div>
-
-        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
-          <div className="flex justify-between items-center">
-            <span className="kpi-label">Awaiting Delivery</span>
-            <div className="kpi-icon-wrap"><Truck size={18} /></div>
-          </div>
-          <div className="kpi-value">{pendingOrders.length}</div>
-          {purchaseOrders.length > 0 && (
-            <div className={`kpi-change${overdueOrders.length > 0 ? ' negative' : pendingOrders.length === 0 ? ' positive' : ''}`}>
-              {overdueOrders.length > 0 ? <AlertTriangle size={14} /> : pendingOrders.length === 0 ? <CheckCircle2 size={14} /> : <Clock size={14} />}
-              <span>
-                {overdueOrders.length > 0
-                  ? `${overdueOrders.length} past the expected date`
-                  : pendingOrders.length === 0 ? 'All received' : 'Not yet marked received'}
-              </span>
-            </div>
-          )}
-          <span className="kpi-context">
-            {purchaseOrders.length === 0
-              ? 'No purchase orders on file yet'
-              : pendingOrders.length > 0
-                ? `₹${wholeMoney(pendingValue)} of orders not yet marked received`
-                : 'Every order on file has been received into stock'}
-          </span>
-        </div>
-
-        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-blue)', '--kpi-color-bg': 'var(--color-info-bg)' } as React.CSSProperties}>
-          <div className="flex justify-between items-center">
-            <span className="kpi-label">Suppliers Bought From</span>
-            <div className="kpi-icon-wrap"><Building2 size={18} /></div>
-          </div>
-          <div className="kpi-value">{supplierNames.size}</div>
-          <span className="kpi-context">
-            {topSupplier
-              ? `Most spend: ${topSupplier[0]} · ₹${wholeMoney(topSupplier[1])}`
-              : suppliers.length > 0
-                ? `${suppliers.length} in the supplier directory, none purchased from yet`
-                : 'No suppliers on file yet'}
-          </span>
-        </div>
-      </div>
-
-      {pendingOrders.length > 0 && (
-        <div className="alert alert-warning mb-4" role="status">
-          <Truck size={16} style={{ flex: 'none' }} />
-          <span>{awaitingSentence}</span>
-          <button
-            type="button"
-            className="alert-action"
-            onClick={() => { setActiveTab('purchases'); setOrderFilter('awaiting'); setPage(1); }}
-          >
-            Show awaiting <ArrowRight size={14} />
-          </button>
-        </div>
-      )}
-
       <div className="flex justify-between items-center gap-3 mb-6">
         <div className="tabs">
           <button className={`tab ${activeTab === 'purchases' ? 'active' : ''}`} onClick={() => setActiveTab('purchases')}>
             Purchases<span className="tab-count">{purchaseOrders.length}</span>
           </button>
-          <button className={`tab ${activeTab === 'invoices' ? 'active' : ''}`} onClick={() => setActiveTab('invoices')}>Supplier Invoices</button>
+          <button className={`tab ${activeTab === 'invoices' ? 'active' : ''}`} onClick={() => setActiveTab('invoices')}>Supplier Bills</button>
         </div>
         {dateRangeLabel && <span className="pager-info">Records on file: <strong>{dateRangeLabel}</strong></span>}
       </div>

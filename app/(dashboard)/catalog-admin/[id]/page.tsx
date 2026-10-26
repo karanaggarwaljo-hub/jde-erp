@@ -328,7 +328,7 @@ export default function CatalogAdminDetailPage() {
         <div>
           <Link href="/catalog-admin" className="btn btn-ghost btn-sm mb-2"><ArrowLeft size={14} /> Back to Website Catalog</Link>
           <h1 className="page-title">{row.title || '(untitled)'} <span className={`badge ${status.cls}`} style={{ marginLeft: '10px', verticalAlign: 'middle' }}>{status.label}</span></h1>
-          {product && <p className="page-subtitle">From Inventory: {product.current_stock} in stock, cost ₹{product.cost_price}</p>}
+          {product && <p className="page-subtitle">From Stock: {product.current_stock} in stock, cost ₹{product.cost_price}</p>}
         </div>
         {row.publication_status !== 'published' && (
           <button className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)' }} onClick={deleteDraft}>
@@ -529,20 +529,20 @@ export default function CatalogAdminDetailPage() {
           {publishReady && row.publication_status !== 'published' && drift.productMissing && (
             <div className="alert alert-danger" role="alert">
               <AlertTriangle size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
-              This part no longer exists in Inventory — publishing is disabled until that&apos;s resolved.
+              This part no longer exists in Stock — publishing is disabled until that&apos;s resolved.
             </div>
           )}
           {publishReady && row.publication_status !== 'published' && !drift.productMissing && driftBlocksPublish && (
             <div className="alert alert-warning" role="alert" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div>
                 <AlertTriangle size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
-                Inventory has changed since these were set — the ERP is the source of truth, so double-check before publishing:
+                Stock has changed since these were set — the ERP is the source of truth, so double-check before publishing:
                 <ul style={{ margin: '6px 0 0 20px' }}>
-                  {drift.priceDrift && <li>Inventory price is now ₹{drift.priceDrift.inventory} (this listing shows ₹{drift.priceDrift.catalog})</li>}
-                  {drift.availabilityDrift && <li>Inventory now shows {AVAILABILITY_LABEL[drift.availabilityDrift.inventory]} (this listing shows {AVAILABILITY_LABEL[drift.availabilityDrift.catalog]})</li>}
+                  {drift.priceDrift && <li>The price in Stock is now ₹{drift.priceDrift.inventory} (this listing shows ₹{drift.priceDrift.catalog})</li>}
+                  {drift.availabilityDrift && <li>Stock now shows {AVAILABILITY_LABEL[drift.availabilityDrift.inventory]} (this listing shows {AVAILABILITY_LABEL[drift.availabilityDrift.catalog]})</li>}
                 </ul>
               </div>
-              <button className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }} onClick={syncFromInventory}><RefreshCw size={14} /> Sync from Inventory</button>
+              <button className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start' }} onClick={syncFromInventory}><RefreshCw size={14} /> Sync from Stock</button>
             </div>
           )}
 
@@ -553,7 +553,7 @@ export default function CatalogAdminDetailPage() {
           <div className="flex gap-2 flex-wrap">
             {row.publication_status !== 'published' ? (
               driftBlocksPublish ? (
-                <button className="btn btn-primary" disabled={publishBusy || !publishReady || drift.productMissing} onClick={publish} title="Publishes with the values currently shown above, despite the Inventory mismatch">
+                <button className="btn btn-primary" disabled={publishBusy || !publishReady || drift.productMissing} onClick={publish} title="Publishes with the values currently shown above, despite the difference from Stock">
                   {publishBusy ? 'Publishing…' : 'Publish Anyway (Keep Current Values)'}
                 </button>
               ) : (

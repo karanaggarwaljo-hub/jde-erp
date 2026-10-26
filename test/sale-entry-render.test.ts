@@ -145,7 +145,7 @@ test('what this customer paid last time is on the line', () => {
 test('a one-off line renders without a catalogue part behind it', () => {
   const markup = renderForm([{ part: 'Fitting labour', qty: 1, price: 500, discount: 0 }]);
   assert.match(markup, /Fitting labour/);
-  assert.match(markup, /not in Inventory, so no stock moves/);
+  assert.match(markup, /not in Stock, so no stock moves/);
 });
 
 test('the keyboard shortcuts are stated on the form', () => {

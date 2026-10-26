@@ -232,9 +232,8 @@ export default function SettingsClient({ initialTab = 'users', driveOutcome = nu
   return <div>
     <div className="page-header">
       <div>
-        <div className="eyebrow">Administration</div>
-        <h1 className="page-title">System Settings &amp; Administration</h1>
-        <p className="page-subtitle">Configure company details, role permissions, Google Drive and backups{companySummary}</p>
+        <h1 className="page-title">Settings</h1>
+        <p className="page-subtitle">Your company details, who can use the ERP, Google Drive and backups{companySummary}</p>
       </div>
     </div>
 
