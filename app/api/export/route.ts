@@ -1,17 +1,17 @@
-import { listRows } from '@/lib/db';
+import { getRow, listRows } from '@/lib/db';
 import { resolveRequestCompanyId } from '@/lib/company-context';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
 import { AGE_BUCKETS, agingRows } from '@/lib/aging';
 import { filterToPeriod, formatPeriod, isAllTime, type Period } from '@/lib/report-period';
 import { stockValueLookup, totalStockValue, type StockLayerLike } from '@/lib/stock-value';
-import { costOfSales, grossProfit, gstPosition, type PeriodConsumption, type PeriodInvoiceItem } from '@/lib/period-accounts';
+import { costOfSales, grossProfit, gstPosition, outputTaxSplit, type PeriodConsumption, type PeriodInvoiceItem } from '@/lib/period-accounts';
 import { isCountedSale } from '@/lib/sales-types';
 
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; gst_amount: number | null; };
 type PurchaseOrder = { total: number; supplier: string; date: string; paid: number; status: string; gst_amount: number | null };
 type Expense = { amount: number; date: string };
 type Product = { id: string; category: string; current_stock: number; cost_price: number; sale_price: number };
-type Customer = { balance: number };
+type Customer = { balance: number; name?: string; gstin?: string | null };
 type Supplier = { balance: number };
 
 function toCsv(rows: Array<Array<string | number>>): string {
@@ -94,12 +94,18 @@ async function buildExport(type: string, period: Period): Promise<{ filename: st
     // Only what the documents record. This used to divide the totals by 1.18 and export the
     // difference as tax collected, whatever the invoices actually charged.
     const gst = gstPosition(invoices, purchaseOrders);
+    const company = (await getRow('companies', companyId ?? '')) as { gstin?: string | null; state_code?: string | null } | undefined;
+    const buyerGstins = new Map(customers.map((customer) => [String(customer.name ?? ''), customer.gstin ?? null]));
+    const split = outputTaxSplit(invoices, { gstin: company?.gstin, state_code: company?.state_code }, (name) => buyerGstins.get(name));
     return {
       filename: 'jde-gst-summary.csv',
       rows: [
         ['Metric', 'Amount'],
         ['Sales invoiced', Math.round(totalRevenue)],
         ['Output GST charged', gst.outputTax],
+        ['  of which IGST', split.igst],
+        ['  of which CGST', split.cgst],
+        [`  of which ${split.stateTaxName}`, split.stateTax],
         ['Input tax credit', gst.inputTax],
         ['Net GST payable', gst.netPayable],
         ['Invoices', gst.invoiceCount],
@@ -112,9 +118,13 @@ async function buildExport(type: string, period: Period): Promise<{ filename: st
 
   if (type === 'aging') {
     const today = new Date();
-    const receivables = agingRows(invoices.map((i) => ({ key: i.customer, date: i.date, due: invoiceBalanceDue(i) })), today);
+    // What is owed today, however long ago it was billed: like the screen, not cut to the chosen
+    // period, which dropped every older debt from the file (audit, October 2026).
+    const owedInvoices = ((await listRows('invoices', companyId)) as unknown as Invoice[]).filter(isCountedSale);
+    const owedPurchases = (await listRows('purchase_orders', companyId)) as unknown as PurchaseOrder[];
+    const receivables = agingRows(owedInvoices.map((i) => ({ key: i.customer, date: i.date, due: invoiceBalanceDue(i) })), today);
     const payables = agingRows(
-      purchaseOrders.filter((p) => p.status === 'received').map((p) => ({ key: p.supplier, date: p.date, due: Number(p.total) - Number(p.paid) })),
+      owedPurchases.filter((p) => p.status === 'received').map((p) => ({ key: p.supplier, date: p.date, due: Number(p.total) - Number(p.paid) })),
       today
     );
     return {
@@ -140,7 +150,9 @@ async function buildExport(type: string, period: Period): Promise<{ filename: st
     filename: 'jde-profit-and-loss.csv',
     rows: [
       ['Line Item', 'Amount'],
-      ['Total Sales Revenue', totalRevenue],
+      ['Sales (GST included)', totalRevenue],
+      ['Less: GST collected', profit ? -profit.gstCollected : notKnown],
+      ['Net Sales (before GST)', profit ? profit.netSales : notKnown],
       ['Cost of Goods Sold', cost.complete ? -cost.cost : notKnown],
       ['Gross Profit', profit ? profit.grossProfit : notKnown],
       ['Operating Expenses', -totalExpenses],

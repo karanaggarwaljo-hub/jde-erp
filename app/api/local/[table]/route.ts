@@ -1,7 +1,7 @@
-import { dbErrorMessage, insertRows, isCompanyScoped, isKnownTable, listRows, insertRow } from '@/lib/db';
+import { dbErrorMessage, insertRows, isCompanyScoped, isKnownTable, listRows, insertRow, openImportLayers } from '@/lib/db';
 import { resolveRequestCompanyId } from '@/lib/company-context';
 import { checkCompanyAccess, getCurrentUser } from '@/lib/auth/dal';
-import { refuseGenericWrite } from '@/lib/generic-write-guard';
+import { refuseGenericWrite, withOpeningBalance } from '@/lib/generic-write-guard';
 import { describeRow, recordAudit } from '@/lib/audit-log';
 import { describeCodeClashes, findCodeClashes } from '@/lib/import-part-codes';
 import { TABLES } from '@/lib/db/schema';
@@ -108,6 +108,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ tab
       }
 
       const created = await insertRows('products', scopedRows);
+      // Each imported stock figure becomes an opening batch, so FIFO cost has something to draw on.
+      await openImportLayers(verifiedCompanyId ?? '', created.map((row) => String(row.id)).filter(Boolean));
       await recordAudit({
         companyId: verifiedCompanyId ?? '', action: 'products.import', entity: 'products',
         summary: `Imported ${created.length} part${created.length === 1 ? '' : 's'} from a file`,
@@ -116,7 +118,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ tab
       return Response.json({ imported: created.length }, { status: 201 });
     }
 
-    const row = await insertRow(table, verifiedCompanyId ? { ...body, company_id: verifiedCompanyId } : body);
+    const row = await insertRow(table, withOpeningBalance(table, verifiedCompanyId ? { ...body, company_id: verifiedCompanyId } : body));
+    // A part created here with stock gets that stock as an opening batch, as an import does.
+    if (table === 'products' && verifiedCompanyId) await openImportLayers(verifiedCompanyId, [String(row.id)]);
     await recordAudit({
       companyId: verifiedCompanyId ?? String(row.id ?? ''), action: `${table}.create`, entity: table,
       entityId: String(row[TABLES[table].primaryKey] ?? ''),

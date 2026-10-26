@@ -1,6 +1,8 @@
 import { listRows } from '@/lib/db';
 import { resolveRequestCompanyId } from '@/lib/company-context';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
+import { isCountedSale } from '@/lib/sales-types';
+import { shopDay } from '@/lib/logbook';
 import { totalStockValue, type StockLayerLike } from '@/lib/stock-value';
 
 type Product = { id: string; name: string; part_number: string; brand: string; category: string; current_stock: number; min_stock: number; cost_price: number };
@@ -11,10 +13,9 @@ type Quotation = { status: string };
 type PurchaseOrder = { date: string; total: number; status: string };
 type Expense = { category: string; amount: number; date: string };
 
+/** The shop's date n days ago (India time), not the UTC one. */
 function daysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
+  return shopDay(new Date(Date.now() - n * 86_400_000));
 }
 
 function sum(rows: Array<{ [key: string]: unknown }>, field: string): number {
@@ -35,7 +36,8 @@ export async function buildBusinessDigest() {
   const products = (await listRows('products', companyId)) as unknown as Product[];
   const customers = (await listRows('customers', companyId)) as unknown as Customer[];
   const suppliers = (await listRows('suppliers', companyId)) as unknown as Supplier[];
-  const invoices = (await listRows('invoices', companyId)) as unknown as Invoice[];
+  // Sales that happened: not parked drafts or cancelled bills.
+  const invoices = ((await listRows('invoices', companyId)) as unknown as Invoice[]).filter(isCountedSale);
   const purchaseOrders = (await listRows('purchase_orders', companyId)) as unknown as PurchaseOrder[];
   const expenses = (await listRows('expenses', companyId)) as unknown as Expense[];
   const quotations = (await listRows('quotations', companyId)) as unknown as Quotation[];

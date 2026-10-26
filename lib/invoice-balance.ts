@@ -14,6 +14,8 @@ export type BalanceableInvoice = {
   paid: number | string | null | undefined;
   /** Optional so rows loaded before this column existed, and test fixtures, still work. */
   settlement_write_off?: number | string | null;
+  /** A parked draft is not billed yet and a cancelled bill bills nothing: neither is owed. */
+  status?: string | null;
 };
 
 /** Rupees below which a balance is treated as cleared — a rounding crumb, not a debt. */
@@ -37,6 +39,10 @@ export function invoicePaid(invoice: BalanceableInvoice): number {
 /** What the customer still owes: never negative, so an over-payment on one invoice cannot
  *  silently cancel out a genuine debt on another when these are summed. */
 export function invoiceBalanceDue(invoice: BalanceableInvoice): number {
+  // A draft carries its full total while it is being built (a job card's parts, a parked sale), but
+  // nothing is owed on it until it is confirmed. Counting it put job-card drafts in the payment
+  // window, on WhatsApp reminders and in every receivables total (audit, October 2026).
+  if (invoice.status === 'draft' || invoice.status === 'cancelled') return 0;
   return Math.max(0, num(invoice.total) - num(invoice.paid) - invoiceWrittenOff(invoice));
 }
 

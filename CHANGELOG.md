@@ -2,6 +2,53 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-26 — Fixes from the full operation audit
+
+An audit of every part of the ERP found 22 real bugs. None had damaged the real company's data yet:
+its stock, balances and bills all checked out. All 22 are now fixed.
+
+**Money and numbers**
+- **Profit was shown too high.** Profit & Loss counted the GST on bills as profit. It now shows sales
+  with GST, less the GST collected, giving net sales, and works profit out from net sales. The same
+  goes for the CSV.
+- **A payment or a return could be recorded against a draft bill,** such as a job card's bill while
+  the machine is still in. That left the customer's balance wrong. Both are now refused, and drafts
+  no longer appear in Receive Payment. The Return button is hidden on drafts.
+- **Drafts were counted as sales and as money owed** on the Dashboard, Customers (including WhatsApp
+  reminders), Reports aging and the AI summary. A draft now counts for nothing until it's confirmed.
+- **Parts imported from a file with stock** now get that stock as an opening batch, so cost of goods
+  and stock value are right.
+- **Editing a bill can no longer undo a payment.** If a receipt was recorded against the bill on
+  another computer, or the edit would cut the bill below what was paid, the save is refused with a
+  message saying which receipt to check. What the customer owes is now worked out by the database
+  from the saved bill.
+
+**Other fixes**
+- **The GST summary** in Reports now splits output tax by each bill's place of supply: IGST for other
+  states, and CGST + SGST, or UTGST for Chandigarh. The GST CSV does too.
+- **Start fresh** now also clears job cards and the cheque register, all in one step. Supplier bill
+  files are kept.
+- **A job card whose bill was cancelled** can be billed again.
+- **Mark Received** can't put the same goods into stock twice.
+- **Changing the stock count in Edit Part** sets the count you typed, even if a sale was made
+  elsewhere while the form was open.
+- **Changing a part's cost price** no longer rewrites the cost of goods that came from a purchase.
+- **The receivables aging CSV** includes every debt, not just the chosen period's.
+- **Payment Terms says "Settled"** on a bill closed for less than its total.
+- **The nightly backup** no longer skips a night after a manual backup.
+- **"This month" on Bills & Invoices,** a cancelled cheque's date and the AI summary now use India
+  time.
+- **A job card's parts total** says "GST included" when the bill's prices include GST.
+- **Two computers saving a bill at the same moment** no longer clash on its number.
+
+**Security** (ahead of adding staff logins)
+- **A website photo** can only be put on your own company's listing.
+- **The general save route** can no longer set stock or what a customer or supplier owes. The unused
+  route that adjusted them directly was removed.
+- **Bills now check** that their customer and parts belong to the company.
+- **20 old `erp_` tables** from an earlier version of the app were open to any signed-in session. They
+  are now locked. Their data is untouched, and nothing uses them.
+
 ## 2026-10-24 — Change a part's photo from where you'd look for it
 
 Changing a part's photo was possible, but only from inside the part's detail window or the photos

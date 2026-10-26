@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import { BACKUP_TABLES, TABLES, isWritableTable, type TableName } from './schema';
 import { partPhotoPath } from '../part-photos';
+import { shopDay } from '../logbook';
 import type { StartFreshCounts } from '../start-fresh';
 import { listingFitment, type PartFitmentResult } from '../part-fitment';
 
@@ -214,6 +215,25 @@ export async function insertRow(table: TableName, row: Record<string, unknown>):
  * Bulk import uses one PostgREST insert instead of one browser/API/auth/database round trip per
  * row. This is intentionally server-side only; callers still go through a protected API route.
  */
+/** Parts imported from a file with a stock figure get that stock as an opening batch at their own
+ *  cost (jde_open_import_layers), as a part added by hand does. Without it the stock had nothing
+ *  behind it, so cost of goods, stock value and returns to a supplier went wrong. Returns how many
+ *  batches were opened. */
+/** Sets a part's stock to a counted figure, the difference worked out under a lock against the stock
+ *  as it is now (jde_set_product_stock). Returns the change made. */
+export async function setProductStock(companyId: string, productId: string, target: number, unitCost: number): Promise<number> {
+  const { data, error } = await getClient().rpc('jde_set_product_stock', { p_company_id: companyId, p_product_id: productId, p_target: target, p_unit_cost: unitCost });
+  if (error) throw error;
+  return Number(data ?? 0);
+}
+
+export async function openImportLayers(companyId: string, productIds: string[]): Promise<number> {
+  if (productIds.length === 0) return 0;
+  const { data, error } = await getClient().rpc('jde_open_import_layers', { p_company_id: companyId, p_product_ids: productIds });
+  if (error) throw error;
+  return Number(data ?? 0);
+}
+
 export async function insertRows(table: TableName, rows: Record<string, unknown>[]): Promise<Record<string, unknown>[]> {
   if (rows.length === 0) return [];
   const def = TABLES[table];
@@ -269,26 +289,6 @@ export async function getRowCompanyId(table: TableName, id: string): Promise<str
   const { data, error } = await getClient().from(supaTable(table)).select('company_id').eq(def.primaryKey, id).maybeSingle();
   if (error) throw error;
   return (data as { company_id: string } | null)?.company_id ?? undefined;
-}
-
-export type AdjustableTable = 'products' | 'customers' | 'suppliers';
-
-const ADJUST_RPC: Record<AdjustableTable, { fn: string; idParam: string; deltaParam: string }> = {
-  products: { fn: 'jde_adjust_product_stock', idParam: 'p_id', deltaParam: 'p_delta' },
-  customers: { fn: 'jde_adjust_customer_balance', idParam: 'c_id', deltaParam: 'c_delta' },
-  suppliers: { fn: 'jde_adjust_supplier_balance', idParam: 's_id', deltaParam: 's_delta' },
-};
-
-/**
- * Atomically adds `delta` to a product's current_stock / a customer's or supplier's balance,
- * via a database-side UPDATE ... SET col = col + delta. Safe under concurrent writes from
- * multiple computers, unlike reading the current value in JS and writing back the sum.
- */
-export async function adjustRow(table: AdjustableTable, id: string, delta: number): Promise<Record<string, unknown>> {
-  const rpc = ADJUST_RPC[table];
-  const { data, error } = await getClient().rpc(rpc.fn, { [rpc.idParam]: id, [rpc.deltaParam]: delta }).single();
-  if (error) throw error;
-  return data as Record<string, unknown>;
 }
 
 /** Opens a new FIFO cost batch for a product. When adjustStock is true (purchases, manual
@@ -1424,17 +1424,19 @@ export async function getStartFreshCounts(companyId: string): Promise<StartFresh
     head('jde_customers'),
     head('jde_suppliers'),
     head('jde_catalog_products').eq('publication_status', 'published'),
+    head('jde_job_cards'),
+    head('jde_cheques'),
   ]);
   for (const result of results) {
     if (result.error) throw result.error;
   }
   const [
     parts, partsWithStock, partsWithPrices, invoices, quotations, salesReturns, paymentsReceived, writeOffs,
-    purchases, purchaseReturns, supplierPayments, expenses, customers, suppliers, liveOnWebsite,
+    purchases, purchaseReturns, supplierPayments, expenses, customers, suppliers, liveOnWebsite, jobCards, cheques,
   ] = results.map((result) => result.count ?? 0);
   return {
     parts, partsWithStock, partsWithPrices, invoices, quotations, salesReturns, paymentsReceived, writeOffs,
-    purchases, purchaseReturns, supplierPayments, expenses, customers, suppliers, liveOnWebsite,
+    purchases, purchaseReturns, supplierPayments, expenses, customers, suppliers, liveOnWebsite, jobCards, cheques,
   };
 }
 
@@ -2027,14 +2029,10 @@ export async function deleteMoneyEntriesFor(companyId: string, sourceType: strin
  *  is deleted, so the register never shows a cheque paying something that no longer exists. */
 export async function retireChequesFor(companyId: string, sourceTable: string, sourceIds: string[], why: string): Promise<void> {
   if (sourceIds.length === 0) return;
-  const today = new Date().toISOString().slice(0, 10);
+  // The shop's day (India time): the UTC date is still yesterday until 5:30 am.
+  const today = shopDay(new Date());
   const { error } = await getClient().from('jde_cheques').update({ status: 'cancelled', status_on: today, note: why })
     .eq('company_id', companyId).eq('source_table', sourceTable).in('source_id', sourceIds).eq('status', 'pending');
-  if (error) throw error;
-}
-
-export async function deleteAllCheques(companyId: string): Promise<void> {
-  const { error } = await getClient().from('jde_cheques').delete().eq('company_id', companyId);
   if (error) throw error;
 }
 
@@ -2043,12 +2041,6 @@ export async function deleteMoneyEntry(companyId: string, id: string): Promise<b
   if (error) throw error;
   return ((data as unknown[]) ?? []).length > 0;
 }
-
-export async function deleteAllMoneyEntries(companyId: string): Promise<void> {
-  const { error } = await getClient().from('jde_money_entries').delete().eq('company_id', companyId);
-  if (error) throw error;
-}
-
 /** The tables whose own rows carry where their money went. */
 export type MoneySourceTable = 'payments_received' | 'supplier_payments' | 'expenses' | 'money_entries';
 const MONEY_SOURCE_TABLE: Record<MoneySourceTable, string> = {

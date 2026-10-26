@@ -1,5 +1,6 @@
 import { isSupportedCatalogImageType, updateRow, uploadCatalogImage } from '@/lib/db';
 import { recordAudit } from '@/lib/audit-log';
+import { requireOwnCompanyRow } from '@/lib/auth/dal';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,10 @@ export async function POST(request: Request) {
   if (!isSupportedCatalogImageType(mimeType)) {
     return Response.json({ error: 'Please upload a JPEG, PNG, or WebP image.' }, { status: 400 });
   }
+
+  // The listing has to be the caller's own company's: listing ids are public on the website.
+  const access = await requireOwnCompanyRow('catalog_products', catalogId);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
 
   try {
     const imageUrl = await uploadCatalogImage(catalogId, base64, mimeType);

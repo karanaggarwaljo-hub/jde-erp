@@ -19,7 +19,7 @@ import {
   type JobState,
 } from '@/lib/job-cards';
 
-type Invoice = JobBill & { customer: string } & Record<string, unknown>;
+type Invoice = JobBill & { customer: string; gst_mode?: string | null } & Record<string, unknown>;
 type InvoiceItem = { invoice_id: string; name: string; part_number?: string | null; qty: number | string; line_total: number | string } & Record<string, unknown>;
 type Tab = 'shop' | 'billed' | 'all';
 
@@ -172,7 +172,7 @@ export default function JobCards() {
                         ))}
                       </tbody>
                     </table>
-                    <p className="text-sm text-muted" style={{ marginTop: 6 }}>{pieces} piece{pieces === 1 ? '' : 's'}, {rupees(partsValue)} before GST{state !== 'billed' ? '. Nothing is billed until you press "Bill & take payment".' : '.'}</p>
+                    <p className="text-sm text-muted" style={{ marginTop: 6 }}>{pieces} piece{pieces === 1 ? '' : 's'}, {rupees(partsValue)}{(bill as Invoice | null)?.gst_mode === 'inclusive' ? ' (GST included)' : ' before GST'}{state !== 'billed' ? '. Nothing is billed until you press "Bill & take payment".' : '.'}</p>
                   </div>
                 ) : (
                   <p className="text-sm text-muted mb-3">No parts on this job yet. Press &quot;Add parts&quot; when the customer takes something — they go on one draft bill for this job.</p>

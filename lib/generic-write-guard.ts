@@ -23,6 +23,30 @@ const WRITTEN_ELSEWHERE: Partial<Record<TableName, string>> = {
   catalog_events: 'the public catalogue',
 };
 
+/**
+ * Columns of master-data tables that a plain edit must never set. A part's stock moves only with a
+ * stock batch (a purchase, a sale, a count), and what a customer or supplier owes only with the
+ * bill, payment or return behind it: written directly they drift from the records that explain them
+ * (audit, October 2026). Edits drop these; a new customer or supplier starts owing nothing.
+ */
+const PROTECTED_COLUMNS: Partial<Record<TableName, string[]>> = {
+  products: ['current_stock'],
+  customers: ['balance'],
+  suppliers: ['balance'],
+};
+
+/** The patch without the columns a plain edit may not set. */
+export function withoutProtectedColumns(table: TableName, patch: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...patch };
+  for (const column of PROTECTED_COLUMNS[table] ?? []) delete out[column];
+  return out;
+}
+
+/** A new customer or supplier owes, or is owed, nothing until a bill or purchase says otherwise. */
+export function withOpeningBalance(table: TableName, row: Record<string, unknown>): Record<string, unknown> {
+  return table === 'customers' || table === 'suppliers' ? { ...row, balance: 0 } : row;
+}
+
 /** Every non-writable table names the screen that owns it. Exported so a test can prove that a
  *  table added later cannot quietly fall through to the vague message. */
 export function tablesMissingAnOwner(): string[] {

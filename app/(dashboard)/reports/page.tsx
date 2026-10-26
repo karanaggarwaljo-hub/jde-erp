@@ -14,12 +14,12 @@ import {
   PRESET_LABELS, daysInPeriod, filterToPeriod, financialYearLabel, formatPeriod, isAllTime,
   periodFor, previousPeriod, todayIso, type Period, type PeriodPreset,
 } from '@/lib/report-period';
-import { costOfSales, grossProfit, gstPosition, type GstPosition, type PeriodConsumption, type PeriodInvoiceItem } from '@/lib/period-accounts';
+import { costOfSales, grossProfit, gstPosition, outputTaxSplit, type GstPosition, type OutputTaxSplit, type PeriodConsumption, type PeriodInvoiceItem } from '@/lib/period-accounts';
 import { isCountedSale } from '@/lib/sales-types';
 
 type ReportType = 'pnl' | 'profit' | 'sales' | 'stock' | 'gst' | 'aging';
 
-type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; gst_amount: number | null; };
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; gst_amount: number | null; place_of_supply?: string | null };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string; gst_amount: number | null };
 type Expense = { amount: number; date: string };
 type Product = { id: string; category: string; current_stock: number; cost_price: number; sale_price: number };
@@ -74,7 +74,7 @@ function ValueBars({ rows }: { rows: Array<{ label: string; value: number; color
  *
  *  The CGST/SGST rows are the payable split in half, which only holds for supply within the state.
  *  Place of supply is not recorded anywhere in the app, so that is stated as an assumption. */
-function GstLiabilityPanel({ title, subtitle, position }: { title: string; subtitle: string; position: GstPosition }) {
+function GstLiabilityPanel({ title, subtitle, position, split }: { title: string; subtitle: string; position: GstPosition; split: OutputTaxSplit }) {
   const { outputTax, inputTax, netPayable, anyTaxRecorded, invoiceCount, invoicesWithTax, purchaseCount, purchasesWithTax } = position;
   return (
     <div className="card">
@@ -110,11 +110,12 @@ function GstLiabilityPanel({ title, subtitle, position }: { title: string; subti
             <strong>₹{netPayable.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong>
           </div>
           <div className="mt-4">
-            <div className="report-line"><span className="text-muted">CGST</span><span className="font-semibold">₹{(netPayable / 2).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
-            <div className="report-line"><span className="text-muted">SGST</span><span className="font-semibold">₹{(netPayable / 2).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+            <p className="text-muted text-sm">Output GST by kind, from each bill&apos;s place of supply:</p>
+            <div className="report-line"><span className="text-muted">IGST (sales to other states)</span><span className="font-semibold">₹{split.igst.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+            <div className="report-line"><span className="text-muted">CGST</span><span className="font-semibold">₹{split.cgst.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+            <div className="report-line"><span className="text-muted">{split.stateTaxName}</span><span className="font-semibold">₹{split.stateTax.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
             <p className="text-muted text-sm mt-2">
-              Split evenly as CGST and SGST for supply within the state; place of supply is not recorded, so an
-              inter-state sale would belong under IGST instead.
+              Input tax credit is set off against these as the GST rules allow when the return is filed.
               {(invoicesWithTax < invoiceCount || purchasesWithTax < purchaseCount) && ' Documents with no GST recorded contribute nothing above.'}
               {' '}Credit notes for returned goods are not adjusted here. Treat this as indicative, not as a filed return.
             </p>
@@ -136,6 +137,8 @@ export default function ReportsPage() {
 
   const { rows: invoices, activeCompany, error: invoicesError } = useCompanyTable<Invoice>('invoices');
   const { rows: purchaseOrders, error: purchaseOrdersError } = useCompanyTable<PurchaseOrder>('purchase_orders');
+  // Each buyer's GSTIN, which decides IGST against CGST + SGST/UTGST on their bills.
+  const { rows: customers } = useCompanyTable<{ id: string; name: string; gstin?: string | null }>('customers');
   const { rows: expenses, error: expensesError } = useCompanyTable<Expense>('expenses');
   const { rows: products, error: productsError } = useCompanyTable<Product>('products');
   const { rows: stockLayers, error: stockLayersError } = useCompanyTable<StockLayerLike>('stock_layers');
@@ -163,6 +166,10 @@ export default function ReportsPage() {
   const periodExpenses = filterToPeriod(expenses, (row) => row.date, period);
 
   const totalRevenue = periodInvoices.reduce((t, i) => t + Number(i.total || 0), 0);
+  // The GST inside those bills is collected for the government, not earned: profit is worked from
+  // sales before it (lib/period-accounts.ts grossProfit).
+  const gstCollected = Math.round(periodInvoices.reduce((t, i) => t + Number(i.gst_amount || 0), 0) * 100) / 100;
+  const netSales = Math.round((totalRevenue - gstCollected) * 100) / 100;
   const totalPurchaseSpend = periodPurchaseOrders.reduce((t, p) => t + Number(p.total || 0), 0);
   const totalExpenses = periodExpenses.reduce((t, e) => t + Number(e.amount || 0), 0);
   // Sales less what those sales cost, from the batches the goods actually came out of. This used
@@ -205,6 +212,8 @@ export default function ReportsPage() {
   // by 1.18 and call the difference tax collected, whichever rate the documents actually carried —
   // and on this company's records, not one of them carries any GST at all.
   const gst = gstPosition(periodInvoices, periodPurchaseOrders);
+  const buyerGstins = new Map(customers.map((customer) => [customer.name, customer.gstin ?? null]));
+  const gstSplit = outputTaxSplit(periodInvoices, { gstin: activeCompany?.gstin, state_code: activeCompany?.state_code }, (name) => buyerGstins.get(name));
 
   // Deliberately NOT scoped to the period, and labelled as such on screen. What a customer owes is
   // owed today whatever window the rest of the page is showing; filtering it by report period would
@@ -260,8 +269,8 @@ export default function ReportsPage() {
     return `${pct >= 0 ? '+' : ''}${pct}% on the ${periodDays} days before`;
   };
 
-  /** Share of total sales revenue. Left as an em dash when there is no revenue to divide by. */
-  const pctOfRevenue = (value: number) => (totalRevenue > 0 ? `${((value / totalRevenue) * 100).toFixed(1)}%` : '—');
+  /** Share of net sales (before GST). Left as an em dash when there are no sales to divide by. */
+  const pctOfRevenue = (value: number) => (netSales > 0 ? `${((value / netSales) * 100).toFixed(1)}%` : '—');
 
   // What the AI is told about scope. Without it, a summary of the Stock tab can describe stock as
   // though it were a figure for the chosen month, and a summary of a month can be written as though
@@ -390,7 +399,7 @@ export default function ReportsPage() {
         <button type="button" className="alert-action" onClick={() => setReportType('aging')}>Open aging report</button>
       </div>}
       <div className="kpi-grid">
-        <Kpi title="Total Revenue" value={`₹${totalRevenue.toLocaleString()}`} note={changeOn(totalRevenue, priorRevenue)} icon={TrendingUp} color="var(--color-success)" bg="var(--color-success-bg)" />
+        <Kpi title="Sales (incl. GST)" value={`₹${totalRevenue.toLocaleString()}`} note={changeOn(totalRevenue, priorRevenue)} icon={TrendingUp} color="var(--color-success)" bg="var(--color-success-bg)" />
         <Kpi title="Cost of goods sold" value={cost.complete ? `₹${cost.cost.toLocaleString()}` : 'Not known'} note={cost.complete && priorCost?.complete ? changeOn(cost.cost, priorCost.cost) : null} icon={ShoppingBag} color="var(--chart-blue)" bg="var(--color-info-bg)" />
         <Kpi title="Gross Profit" value={grossMargin === null ? 'Not known' : `₹${grossMargin.toLocaleString()}`} note={changeOn(grossMargin, priorProfit?.grossProfit ?? null)} icon={Wallet} color="var(--chart-amber)" bg="var(--amber-tint)" />
         <Kpi title="Net Result" value={netResult === null ? 'Not known' : `₹${netResult.toLocaleString()}`} note={changeOn(netResult, priorNetResult)} icon={(netResult ?? 0) >= 0 ? TrendingUp : TrendingDown} color={(netResult ?? 0) >= 0 ? 'var(--color-success)' : 'var(--color-danger)'} bg={(netResult ?? 0) >= 0 ? 'var(--color-success-bg)' : 'var(--color-danger-bg)'} />
@@ -413,9 +422,19 @@ export default function ReportsPage() {
             <tbody>
               <tr><th colSpan={3} scope="colgroup">Revenue</th></tr>
               <tr>
-                <td><span className="flex flex-col"><span>Total sales revenue</span><small className="text-muted">{periodInvoices.length} invoice{periodInvoices.length === 1 ? '' : 's'} in this period</small></span></td>
-                <td className="text-right font-semibold text-success">₹{totalRevenue.toLocaleString()}</td>
-                <td className="text-right text-muted">{pctOfRevenue(totalRevenue)}</td>
+                <td><span className="flex flex-col"><span>Sales, GST included</span><small className="text-muted">{periodInvoices.length} invoice{periodInvoices.length === 1 ? '' : 's'} in this period</small></span></td>
+                <td className="text-right">₹{totalRevenue.toLocaleString()}</td>
+                <td className="text-right text-muted" />
+              </tr>
+              <tr>
+                <td><span className="flex flex-col"><span>Less: GST collected</span><small className="text-muted">Collected for the government, so not part of what you earned</small></span></td>
+                <td className="text-right">- ₹{gstCollected.toLocaleString()}</td>
+                <td className="text-right text-muted" />
+              </tr>
+              <tr>
+                <td className="font-semibold">Net sales (before GST)</td>
+                <td className="text-right font-semibold text-success">₹{netSales.toLocaleString()}</td>
+                <td className="text-right text-muted">{pctOfRevenue(netSales)}</td>
               </tr>
 
               <tr><th colSpan={3} scope="colgroup">Less: cost of goods sold</th></tr>
@@ -447,7 +466,7 @@ export default function ReportsPage() {
             <span className="pager-info">{cost.complete
               ? 'Cost of goods sold is the real cost of the stock that left the shelf, batch by batch — not the amount spent on purchases in the same period.'
               : `${cost.linesWithoutCost} line${cost.linesWithoutCost === 1 ? '' : 's'} across ${cost.invoicesAffected} invoice${cost.invoicesAffected === 1 ? '' : 's'} ${cost.linesWithoutCost === 1 ? 'has' : 'have'} no recorded cost, so profit cannot be worked out. Purchases in this period came to ₹${totalPurchaseSpend.toLocaleString()}, which is a different figure and not a substitute for it.`}</span>
-            <span className="pager-info">Percentages are of total sales revenue.</span>
+            <span className="pager-info">Percentages are of net sales, before GST.</span>
           </div>
         </div>
 
@@ -455,12 +474,12 @@ export default function ReportsPage() {
           <GstLiabilityPanel
             title="GST summary"
             subtitle="From the GST recorded on the invoices and purchase orders themselves"
-            position={gst}
+            position={gst} split={gstSplit}
           />
           <div className="card">
             <div className="card-header"><h3 className="card-title">Revenue vs. Costs</h3></div>
             <ValueBars rows={[
-              { label: 'Total Revenue', value: totalRevenue, color: 'var(--color-success)' },
+              { label: 'Sales (incl. GST)', value: totalRevenue, color: 'var(--color-success)' },
               ...(cost.complete ? [{ label: 'Cost of goods sold', value: cost.cost, color: 'var(--chart-blue)' }] : []),
               { label: 'Operating Expenses', value: totalExpenses, color: 'var(--chart-orange)' },
               ...(netResult === null ? [] : [{ label: 'Net Result', value: netResult, color: netResult >= 0 ? 'var(--chart-amber)' : 'var(--color-danger)' }]),
@@ -473,7 +492,7 @@ export default function ReportsPage() {
     {reportType === 'sales' && <>
       <div className="kpi-grid">
         <Kpi title="Total Invoices" value={`${periodInvoices.length}`} icon={Receipt} color="var(--chart-blue)" bg="var(--color-info-bg)" />
-        <Kpi title="Total Revenue" value={`₹${totalRevenue.toLocaleString()}`} icon={TrendingUp} color="var(--color-success)" bg="var(--color-success-bg)" />
+        <Kpi title="Sales (incl. GST)" value={`₹${totalRevenue.toLocaleString()}`} icon={TrendingUp} color="var(--color-success)" bg="var(--color-success-bg)" />
         <Kpi title="Avg Order Value" value={`₹${avgOrderValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} icon={IndianRupee} color="var(--chart-amber)" bg="var(--amber-tint)" />
         <Kpi title="Outstanding Due" value={`₹${salesOutstandingDue.toLocaleString()}`} icon={AlertCircle} color="var(--color-danger)" bg="var(--color-danger-bg)" />
       </div>
@@ -552,7 +571,7 @@ export default function ReportsPage() {
         <GstLiabilityPanel
           title="GSTR-3B Liability"
           subtitle="From the GST recorded on the invoices and purchase orders themselves"
-          position={gst}
+          position={gst} split={gstSplit}
         />
       </div>
     </>}
