@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { shopDay } from '@/lib/logbook';
 import { Ban, ExternalLink, Eye, FileDown, FileText, FolderOpen, Paperclip, Search } from 'lucide-react';
 import { useCompany } from '@/components/CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -15,10 +16,11 @@ type Range = 'month' | 'last' | 'all';
 type BillSummary = { inDrive: boolean; driveLink: string | null; fileName: string; sizeBytes: number; mimeType: string; uploadedAt: string };
 
 const monthKey = (iso: string) => iso.slice(0, 7);
-const thisMonth = () => new Date().toISOString().slice(0, 7);
+// Months in the shop's own time: in UTC it is still last month until 5:30 am on the 1st.
+const thisMonth = () => shopDay(new Date()).slice(0, 7);
 const lastMonth = () => {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
+  const [year, month] = thisMonth().split('-').map(Number);
+  return month === 1 ? `${year - 1}-12` : `${year}-${String(month - 1).padStart(2, '0')}`;
 };
 const kb = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 const inRange = (date: string, range: Range) => range === 'all' || monthKey(date) === (range === 'month' ? thisMonth() : lastMonth());

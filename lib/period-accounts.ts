@@ -20,13 +20,15 @@
  */
 
 import { round2 } from '@/lib/money';
+import { supplyTax } from '@/lib/gst-supply';
 
 function num(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export type PeriodInvoice = { id: string; total: number | string };
+/** `gst_amount` is the tax the bill records: part of its total, but the government's money. */
+export type PeriodInvoice = { id: string; total: number | string; gst_amount?: number | string | null };
 export type PeriodInvoiceItem = { id: string; invoice_id: string };
 export type PeriodConsumption = { invoice_item_id: string; qty: number | string | null; unit_cost: number | string | null };
 
@@ -79,6 +81,11 @@ export function costOfSales(
 }
 
 export type GrossProfit = {
+  /** What the bills came to, GST included. */
+  salesIncludingGst: number;
+  /** The GST on them, collected for the government. */
+  gstCollected: number;
+  /** Sales before GST: what profit is worked from. */
   netSales: number;
   costOfSales: number;
   grossProfit: number;
@@ -87,12 +94,21 @@ export type GrossProfit = {
 };
 
 /** Sales less what those sales cost. Returns null when the cost is not fully known, so a caller
- *  has nothing to display by accident — the same rule the settle-and-close dialog already uses. */
+ *  has nothing to display by accident — the same rule the settle-and-close dialog already uses.
+ *
+ *  Sales are taken before GST. A bill's total includes its GST, which is collected for the
+ *  government, while the cost of goods is what the stock cost before GST; counting the tax as
+ *  sales made gross profit more than double what it was (audit, October 2026). Profit by Part
+ *  (lib/part-profit.ts) already worked from the taxable value, so the two now agree. */
 export function grossProfit(invoices: PeriodInvoice[], cost: CostOfSales): GrossProfit | null {
   if (!cost.complete) return null;
-  const netSales = round2(invoices.reduce((total, invoice) => total + num(invoice.total), 0));
+  const salesIncludingGst = round2(invoices.reduce((total, invoice) => total + num(invoice.total), 0));
+  const gstCollected = round2(invoices.reduce((total, invoice) => total + num(invoice.gst_amount), 0));
+  const netSales = round2(salesIncludingGst - gstCollected);
   const profit = round2(netSales - cost.cost);
   return {
+    salesIncludingGst,
+    gstCollected,
     netSales,
     costOfSales: cost.cost,
     grossProfit: profit,
@@ -137,5 +153,39 @@ export function gstPosition(invoices: TaxedDocument[], purchases: TaxedDocument[
     purchaseCount: purchases.length,
     purchasesWithTax,
     anyTaxRecorded: invoicesWithTax > 0 || purchasesWithTax > 0,
+  };
+}
+
+/** Output tax by the kind it is, bill by bill: IGST on a sale to another state, else CGST plus SGST
+ *  (or UTGST in a Union Territory such as Chandigarh), from each bill's own place of supply
+ *  (lib/gst-supply.ts) — the same rule the invoice prints by. The summary used to halve the whole
+ *  figure into CGST and SGST, which put every inter-state sale under the wrong tax and called
+ *  Chandigarh's UTGST "SGST" (audit, October 2026). */
+export type OutputTaxSplit = { igst: number; cgst: number; stateTax: number; stateTaxName: 'SGST' | 'UTGST' };
+
+export function outputTaxSplit(
+  invoices: Array<TaxedDocument & { customer?: string | null; place_of_supply?: string | null }>,
+  seller: { gstin?: string | null; state_code?: string | null },
+  buyerGstin: (customer: string) => string | null | undefined,
+): OutputTaxSplit {
+  let igst = 0;
+  let cgst = 0;
+  let stateTax = 0;
+  for (const invoice of invoices) {
+    const tax = num(invoice.gst_amount);
+    if (tax <= 0) continue;
+    const supply = supplyTax(seller.gstin, buyerGstin(String(invoice.customer ?? '')), invoice.place_of_supply, seller.state_code);
+    if (supply.kind === 'inter') igst += tax;
+    else {
+      const half = round2(tax / 2);
+      cgst += half;
+      stateTax += tax - half;
+    }
+  }
+  return {
+    igst: round2(igst),
+    cgst: round2(cgst),
+    stateTax: round2(stateTax),
+    stateTaxName: supplyTax(seller.gstin, null, null, seller.state_code).localTax,
   };
 }

@@ -22,6 +22,9 @@ export type StartFreshCounts = {
   customers: number;
   suppliers: number;
   liveOnWebsite: number;
+  /** Job cards and the cheque register go too (in the same transaction since October 2026). */
+  jobCards?: number;
+  cheques?: number;
 };
 
 export type StartFreshPlan = { cleared: string[]; deleted: string[]; kept: string[]; nothingToDo: boolean };
@@ -32,7 +35,7 @@ type Kind = { n: number; one: string; many?: string };
 
 /** Everything that would be deleted, largest kinds first in the order the business thinks of them,
  *  leaving out any there are none of. */
-function deletedKinds(c: Pick<StartFreshCounts, 'invoices' | 'quotations' | 'salesReturns' | 'paymentsReceived' | 'writeOffs' | 'purchases' | 'purchaseReturns' | 'supplierPayments' | 'expenses' | 'customers'>): string[] {
+function deletedKinds(c: Pick<StartFreshCounts, 'invoices' | 'quotations' | 'salesReturns' | 'paymentsReceived' | 'writeOffs' | 'purchases' | 'purchaseReturns' | 'supplierPayments' | 'expenses' | 'customers' | 'jobCards' | 'cheques'>): string[] {
   const kinds: Kind[] = [
     { n: c.invoices, one: 'sales bill' },
     { n: c.quotations, one: 'quotation' },
@@ -44,6 +47,8 @@ function deletedKinds(c: Pick<StartFreshCounts, 'invoices' | 'quotations' | 'sal
     { n: c.supplierPayments, one: 'payment to a supplier', many: 'payments to suppliers' },
     { n: c.expenses, one: 'expense' },
     { n: c.customers, one: 'customer' },
+    { n: c.jobCards ?? 0, one: 'job card' },
+    { n: c.cheques ?? 0, one: 'cheque in the register', many: 'cheques in the register' },
   ];
   return kinds.filter((kind) => kind.n > 0).map((kind) => counted(kind.n, kind.one, kind.many));
 }
@@ -60,6 +65,7 @@ export function startFreshPlan(c: StartFreshCounts): StartFreshPlan {
     `${counted(c.suppliers, 'supplier')}, with what you owe them set to zero`,
   ];
   if (c.liveOnWebsite > 0) kept.push(`${counted(c.liveOnWebsite, 'listing')} live on your website`);
+  kept.push('Supplier bill files, and bill PDFs already copied to Google Drive');
   kept.push('The audit log, staff logins and company details');
 
   return { cleared, deleted, kept, nothingToDo: cleared.length === 0 && deleted.length === 0 };
@@ -85,6 +91,8 @@ export function describeReset(result: Record<string, number | undefined>): strin
     supplierPayments: get('supplier_payments'),
     expenses: get('expenses'),
     customers: get('customers'),
+    jobCards: get('job_cards'),
+    cheques: get('cheques'),
   });
   const parts = get('parts_cleared');
   return [

@@ -1,6 +1,6 @@
 import { dbErrorMessage, getRow, isCompanyScoped, isKnownTable, updateRow, deleteRow, deleteCompany, retireChequesFor } from '@/lib/db';
 import { requireOwnCompanyRow } from '@/lib/auth/dal';
-import { refuseGenericWrite } from '@/lib/generic-write-guard';
+import { refuseGenericWrite, withoutProtectedColumns } from '@/lib/generic-write-guard';
 import { resolveRequestCompanyId } from '@/lib/company-context';
 import { describeRow, pick, recordAudit } from '@/lib/audit-log';
 
@@ -22,10 +22,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ta
     if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
   }
   try {
-    const patch = await request.json();
+    // Stock and what is owed are left out: they move only with the records behind them.
+    const patch = withoutProtectedColumns(table, await request.json());
     // A generic edit is never how this app moves a row between companies — that would need its
     // own deliberate, audited flow, not a side effect of whatever a patch body happens to carry.
     delete patch.company_id;
+    if (Object.keys(patch).length === 0) return Response.json({ error: 'Nothing here can be changed this way.' }, { status: 400 });
     const before = await getRow(table, decodedId);
     const row = await updateRow(table, decodedId, patch);
     if (!row) return Response.json({ error: 'Not found' }, { status: 404 });

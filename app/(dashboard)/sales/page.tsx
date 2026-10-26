@@ -747,7 +747,9 @@ export default function SalesPage() {
       setJobLink(null);
       const job = jobCards.find((row) => row.id === jobLink.jobId);
       if (!job) { setFeedback('That job card was not found in this company.'); return; }
-      const bill = job.invoice_id ? invoices.find((invoice) => invoice.id === job.invoice_id) : undefined;
+      // A cancelled bill no longer bills the job, so the job starts a new one (finishJob relinks it).
+      const linked = job.invoice_id ? invoices.find((invoice) => invoice.id === job.invoice_id) : undefined;
+      const bill = linked && linked.status !== CANCELLED_STATUS ? linked : undefined;
       if (bill && bill.status !== DRAFT_STATUS) {
         setFeedback(`${job.job_no} is already billed as ${bill.id}.`);
         return;
@@ -1500,14 +1502,14 @@ ${stockLine}`)) return;
                         style={items.length === 0 || writtenOff > 0 || returnCount > 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         onClick={() => items.length > 0 && writtenOff === 0 && returnCount === 0 && openEditInvoice(invoice)}
                       ><Pencil size={14} /></button>
-                      <button
+                      {!isDraft(invoice) && <button
                         className="btn btn-ghost btn-sm"
                         aria-label={`Return items from ${invoice.id}`}
                         title={items.length > 0 ? 'Create partial return / credit note' : 'Return unavailable — this invoice predates line-item tracking'}
                         disabled={items.length === 0 || loadingReturn}
                         style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
                         onClick={() => items.length > 0 && openSalesReturn(invoice)}
-                      ><Undo2 size={14} /></button>
+                      ><Undo2 size={14} /></button>}
                       </>}
                       <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={() => window.open(`/sales/invoice/${invoice.id}`, '_blank')}><Printer size={14} /></button>
                       {activeCompany && (

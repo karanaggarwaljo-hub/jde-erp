@@ -111,13 +111,16 @@ export async function backupDatabase(): Promise<BackupInfo> {
   return { filename, size_bytes: Buffer.byteLength(contents, 'utf8'), created_at: now.toISOString() };
 }
 
-async function hasBackupToday(): Promise<boolean> {
-  const todayStr = new Date().toISOString().slice(0, 10);
-  return (await listBackups()).some((backup) => backup.created_at.slice(0, 10) === todayStr);
+/** A backup taken in the last two hours: the nightly job running twice. The job used to skip the
+ *  night whenever any backup (a "Back up now", or the one before Start fresh) had been taken earlier
+ *  that UTC day, so everything entered after it missed that night's copy (audit, October 2026). */
+async function hasRecentBackup(): Promise<boolean> {
+  const since = Date.now() - 2 * 60 * 60 * 1000;
+  return (await listBackups()).some((backup) => Date.parse(backup.created_at) >= since);
 }
 
 export async function backupIfNeededToday(): Promise<BackupInfo | null> {
-  if (await hasBackupToday()) return null;
+  if (await hasRecentBackup()) return null;
   return backupDatabase();
 }
 

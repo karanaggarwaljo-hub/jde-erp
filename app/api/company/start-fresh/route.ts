@@ -1,5 +1,5 @@
 import { checkCompanyAccess } from '@/lib/auth/dal';
-import { dbErrorMessage, deleteAllCheques, deleteAllMoneyEntries, getStartFreshCounts, isBusinessRuleError, resetCompanyData } from '@/lib/db';
+import { dbErrorMessage, getStartFreshCounts, isBusinessRuleError, resetCompanyData } from '@/lib/db';
 import { backupDatabase } from '@/lib/db/backup';
 import { recordAudit } from '@/lib/audit-log';
 import { describeReset } from '@/lib/start-fresh';
@@ -60,11 +60,11 @@ export async function POST(request: Request) {
   }
 
   try {
+    // One transaction: job cards, the cheque register and the money records behind cheques go with
+    // the bills and payments they belong to, or nothing does. They used to be cleared afterwards, and
+    // a failure there left cheques for deleted bills while the owner was told it had all worked.
+    // The banks and cheque books stay.
     const result = await resetCompanyData(companyId, confirm);
-    // The records behind cheques taken or paid inside bills and purchases go with them. The banks stay.
-    await deleteAllMoneyEntries(companyId).catch((error) => console.error('Start fresh: clearing the cheque records failed:', error));
-    // The cheque register goes with the payments it recorded; the cheque books stay.
-    await deleteAllCheques(companyId).catch((error) => console.error('Start fresh: clearing the cheque register failed:', error));
     const summary = describeReset(result);
     await recordAudit({
       companyId, action: 'company.start_fresh', entity: 'companies', entityId: companyId,

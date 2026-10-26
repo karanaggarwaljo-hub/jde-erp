@@ -28,6 +28,12 @@ export function consumeStockFifo(productId: string, qty: number, invoiceItemId: 
   return postJson<ConsumptionResult[]>('/api/fifo/consume', { product_id: productId, qty, invoice_item_id: invoiceItemId });
 }
 
+/** Sets a part's stock to a counted figure; the server works out the difference against the stock
+ *  as it is now. Returns the change made. */
+export function setProductStock(productId: string, target: number, unitCost: number) {
+  return postJson<{ delta: number }>('/api/fifo/set-stock', { product_id: productId, target, unit_cost: unitCost }).then((r) => r.delta);
+}
+
 /** Reverses a prior consumeStockFifo call for one invoice line. */
 export function restoreStockForInvoiceItem(invoiceItemId: string) {
   return postJson<{ restored_qty: number }>('/api/fifo/restore', { invoice_item_id: invoiceItemId }).then((r) => r.restored_qty);

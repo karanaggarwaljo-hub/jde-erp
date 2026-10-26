@@ -169,19 +169,5 @@ export function useCompanyTable<T extends Record<string, unknown>>(table: string
     await reload();
   }, [table, reload]);
 
-  /** Atomically adds `delta` to a numeric column (e.g. current_stock, balance) via a database-side
-   *  increment, instead of computing `current + delta` in JS and writing the sum back. Only supported
-   *  for tables with a matching /api/adjust route (products, customers, suppliers). */
-  const adjust = useCallback(async (id: string, delta: number) => {
-    const res = await fetch(`/api/adjust/${table}/${encodeURIComponent(id)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ delta }),
-    });
-    const updated = await parseJsonOrThrow(res, 'Failed to adjust record.');
-    await reload();
-    return updated as T;
-  }, [table, reload]);
-
-  return { rows, setRows, loading, error, reload, create, update, remove, adjust, activeCompany };
+  return { rows, setRows, loading, error, reload, create, update, remove, activeCompany };
 }

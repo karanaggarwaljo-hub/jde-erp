@@ -179,7 +179,9 @@ const MODE_LABELS: Record<string, string> = { cash: 'Cash', upi: 'UPI', card: 'C
 /** What the bill says about payment, from what was actually received on it. The bill form saved every
  *  sale as Credit, so the stored mode alone printed Credit even on a bill paid in full (the owner:
  *  "credit is written fixed"). Paid in full shows how, when an older bill recorded it (Cash, UPI). */
-export function paymentTerms(mode: unknown, paid: number, balanceDue: number): string {
+export function paymentTerms(mode: unknown, paid: number, balanceDue: number, writtenOff = 0): string {
+  // Closed for less than it was billed: the rest was written off, not paid.
+  if (writtenOff > 0.005 && balanceDue <= 0.005) return 'Settled';
   if (paid > 0.005 && balanceDue <= 0.005) {
     const how = MODE_LABELS[text(mode).toLowerCase()];
     return how && how !== 'Credit' ? how : 'Paid';
@@ -335,7 +337,7 @@ export function buildTallyInvoice(source: {
     details: [
       ['Invoice No.', text(invoice.id)],
       ['Date', tallyDate(invoice.date)],
-      ['Payment Terms', paymentTerms(invoice.mode, paid, f.balanceDue)],
+      ['Payment Terms', paymentTerms(invoice.mode, paid, f.balanceDue, f.writtenOff)],
       ...DISPATCH_FIELDS.map(({ key, printed }): [string, string] => [printed, text(invoice[key])]),
     ],
     items: tallyItems,

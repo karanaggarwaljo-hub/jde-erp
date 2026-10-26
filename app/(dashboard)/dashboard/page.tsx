@@ -21,6 +21,7 @@ import {
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { totalStockValue, type StockLayerLike } from '@/lib/stock-value';
 import { invoiceBalanceDue, isInvoiceOpen } from '@/lib/invoice-balance';
+import { isCountedSale } from '@/lib/sales-types';
 import { useCompany } from '@/components/CompanyProvider';
 import ActivityCalendar from '@/components/ActivityCalendar';
 import type { ActivityEvent } from '@/lib/activity-calendar';
@@ -29,7 +30,7 @@ import { shopDay } from '@/lib/logbook';
 type Product = { id: string; part_number: string; name: string; brand: string; category: string; cost_price: number; current_stock: number; min_stock: number; location: string };
 type Customer = { id: string; balance: number };
 type Supplier = { id: string; name: string; balance: number };
-type Invoice = { id: string; customer: string; date: string; total: number; paid: number; settlement_write_off: number; };
+type Invoice = { id: string; customer: string; date: string; total: number; paid: number; settlement_write_off: number; status: string };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number };
 type Grn = { id: string; po_number: string; supplier: string; received_at: string };
 type Quotation = { id: string; customer: string; date: string; total: number };
@@ -88,13 +89,16 @@ export default function DashboardPage() {
   const headerDate = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const headerSubline = [headerDate, activeCompany?.name, activeCompany?.address].filter(Boolean).join(' · ');
 
-  const todaySales = sumInRange(invoices, today, today);
-  const yesterdaySales = sumInRange(invoices, yesterday, yesterday);
+  // Sales that happened: a parked draft (a job card's bill while the machine is in) and a cancelled
+  // bill are not sales.
+  const sales = invoices.filter(isCountedSale);
+  const todaySales = sumInRange(sales, today, today);
+  const yesterdaySales = sumInRange(sales, yesterday, yesterday);
   const todayPurchases = sumInRange(purchaseOrders, today, today);
   const yesterdayPurchases = sumInRange(purchaseOrders, yesterday, yesterday);
 
-  const revenue30 = sumInRange(invoices, isoDate(daysAgoDate(29)), today);
-  const revenuePrev30 = sumInRange(invoices, isoDate(daysAgoDate(59)), isoDate(daysAgoDate(30)));
+  const revenue30 = sumInRange(sales, isoDate(daysAgoDate(29)), today);
+  const revenuePrev30 = sumInRange(sales, isoDate(daysAgoDate(59)), isoDate(daysAgoDate(30)));
   const spend30 = sumInRange(purchaseOrders, isoDate(daysAgoDate(29)), today);
   const spendPrev30 = sumInRange(purchaseOrders, isoDate(daysAgoDate(59)), isoDate(daysAgoDate(30)));
 

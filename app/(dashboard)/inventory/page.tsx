@@ -29,7 +29,7 @@ import { planDetailUpdates, looksLikeAnInventedCode } from '@/lib/detail-import'
 import { matchesProductSearch, duplicatePartNumbers as findDuplicatePartNumbers, compatibilitySuggestions } from '@/lib/product-search';
 import { averageMarginPercent, marginPercent } from '@/lib/margin';
 import { buildPartsWorksheet, countUnanswered, worksheetToCsv, worksheetFileName } from '@/lib/parts-worksheet';
-import { addStockLayer, consumeStockFifo, correctOldestLayerCost } from '@/lib/client-fifo';
+import { correctOldestLayerCost, setProductStock } from '@/lib/client-fifo';
 import { saveEach, IMPORT_SAVES_AT_ONCE } from '@/lib/bulk-save';
 import { createPart } from '@/lib/client-inventory';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
@@ -372,11 +372,10 @@ export default function InventoryPage() {
         const patch: Record<string, unknown> = { ...payload };
         delete patch.current_stock;
         await update(editingProduct.id, patch);
-        const delta = newStock - Number(editingProduct.current_stock);
-        if (delta > 0) {
-          await addStockLayer(editingProduct.id, delta, newCostPrice, null, true);
-        } else if (delta < 0) {
-          await consumeStockFifo(editingProduct.id, -delta, null);
+        // A new count typed in is set as that count: the server works out the difference against
+        // the stock as it is now, so a sale made elsewhere while this form was open is kept.
+        if (newStock !== Number(editingProduct.current_stock)) {
+          await setProductStock(editingProduct.id, newStock, newCostPrice);
         } else if (newCostPrice !== Number(editingProduct.cost_price)) {
           // Stock didn't change, only the cost figure did — correct the batch the display is
           // currently reading from instead of silently leaving it stale (the bug that made typing
