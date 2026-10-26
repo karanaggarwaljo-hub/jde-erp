@@ -36,6 +36,8 @@ export type PartOption = {
   salePrice: number;
   category: string;
   partNumber: string;
+  /** Its other numbers, so the picker finds the part by any of them. */
+  otherNumbers?: readonly string[];
   name: string;
   brand: string;
   stock: number;

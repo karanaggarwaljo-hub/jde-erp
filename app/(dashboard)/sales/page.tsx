@@ -31,7 +31,7 @@ import {
 import { saveSalesInvoice, cancelSalesInvoice, deleteSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance, receiveCustomerPayment, getInvoiceCost } from '@/lib/client-sales';
 import { realisedProfit, type InvoiceCost } from '@/lib/invoice-profit';
 import { invoiceBalanceDue, invoiceWrittenOff, wasSettledShort } from '@/lib/invoice-balance';
-import { addCustomLine, addPartToLines, buildLastSoldIndex, partLabel } from '@/lib/sale-entry';
+import { addCustomLine, addPartToLines, buildLastSoldIndex, partLabeler } from '@/lib/sale-entry';
 import { keepEnterInsideForm } from '@/lib/form-keys';
 import { createSalesReturn, deleteSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem, type SalesReturnRow } from '@/lib/client-sales-returns';
 import { duplicateCreditNotes } from '@/lib/sales-returns';
@@ -154,8 +154,12 @@ export default function SalesPage() {
   //
   // Numbers are coerced here rather than at each use: Postgres numeric columns arrive as strings
   // over the REST API, and the search ranking and the stock/below-cost warnings compare them.
+  // Each part's label, unique even for one part kept in two brands (lib/trade-history.ts). A line
+  // is matched back to its part by this label, so every lookup below uses the same one.
+  const labelOf = useMemo(() => partLabeler(products), [products]);
   const partOptions = useMemo(() => products.map((product) => ({
-    value: partLabel(product.part_number, product.name),
+    value: labelOf(product),
+    otherNumbers: product.other_numbers ?? [],
     price: Number(product.sale_price) || 0,
     costPrice: Number(product.cost_price) || 0,
     category: product.category,
@@ -165,7 +169,7 @@ export default function SalesPage() {
     stock: Number(product.current_stock) || 0,
     hsn: product.hsn_code,
     photo: photoFor(product)?.url ?? null,
-  })), [products, photoFor]);
+  })), [products, photoFor, labelOf]);
 
   const [activeTab, setActiveTab] = useState<SalesTab>('invoices');
   const [search, setSearch] = useState('');
@@ -472,7 +476,7 @@ export default function SalesPage() {
   const quoteItemPayload = (sourceLines: InvoiceLine[]) => sourceLines
     .filter((line) => line.part.trim())
     .map((line) => {
-      const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
+      const product = products.find((p) => labelOf(p) === line.part);
       return {
         product_id: product?.id ?? null,
         part_number: product?.part_number ?? '',
@@ -686,7 +690,7 @@ export default function SalesPage() {
   const invoiceItemPayload = (sourceLines: InvoiceLine[]) => sourceLines
     .filter((line) => line.part.trim())
     .map((line) => {
-      const product = products.find((p) => `${p.part_number} - ${p.name}` === line.part);
+      const product = products.find((p) => labelOf(p) === line.part);
       return {
         product_id: product?.id ?? null,
         part_number: product?.part_number ?? '',

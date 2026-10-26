@@ -2,6 +2,51 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-26 — A part can have several part numbers, and the same part can be kept in several brands
+
+You said two things made adding parts hard. Some parts have more than one part number, but the ERP
+took only one. And you sell the same part in different brands, but the ERP refused a second part
+with the same number. Both are fixed.
+
+**Several part numbers for one part**
+- When you add or edit a part, there is a new box, **Other part numbers**. Type the numbers with a
+  comma between them (for example `32/925694, FS19505`). The form shows the list it will save. A
+  number typed twice, or the part's own number again, is left out.
+- A part is found by **any** of its numbers. That works in the Stock search, when you make a bill or
+  buy stock (typing or scanning), on What to Order, and in the Merge window. The list says which
+  number it found the part by.
+- In the Stock list, a part's other numbers show small under its part number. Its window shows them
+  at the top as "Also known as".
+- When you **scan a supplier's bill**, a part is recognised by any of its numbers. If the bill prints
+  a number the part doesn't have yet, it is added to the part's other numbers. Your own part number
+  is never replaced.
+- When two entries of one part are **merged**, the kept part also keeps the other entry's numbers,
+  unless that number was only a made-up SP- code.
+- The Google Drive **Parts list** sheet has a new column, Other numbers.
+- **Your website** shows a part's other numbers under "Also known as", and customers can search it
+  by any of them. They are read straight from Stock, so they are always the same as in the ERP.
+
+**The same part in several brands**
+- As you chose, each brand is **its own item, with its own stock, cost, price and photo**. Two items
+  can now share a part number when their brands are different. The same number twice in the **same**
+  brand is still refused, so nothing gets entered twice by mistake.
+- To add one, open the part's **⋯** menu (or its window) and choose **Add another brand**. The form
+  copies the name, part numbers, category, fitment, HSN, rack and reorder level. You only type the
+  brand, the price and how many you have.
+- A part's window has a new section, **This part in other brands**: a small table of each brand with
+  its stock and price, and a button to open each one.
+- **Making a bill:** when you type or scan a number kept in two brands, the ERP doesn't pick one.
+  It shows both brands, each with its price and stock, and you choose. On the bill line the brand is
+  written next to the part, so you can see which one you are selling.
+- **Scanning a supplier's bill:** the brand on the bill picks the right item. If the bill has no
+  brand, you get one button per brand, plus "A new brand". A new brand you don't stock yet becomes a
+  new item of its own, with the same number.
+- **Merging** two different brands now shows a warning first. Merge is for one part entered twice;
+  two brands of a part should stay apart.
+
+Nothing in your existing parts changed. Your 258 parts all keep their numbers and brands exactly as
+they were.
+
 ## 2026-10-26 — A simpler ERP: big buttons on Home, a short menu, plain words
 
 You said the ERP had become cluttered and asked for it to be easy enough for a school child. Nothing

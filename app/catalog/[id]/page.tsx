@@ -159,6 +159,10 @@ export default async function CatalogDetailPage({ params }: { params: Promise<{ 
 
           <div className="flex gap-2 flex-wrap mt-4 mb-2 items-center">
             {product.part_number ? <span className="badge badge-muted">Part #: {String(product.part_number)}</span> : null}
+            {/* The part's other numbers, read live from Stock, so a customer holding any of them sees it is this part. */}
+            {Array.isArray(product.other_numbers) && product.other_numbers.length > 0
+              ? <span className="badge badge-muted">Also known as: {(product.other_numbers as string[]).join(', ')}</span>
+              : null}
             {product.oem_number ? <span className="badge badge-muted">OEM #: {String(product.oem_number)}</span> : null}
             <span className={`badge ${product.availability === 'in_stock' ? 'badge-success' : product.availability === 'out_of_stock' ? 'badge-danger' : 'badge-muted'}`}>
               {AVAILABILITY_LABEL[String(product.availability)] || 'Contact for Availability'}

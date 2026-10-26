@@ -15,6 +15,8 @@ export type Product = {
   id: string;
   company_id: string;
   part_number: string;
+  /** Its other numbers (lib/part-numbers.ts): the picker finds the part by any of them. */
+  other_numbers?: string[] | null;
   name: string;
   brand: string;
   hsn_code: string;
@@ -164,6 +166,8 @@ export type PartOption = {
   costPrice: number;
   category: string;
   partNumber: string;
+  /** Its other numbers, so the picker finds the part by any of them. */
+  otherNumbers?: readonly string[];
   /** The catalogue name on its own, so search can rank a name match apart from a code match. */
   name: string;
   brand: string;

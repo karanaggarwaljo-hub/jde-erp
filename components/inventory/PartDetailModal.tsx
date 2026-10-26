@@ -10,7 +10,7 @@
  */
 
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react';
-import { X, ArrowRight, AlertTriangle, Edit, Camera, Pencil } from 'lucide-react';
+import { X, ArrowRight, AlertTriangle, Edit, Camera, Pencil, CopyPlus } from 'lucide-react';
 import { savePartFitment } from '@/lib/client-part-fitment';
 import { money } from '@/lib/money';
 import { looksLikeAnInventedCode } from '@/lib/detail-import';
@@ -29,6 +29,8 @@ export type PartDetailModalProps = {
   onOpenPart: (productId: string) => void;
   onClose: () => void;
   onEdit: (productId: string) => void;
+  /** Opens a new item for this part in another brand, copied from this one. */
+  onAddBrand?: (productId: string) => void;
   /** A photo or the fitment changed here, so the list behind this panel should show it too. */
   onChanged: () => void;
   /** The ways this shop already writes machines, commonest first, offered while typing a fitment so
@@ -50,7 +52,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-export default function PartDetailModal({ companyId, productId, onOpenPart, onClose, onEdit, onChanged, fitmentSuggestions = [] }: PartDetailModalProps) {
+export default function PartDetailModal({ companyId, productId, onOpenPart, onClose, onEdit, onAddBrand, onChanged, fitmentSuggestions = [] }: PartDetailModalProps) {
   const [detail, setDetail] = useState<PartDetail | null>(null);
   const [failure, setFailure] = useState<{ productId: string; message: string } | null>(null);
   // Bumped after a photo changes, to read the part again.
@@ -202,6 +204,12 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
                 {part.category && <span className="badge">{part.category}</span>}
               </div>
             )}
+            {part && (part.other_numbers ?? []).length > 0 && (
+              <div className="flex items-center gap-2" style={{ flexWrap: 'wrap', marginTop: 6 }}>
+                <span className="text-muted" style={{ fontSize: 12 }}>Also known as</span>
+                {(part.other_numbers ?? []).map((number) => <span key={number} className="pn-chip">{number}</span>)}
+              </div>
+            )}
           </div>
           <button className="btn btn-ghost btn-sm" aria-label="Close" onClick={onClose}><X size={16} /></button>
         </div>
@@ -303,6 +311,48 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
               </section>
 
               <PartCostPanel companyId={companyId} productId={productId} />
+
+              {/* The same part from other makers: each its own item with its own stock and price.
+                  The owner chose this over one shared stock count, so how many of each brand is on
+                  the shelf, and what each one costs, stays known. */}
+              <section style={{ marginBottom: 20 }}>
+                <div className="flex items-center justify-between gap-2" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
+                  <h4>This part in other brands</h4>
+                  {onAddBrand && (
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => onAddBrand(part.id)}>
+                      <CopyPlus size={14} /> Add another brand
+                    </button>
+                  )}
+                </div>
+                {(showing.otherBrands ?? []).length === 0 ? (
+                  <p className="text-muted" style={{ fontSize: 13 }}>
+                    Only {part.brand ? <strong>{part.brand}</strong> : 'this one'} so far. If you also sell this part in another brand, add it here: it keeps
+                    the same name and numbers, with its own stock and price.
+                  </p>
+                ) : (
+                  <div className="table-wrap">
+                    <table className="erp-table">
+                      <thead><tr><th>Brand</th><th className="text-right">In stock</th><th className="text-right">Sells for</th><th aria-label="Open" /></tr></thead>
+                      <tbody>
+                        <tr>
+                          <td><strong>{part.brand || 'No brand'}</strong> <span className="text-muted" style={{ fontSize: 12 }}>(this one)</span></td>
+                          <td className="text-right">{amount(part.current_stock)}</td>
+                          <td className="text-right">&#8377;{money(amount(part.sale_price))}</td>
+                          <td />
+                        </tr>
+                        {(showing.otherBrands ?? []).map((other) => (
+                          <tr key={other.id}>
+                            <td><strong>{other.brand || 'No brand'}</strong>{other.name !== part.name && <span className="text-muted" style={{ display: 'block', fontSize: 12 }}>{other.name}</span>}</td>
+                            <td className="text-right">{amount(other.current_stock)}</td>
+                            <td className="text-right">{amount(other.sale_price) > 0 ? `₹${money(amount(other.sale_price))}` : '—'}</td>
+                            <td className="text-right"><button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpenPart(other.id)}>Open <ArrowRight size={13} /></button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
 
               <section style={{ marginBottom: 20 }}>
                 <h4 style={{ marginBottom: 8 }}>Other parts you could use instead</h4>

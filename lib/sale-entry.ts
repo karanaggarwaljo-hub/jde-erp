@@ -15,10 +15,10 @@
  * tomorrow. Being told is the point; being stopped is not.
  */
 
-import { buildLastTradedIndex, partLabel, type LastTraded } from '@/lib/trade-history';
+import { buildLastTradedIndex, partLabel, partLabeler, type LastTraded } from '@/lib/trade-history';
 import type { InvoiceLine, PartOption } from '@/lib/sales-types';
 
-export { partLabel };
+export { partLabel, partLabeler };
 
 export type AddPartResult = {
   lines: InvoiceLine[];
@@ -60,6 +60,8 @@ export type SoldItem = {
   invoice_id: string;
   part_number: string;
   name: string;
+  /** The part's current label, when the line was traced to its part (currentIdentity). */
+  label?: string;
   qty: number | string;
   unit_price: number | string;
 };
@@ -93,6 +95,7 @@ export function buildLastSoldIndex(
       documentId: item.invoice_id,
       partNumber: item.part_number,
       name: item.name,
+      label: item.label,
       rate: Number(item.unit_price),
     })),
     draftStatus

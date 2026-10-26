@@ -15,7 +15,7 @@ An ERP web app for an auto spare parts trading business: inventory, sales, purch
 | Module | Route | What it does |
 |---|---|---|
 | Home | `/dashboard` | One big button for each everyday job (make a bill, money received, buy stock, pay a supplier, add an expense, find a part), four live figures (sold today, to collect, to pay, to reorder), what needs attention, and the activity calendar. |
-| Stock | `/inventory` | Catalog with part number, OEM number, brand, category, pricing, stock levels. Supports bulk import from a CSV/Excel file with flexible column-header matching. Called Stock in the menu; the address is unchanged. |
+| Stock | `/inventory` | Catalog with part number, OEM number, brand, category, pricing, stock levels. Supports bulk import from a CSV/Excel file with flexible column-header matching. Called Stock in the menu; the address is unchanged. A part can carry several part numbers (found by any of them everywhere), and the same part can be kept in several brands under one number, each with its own stock and price. |
 | Sales | `/sales` | Quotations and invoices against your real customer and inventory data. |
 | Purchases | `/purchases` | Purchase orders and goods-received notes, with CSV/Excel/PDF/photo import (Gemini extracts line items from scanned documents). |
 | Customers / Suppliers | `/customers`, `/suppliers` | Directories with credit limits, GSTIN, and outstanding balances. |

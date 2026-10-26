@@ -5,6 +5,7 @@ import type { PartOverview } from '@/lib/part-overview';
 export type PartDetailPart = {
   id: string;
   part_number: string;
+  other_numbers?: string[] | null;
   oem_number: string;
   hsn_code: string;
   name: string;
@@ -32,10 +33,22 @@ export type PartDetailAlternate = {
   detail: string;
 };
 
+/** The same part in another brand: its own item, with its own stock and price. */
+export type PartDetailBrand = {
+  id: string;
+  part_number: string;
+  name: string;
+  brand: string;
+  current_stock: number;
+  sale_price: number;
+};
+
 export type PartDetail = {
   part: PartDetailPart;
   overview: PartOverview;
   alternates: PartDetailAlternate[];
+  /** The same part in other brands (lib/part-numbers.ts otherBrandsOf). */
+  otherBrands?: PartDetailBrand[];
   /** Its published Website Catalog picture, used only when it has no photo of its own. */
   catalogPhoto: string | null;
   /** What its Website Catalog listing says it fits, offered when the part itself says nothing. */

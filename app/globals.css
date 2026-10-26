@@ -1365,6 +1365,14 @@ Modal
   border-color: var(--amber-line, rgba(224,140,11,0.30));
 }
 
+/* Information, not a problem: the one neutral accent (indigo) as a tint. Used for notes such as
+   "this number is also on another brand of the part", which are fine and need no action. */
+.alert-info {
+  background: var(--color-info-bg);
+  color: var(--ind);
+  border-color: rgba(30, 64, 175, 0.2);
+}
+
 /* ===================================================
    Inline Metric Row (compact stats, no card borders)
    =================================================== */
@@ -1652,6 +1660,8 @@ Modal
 
 /* A part number with its "made by this app" label beside it, rather than squeezed inside the code. */
 .pn-cell { align-items: center; display: inline-flex; gap: 6px; white-space: nowrap; }
+/* A part's other numbers, small under its part number (the first two, then a count). */
+.pn-also { color: var(--ink-3); font-size: 11.5px; margin-top: 3px; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Marks a code this app generated rather than the manufacturer's number. A quiet outline label, so it
    is noticed without competing with the number itself. */

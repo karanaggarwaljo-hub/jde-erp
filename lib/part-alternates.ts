@@ -12,6 +12,8 @@ import { normalizeCode } from './part-search';
 export type AlternatePart = {
   id: string;
   part_number: string;
+  /** Its other numbers (lib/part-numbers.ts); a number in common is the strongest reason. */
+  other_numbers?: readonly string[] | null;
   oem_number?: string | null;
   name: string;
   brand?: string | null;
@@ -63,7 +65,7 @@ const overlapOf = (a: Set<string>, b: Set<string>) => {
 };
 
 const plain = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-const rawCodes = (part: AlternatePart) => [part.part_number, part.oem_number].map((code) => String(code ?? '').trim()).filter(Boolean);
+const rawCodes = (part: AlternatePart) => [part.part_number, ...(part.other_numbers ?? []), part.oem_number].map((code) => String(code ?? '').trim()).filter(Boolean);
 const amount = (value: unknown) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;

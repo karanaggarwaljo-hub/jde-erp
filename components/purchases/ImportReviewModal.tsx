@@ -179,10 +179,35 @@ export default function ImportReviewModal(props: ImportReviewModalProps) {
                   {review?.needsDecision && review.match.kind === 'suggested' ? (
                     // Deliberately unresolved until the owner says so: the names only look
                     // alike, and guessing wrong puts this stock on the wrong part.
+                    review.match.others && review.match.others.length > 0 ? (
+                      // One number kept in several brands, and the bill does not say which: one
+                      // button per brand, so the stock goes onto the right shelf.
+                      <div>
+                        <span className="badge badge-warning">Which brand?</span>
+                        <div className="text-muted" style={{ fontSize: '12px', marginTop: '3px' }}>{review.match.reason}</div>
+                        <div style={{ display: 'flex', gap: '6px', marginTop: '5px', flexWrap: 'wrap' }}>
+                          {[review.match.product, ...review.match.others].map((candidate) => (
+                            <button key={candidate.id} type="button" className="btn btn-sm btn-secondary" disabled={confirmingImport}
+                              title={`${candidate.part_number} — ${candidate.name} · ${candidate.current_stock} in stock`}
+                              onClick={() => setImportLinks((current) => ({ ...current, [index]: candidate.id }))}>
+                              {candidate.brand?.trim() || 'No brand'}
+                            </button>
+                          ))}
+                          <button type="button" className="btn btn-sm btn-ghost" disabled={confirmingImport || !line.brand?.trim()}
+                            title={line.brand?.trim() ? `Add ${line.brand.trim()} as a new item with its own stock` : 'Type its brand in the Brand box first'}
+                            onClick={() => setImportLinks((current) => ({ ...current, [index]: NEW_PART }))}>
+                            A new brand
+                          </button>
+                        </div>
+                        {!line.brand?.trim() && (
+                          <div className="text-muted" style={{ fontSize: '11.5px', marginTop: '3px' }}>For a brand you don&apos;t stock yet, type it in the Brand box first.</div>
+                        )}
+                      </div>
+                    ) : (
                     <div>
                       <span className="badge badge-warning">Same part?</span>
                       <div style={{ fontSize: '12px', marginTop: '3px' }}>
-                        <strong>{review.match.product.part_number}</strong> — {review.match.product.name}
+                        <strong>{review.match.product.part_number}</strong> — {review.match.product.name}{review.match.product.brand ? ` (${review.match.product.brand})` : ''}
                         <div className="text-muted">Already in stock: {review.match.product.current_stock} · {review.match.reason}</div>
                       </div>
                       <div style={{ display: 'flex', gap: '6px', marginTop: '5px' }}>
@@ -196,12 +221,13 @@ export default function ImportReviewModal(props: ImportReviewModalProps) {
                         </button>
                       </div>
                     </div>
+                    )
                   ) : review?.matchedProduct ? (
                     <div>
                       <span className="badge badge-success">{importLinks[index] ? 'Linked by you' : 'Matched'}</span>{' '}
                       <strong style={{ fontSize: '12px' }}>{review.matchedProduct.part_number}</strong>
                       <div className="text-muted" style={{ fontSize: '12px', marginTop: '3px' }}>
-                        {review.matchedProduct.name}
+                        {review.matchedProduct.name}{review.matchedProduct.brand ? ` (${review.matchedProduct.brand})` : ''}
                         {review.match.kind === 'exact' && !importLinks[index] ? ` · ${review.match.reason}` : ''}
                       </div>
                       {importLinks[index] && importLinks[index] !== NEW_PART && (

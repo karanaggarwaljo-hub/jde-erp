@@ -17,6 +17,9 @@ export type Product = {
   id: string;
   company_id: string;
   part_number: string;
+  /** Every other number this part is known by (a supplier's code, an old number). Searched
+   *  wherever the part number is. Tidied by the database; see lib/part-numbers.ts. */
+  other_numbers?: string[] | null;
   oem_number: string;
   hsn_code: string;
   name: string;
@@ -37,6 +40,8 @@ export type Product = {
  *  <input> holds; the numbers are converted once, on save. */
 export type PartFormData = {
   part_number: string;
+  /** The part's other numbers as typed, separated by commas (lib/part-numbers.ts splitNumberList). */
+  other_numbers: string;
   oem_number: string;
   hsn_code: string;
   name: string;

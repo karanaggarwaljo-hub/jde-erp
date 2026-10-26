@@ -18,6 +18,8 @@
 export type SearchableProduct = {
   name?: string | null;
   part_number?: string | null;
+  /** A part's other numbers (lib/part-numbers.ts): found by any of them, like the part number. */
+  other_numbers?: readonly string[] | null;
   oem_number?: string | null;
   brand?: string | null;
   compatibility?: string | null;
@@ -31,9 +33,9 @@ const plain = (value: unknown): string => (typeof value === 'string' ? value.toL
 const squashed = (value: unknown): string => plain(value).replace(/[^a-z0-9]/g, '');
 
 /** The fields compared with punctuation removed as well as plainly. */
-const CODE_FIELDS: (keyof SearchableProduct)[] = ['part_number', 'oem_number', 'compatibility'];
+const CODE_FIELDS = ['part_number', 'oem_number', 'compatibility'] as const;
 /** The fields compared as written — prose, where punctuation separates real meaning. */
-const TEXT_FIELDS: (keyof SearchableProduct)[] = ['name', 'brand', 'category', 'compatibility'];
+const TEXT_FIELDS = ['name', 'brand', 'category', 'compatibility'] as const;
 
 export function matchesProductSearch(product: SearchableProduct, query: string): boolean {
   const term = query.trim().toLowerCase();
@@ -50,6 +52,9 @@ export function matchesProductSearch(product: SearchableProduct, query: string):
 
   for (const field of CODE_FIELDS) {
     if (squashed(product[field]).includes(squashedTerm)) return true;
+  }
+  for (const number of product.other_numbers ?? []) {
+    if (squashed(number).includes(squashedTerm)) return true;
   }
   return false;
 }
@@ -74,30 +79,4 @@ export function compatibilitySuggestions(products: SearchableProduct[], limit = 
     .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label))
     .slice(0, limit)
     .map((entry) => entry.label);
-}
-
-/** The minimum needed to spot a part number already in use. */
-export type NumberedProduct = { id: string; part_number?: string | null; name?: string | null };
-
-/**
- * Other parts already carrying this number.
- *
- * Kept apart from the same-name duplicate check, because they catch different mistakes and
- * deserve different words. A repeated name is usually someone re-adding a part they could not
- * see; a repeated number is the thing that makes a catalogue permanently ambiguous. Three
- * different products in this catalogue share SP-258, which is exactly why a scan of it cannot
- * resolve to one part and every sale and purchase has to stop and ask which was meant.
- *
- * Compared with punctuation and case removed, matching how lib/part-search.ts resolves a scanned
- * code — otherwise "SP-258" and "sp258" would look like different numbers here and the same
- * number there, and the warning would miss the case it exists for.
- */
-export function duplicatePartNumbers<T extends NumberedProduct>(
-  partNumber: string,
-  products: T[],
-  excludeId?: string
-): T[] {
-  const code = squashed(partNumber);
-  if (!code) return [];
-  return products.filter((product) => product.id !== excludeId && squashed(product.part_number) === code);
 }

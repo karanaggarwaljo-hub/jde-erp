@@ -1,4 +1,5 @@
 import type { CostUpdateRow } from './client-import';
+import { brandKey } from './part-numbers';
 
 /** Works out which existing part each row of a cost sheet refers to, and what would change.
  *
@@ -10,7 +11,10 @@ import type { CostUpdateRow } from './client-import';
 export type CostMatchProduct = {
   id: string;
   part_number: string;
+  /** Its other numbers (lib/part-numbers.ts), matched after the part and OEM numbers. */
+  other_numbers?: readonly string[] | null;
   oem_number: string;
+  brand?: string | null;
   name: string;
   cost_price: number;
 };
@@ -29,7 +33,7 @@ export type CostMatch = {
   row: CostUpdateRow;
   outcome: CostMatchOutcome;
   product?: CostMatchProduct;
-  matchedBy?: 'part number' | 'OEM number' | 'name';
+  matchedBy?: 'part number' | 'OEM number' | 'other number' | 'name';
   /** Plain-language explanation, shown as-is for anything that will not be applied. */
   reason?: string;
 };
@@ -42,14 +46,18 @@ const codeKey = (value: string): string => value.toLowerCase().replace(/[^a-z0-9
  *  would merge genuinely different parts. */
 const nameKey = (value: string): string => value.toLowerCase().replace(/\s+/g, ' ').trim();
 
-function indexBy(products: CostMatchProduct[], pick: (p: CostMatchProduct) => string, key: (v: string) => string) {
+function indexBy(products: CostMatchProduct[], pick: (p: CostMatchProduct) => string | readonly string[], key: (v: string) => string) {
   const map = new Map<string, CostMatchProduct[]>();
   for (const product of products) {
-    const value = key(pick(product) ?? '');
-    if (!value) continue;
-    const bucket = map.get(value);
-    if (bucket) bucket.push(product);
-    else map.set(value, [product]);
+    const picked = pick(product) ?? '';
+    for (const raw of typeof picked === 'string' ? [picked] : picked) {
+      const value = key(raw ?? '');
+      if (!value) continue;
+      const bucket = map.get(value);
+      if (bucket) {
+        if (!bucket.includes(product)) bucket.push(product);
+      } else map.set(value, [product]);
+    }
   }
   return map;
 }
@@ -57,6 +65,7 @@ function indexBy(products: CostMatchProduct[], pick: (p: CostMatchProduct) => st
 export function planCostUpdates(rows: CostUpdateRow[], products: CostMatchProduct[]): CostMatch[] {
   const byPart = indexBy(products, (p) => p.part_number, codeKey);
   const byOem = indexBy(products, (p) => p.oem_number, codeKey);
+  const byOther = indexBy(products, (p) => p.other_numbers ?? [], codeKey);
   const byName = indexBy(products, (p) => p.name, nameKey);
 
   // Part number first, then OEM, then name: a code identifies a part far more reliably than a
@@ -64,6 +73,7 @@ export function planCostUpdates(rows: CostUpdateRow[], products: CostMatchProduc
   const attempts: Array<{ label: CostMatch['matchedBy']; value: (r: CostUpdateRow) => string; index: Map<string, CostMatchProduct[]> }> = [
     { label: 'part number', value: (r) => codeKey(r.partNumber), index: byPart },
     { label: 'OEM number', value: (r) => codeKey(r.oemNumber), index: byOem },
+    { label: 'other number', value: (r) => codeKey(r.partNumber), index: byOther },
     { label: 'name', value: (r) => nameKey(r.name), index: byName },
   ];
 
@@ -137,17 +147,24 @@ export function countOutcomes(matches: CostMatch[]): CostPlanCounts {
  *
  *  Used by the "add as new parts" side of the importer to flag rows that would create a second
  *  copy of something already stocked. Same keys and the same tolerance as the cost matcher above,
- *  so the two halves of one dialog can never disagree about whether a part is already there. */
+ *  so the two halves of one dialog can never disagree about whether a part is already there.
+ *
+ *  A row naming a brand is only "already there" when that brand is, or when the part on file has
+ *  no brand recorded: since October 2026 the same part can be kept in several brands, each its
+ *  own item, so a JCB filter on file does not make a Fleetguard one a duplicate. */
 export function findExistingProduct(
   products: CostMatchProduct[],
-  candidate: { partNumber?: string; name?: string }
+  candidate: { partNumber?: string; name?: string; brand?: string | null }
 ): CostMatchProduct | undefined {
+  const brand = brandKey(candidate.brand);
+  const sameBrand = (p: CostMatchProduct) => !brand || !brandKey(p.brand) || brandKey(p.brand) === brand;
   const partKey = codeKey(candidate.partNumber ?? '');
   if (partKey) {
-    const byPart = products.find((p) => codeKey(p.part_number ?? '') === partKey);
+    const byPart = products.find((p) => sameBrand(p)
+      && [p.part_number ?? '', ...(p.other_numbers ?? [])].some((number) => codeKey(number) === partKey));
     if (byPart) return byPart;
   }
   const label = nameKey(candidate.name ?? '');
-  if (label) return products.find((p) => nameKey(p.name ?? '') === label);
+  if (label) return products.find((p) => sameBrand(p) && nameKey(p.name ?? '') === label);
   return undefined;
 }
