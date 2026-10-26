@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { currentIdentity, indexProductsById, savedLineLabel } from '../lib/trade-history';
+import { currentIdentity, indexProductsById, partLabeler, savedLineLabel } from '../lib/trade-history';
 import { buildLastSoldIndex } from '../lib/sale-entry';
 import { buildLastPaidIndex } from '../lib/purchase-entry';
 
@@ -51,4 +51,30 @@ test('what a supplier last charged is still found after the part is renamed', ()
   const items = [{ po_id: 'PO-1009', product_id: 'p-bearing', part_number: 'BIG-P17', name: 'big pinion beraing 803149/10', unit_cost: 1300 }];
   const index = buildLastPaidIndex('KRISHNA HYDRAULICS', orders, items.map((item) => currentIdentity(item, CATALOGUE)));
   assert.equal(index.get('803149/10 - Big Pinion Bearing')?.rate, 1300);
+});
+
+/** October 2026: one part kept in two brands shares a number and a name. A line finds its part by
+ *  its label, so the two must not share one, or the second brand could never be billed. */
+test('the same part in two brands gets two labels; every other part keeps its own', () => {
+  const parts = [
+    { id: 'jcb', part_number: '320/A7291', name: 'Water Separator', brand: 'JCB' },
+    { id: 'fg', part_number: '320/A7291', name: 'Water Separator', brand: 'Fleetguard' },
+    { id: 'pin', part_number: 'P00-12400', name: 'PIN', brand: 'JCB' },
+  ];
+  const labelOf = partLabeler(parts);
+  assert.equal(labelOf(parts[0]), '320/A7291 - Water Separator (JCB)');
+  assert.equal(labelOf(parts[1]), '320/A7291 - Water Separator (Fleetguard)');
+  assert.equal(labelOf(parts[2]), 'P00-12400 - PIN', 'a part with no twin is labelled exactly as before');
+
+  // A saved line reopens under its own brand's label, and its last price is kept apart.
+  const byId = indexProductsById(parts);
+  assert.equal(savedLineLabel({ product_id: 'fg', part_number: '320/A7291', name: 'Water Separator' }, byId), '320/A7291 - Water Separator (Fleetguard)');
+  const invoices = [{ id: 'INV-1', customer: 'bawa', date: '2026-10-01', status: 'paid' }];
+  const items = [
+    { invoice_id: 'INV-1', product_id: 'jcb', part_number: '320/A7291', name: 'Water Separator', qty: 1, unit_price: 1850 },
+    { invoice_id: 'INV-1', product_id: 'fg', part_number: '320/A7291', name: 'Water Separator', qty: 1, unit_price: 1200 },
+  ];
+  const last = buildLastSoldIndex('bawa', invoices, items.map((item) => currentIdentity(item, byId)));
+  assert.equal(last.get('320/A7291 - Water Separator (JCB)')?.rate, 1850);
+  assert.equal(last.get('320/A7291 - Water Separator (Fleetguard)')?.rate, 1200);
 });

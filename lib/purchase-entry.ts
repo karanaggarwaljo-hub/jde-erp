@@ -15,10 +15,10 @@
  * real thing to do when a part is scarce or the sale price is stale. Being told is the point.
  */
 
-import { buildLastTradedIndex, partLabel, type LastTraded } from '@/lib/trade-history';
+import { buildLastTradedIndex, partLabel, partLabeler, type LastTraded } from '@/lib/trade-history';
 import type { PartOption, POLine } from '@/lib/purchase-types';
 
-export { partLabel };
+export { partLabel, partLabeler };
 
 export type AddPartResult = {
   lines: POLine[];
@@ -63,6 +63,8 @@ export type PurchaseItem = {
   po_id: string;
   part_number: string;
   name: string;
+  /** The part's current label, when the line was traced to its part (currentIdentity). */
+  label?: string;
   unit_cost: number | string;
 };
 
@@ -88,6 +90,7 @@ export function buildLastPaidIndex(
       documentId: item.po_id,
       partNumber: item.part_number,
       name: item.name,
+      label: item.label,
       rate: Number(item.unit_cost),
     })),
     draftStatus

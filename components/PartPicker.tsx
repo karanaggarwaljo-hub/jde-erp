@@ -170,7 +170,9 @@ export default function PartPicker<T extends PickablePart>({ parts, onPick, onCu
                   {showPhotos && <PartPhoto url={part.photo} name={part.name} size={32} />}
                   <span className="pn-chip">{part.partNumber}</span>
                   <span className="part-picker-name">{part.name}</span>
-                  {part.brand && <span className="text-muted text-sm">{part.brand}</span>}
+                  {/* The brand as a tag, so the same part in two brands is told apart at a glance. */}
+                  {part.brand && <span className="badge badge-info">{part.brand}</span>}
+                  {match.via && <span className="text-muted text-sm">found as {match.via}</span>}
                 </div>
                 <div className="part-picker-meta">
                   <span className={outOfStock ? 'text-danger text-sm' : 'text-muted text-sm'}>

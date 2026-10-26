@@ -120,7 +120,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
 
         const chosenNew = costSheet.newParts.filter((_, index) => !excludedNew.has(index));
         const duplicateCount = costSheet.newParts.filter((part) =>
-          findExistingProduct(products, { partNumber: part.part_number, name: part.name })
+          findExistingProduct(products, { partNumber: part.part_number, name: part.name, brand: part.brand })
         ).length;
         const allNewTicked = costSheet.newParts.length > 0 && chosenNew.length === costSheet.newParts.length;
         const toggleNew = (index: number) =>
@@ -298,7 +298,7 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                         </thead>
                         <tbody>
                           {costSheet.newParts.map((part, index) => {
-                            const existing = findExistingProduct(products, { partNumber: part.part_number, name: part.name });
+                            const existing = findExistingProduct(products, { partNumber: part.part_number, name: part.name, brand: part.brand });
                             return (
                               <tr key={index} style={excludedNew.has(index) ? { opacity: 0.45 } : undefined}>
                                 <td>

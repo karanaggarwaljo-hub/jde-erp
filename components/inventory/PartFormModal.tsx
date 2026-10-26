@@ -16,6 +16,7 @@ import type { Dispatch, FormEvent, ReactNode, RefObject, SetStateAction } from '
 import { Plus, Sparkles } from 'lucide-react';
 import { money, wholeMoney } from '@/lib/money';
 import { compatibilitySuggestions } from '@/lib/product-search';
+import { brandLabel, cleanOtherNumbers, splitNumberList } from '@/lib/part-numbers';
 import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import type { PartDraftSummary, PartFormData, Product } from '@/lib/inventory-types';
 
@@ -26,9 +27,13 @@ export type PartFormModalProps = {
   products: Product[];
   categoryOptions: string[];
   possibleDuplicate: Product | undefined;
-  /** Other parts already carrying the number being typed. Usually empty; more than one is how a
-   *  catalogue ends up with three different products under SP-258. */
-  duplicatePartNumbers: Product[];
+  /** Other parts already using the part number being typed: the same brand is a clash the database
+   *  refuses (one number per brand); another brand is the same part from another maker, and fine. */
+  numberUsers: { sameBrand: Product[]; otherBrands: Product[] };
+  /** Other parts that already answer to one of the other numbers typed. Allowed, only noted. */
+  otherNumberUsers: Array<{ number: string; part: Product }>;
+  /** Set while adding another brand of an existing part: the details were copied from it. */
+  addingBrandOf: Product | null;
   draft: PartDraftSummary;
   draftMargin: number | null;
   saveError: string;
@@ -51,7 +56,7 @@ export type PartFormModalProps = {
 
 export default function PartFormModal(props: PartFormModalProps) {
   const {
-    formData, setFormData, editingProduct, products, categoryOptions, possibleDuplicate, duplicatePartNumbers,
+    formData, setFormData, editingProduct, products, categoryOptions, possibleDuplicate, numberUsers, otherNumberUsers, addingBrandOf,
     draft, draftMargin, saveError, savingProduct, savedThisSession,
     suggesting, suggestFailed, suggestPartDetails,
     addAnotherRef, handleSave, setShowModal, brandChipColor, photoEditor,
@@ -62,11 +67,13 @@ export default function PartFormModal(props: PartFormModalProps) {
           <div className="modal-box" style={{ maxWidth: '980px' }}>
             <div className="modal-header">
               <div>
-                <h3 className="modal-title">{editingProduct ? 'Edit Spare Part' : 'Add New Spare Part'}</h3>
+                <h3 className="modal-title">{editingProduct ? 'Edit Spare Part' : addingBrandOf ? 'Add Another Brand' : 'Add New Spare Part'}</h3>
                 <p className="page-subtitle" style={{ marginTop: '2px' }}>
                   {editingProduct
                     ? <>Editing <span className="pn-chip">{editingProduct.part_number}</span> · changes apply the moment you save</>
-                    : 'Added to this company’s catalogue and available to sell straight away'}
+                    : addingBrandOf
+                      ? <>The same part as <strong>{addingBrandOf.name}</strong> ({brandLabel(addingBrandOf.brand)}), in another brand, with its own stock and price</>
+                      : 'Added to this company’s catalogue and available to sell straight away'}
                 </p>
               </div>
               <button className="btn btn-ghost btn-sm" disabled={savingProduct} onClick={() => setShowModal(false)}>✕</button>
@@ -80,18 +87,38 @@ export default function PartFormModal(props: PartFormModalProps) {
               <div className="modal-body part-form">
                 <div className="part-form-fields">
                 {saveError && <div className="alert alert-danger" role="alert">{saveError}</div>}
+                {addingBrandOf && (
+                  <div className="alert alert-info" role="status">
+                    <span>
+                      The name, part numbers, category and fitment are copied from {addingBrandOf.name}. Type the new
+                      <strong> brand</strong>, then its own price and how many you have.
+                    </span>
+                  </div>
+                )}
                 {possibleDuplicate && (
                   <div className="alert alert-warning" role="alert">
                     A part named &quot;{possibleDuplicate.name}&quot; already exists ({possibleDuplicate.part_number}, {possibleDuplicate.current_stock} in stock) — this will add a separate, second entry rather than update it. If you meant to edit the existing one, cancel and use its Edit button instead.
                   </div>
                 )}
-                {/* The database refuses a second part with the same number, so this is no longer a
-                    warning about what saving would create — it is a warning that saving will be
-                    refused. Said here, before the button, rather than as an error afterwards. */}
-                {duplicatePartNumbers.length > 0 && (
+                {/* One number per brand: the database refuses the same number twice in the same
+                    brand, so that is said here, before the button. The same number in another brand
+                    is the same part from another maker, and is fine. */}
+                {numberUsers.sameBrand.length > 0 && (
                   <div className="alert alert-warning" role="alert">
-                    <strong>{formData.part_number.trim()}</strong> is already on {duplicatePartNumbers.length === 1 ? 'another part' : `${duplicatePartNumbers.length} other parts`}:{' '}
-                    {duplicatePartNumbers.map((p) => p.name).join(', ')}. A part number has to name one part, so this will not save as it stands. Give this one its own number, or clear the box and one will be made for it.
+                    <span>
+                      <strong>{formData.part_number.trim()}</strong> is already on{' '}
+                      {numberUsers.sameBrand.map((p) => p.name).join(', ')}, in the same brand ({brandLabel(formData.brand)}). This will
+                      not save as it stands. If this is another brand of that part, type its brand. Otherwise give it its own number,
+                      or clear the box and one will be made for it.
+                    </span>
+                  </div>
+                )}
+                {numberUsers.sameBrand.length === 0 && numberUsers.otherBrands.length > 0 && (
+                  <div className="alert alert-info" role="status">
+                    <span>
+                      {formData.part_number.trim()} is also on {numberUsers.otherBrands.map((p) => `${p.name} (${brandLabel(p.brand)})`).join(', ')}.
+                      That is fine: this one is a different brand, with its own stock and price.
+                    </span>
                   </div>
                 )}
                 {photoEditor && (
@@ -180,6 +207,35 @@ export default function PartFormModal(props: PartFormModalProps) {
                       <label className="form-label">HSN Code</label>
                       <input className="form-input" placeholder="e.g. 84314990" value={formData.hsn_code} onChange={e => setFormData({ ...formData, hsn_code: e.target.value })} />
                     </div>
+                  </div>
+                  {/* Any number of other numbers, typed with commas between them. One box rather
+                      than a row per number, so nothing half-typed is lost when Save is pressed. */}
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="part-other-numbers">Other part numbers</label>
+                    <input
+                      id="part-other-numbers"
+                      className="form-input"
+                      placeholder="e.g. 32/925694, FS19505 (put a comma between them)"
+                      value={formData.other_numbers}
+                      onChange={e => setFormData({ ...formData, other_numbers: e.target.value })}
+                    />
+                    {(() => {
+                      const kept = cleanOtherNumbers(splitNumberList(formData.other_numbers), formData.part_number);
+                      if (kept.length === 0) {
+                        return <small className="text-muted">The supplier&apos;s code, an old number, the maker&apos;s number. Searching, billing and scanned supplier bills find the part by any of them.</small>;
+                      }
+                      return (
+                        <div className="flex items-center gap-2" style={{ flexWrap: 'wrap', marginTop: '6px' }}>
+                          <small className="text-muted">{kept.length === 1 ? 'Also found as' : `Also found as (${kept.length})`}</small>
+                          {kept.map((number) => <span key={number} className="pn-chip">{number}</span>)}
+                        </div>
+                      );
+                    })()}
+                    {otherNumberUsers.length > 0 && (
+                      <small className="text-muted" style={{ display: 'block', marginTop: '4px' }}>
+                        {otherNumberUsers.map(({ number, part }) => `${number} is also on ${part.name} (${brandLabel(part.brand)})`).join(' · ')}.
+                      </small>
+                    )}
                   </div>
                 </div>
 

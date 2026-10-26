@@ -32,6 +32,7 @@ const EXTENSION: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'p
 export type DrivePart = {
   id: string;
   part_number?: string | null;
+  other_numbers?: readonly string[] | null;
   oem_number?: string | null;
   name?: string | null;
   brand?: string | null;
@@ -70,10 +71,10 @@ function csvCell(value: unknown): string {
 /** The Parts list sheet, as CSV: one row per part, sorted by part number, with a link to its photo
  *  in the Drive where there is one. */
 export function partsCsv(parts: DrivePart[], photoLinks: Map<string, string>): string {
-  const header = ['Part number', 'OEM number', 'Name', 'Brand', 'Category', 'Fits', 'Sale price', 'MRP', 'Cost price', 'Stock', 'Min stock', 'Location', 'HSN', 'Photo'];
+  const header = ['Part number', 'Other numbers', 'OEM number', 'Name', 'Brand', 'Category', 'Fits', 'Sale price', 'MRP', 'Cost price', 'Stock', 'Min stock', 'Location', 'HSN', 'Photo'];
   const rows = [...parts]
     .sort((a, b) => text(a.part_number).localeCompare(text(b.part_number)) || text(a.name).localeCompare(text(b.name)))
-    .map((part) => [asText(part.part_number), asText(part.oem_number), part.name, part.brand, part.category, part.compatibility, part.sale_price, part.mrp, part.cost_price, part.current_stock, part.min_stock, part.location, asText(part.hsn_code), photoLinks.get(part.id) ?? '']);
+    .map((part) => [asText(part.part_number), (part.other_numbers ?? []).join(', '), asText(part.oem_number), part.name, part.brand, part.category, part.compatibility, part.sale_price, part.mrp, part.cost_price, part.current_stock, part.min_stock, part.location, asText(part.hsn_code), photoLinks.get(part.id) ?? '']);
   return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
 }
 

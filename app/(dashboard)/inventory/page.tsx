@@ -15,6 +15,7 @@ import {
   XCircle,
   Merge,
   Camera,
+  CopyPlus,
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { money, wholeMoney } from '@/lib/money';
@@ -22,7 +23,8 @@ import { useCompany } from '@/components/CompanyProvider';
 import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sheetFromScannedParts, fileToBase64, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
 import { planCostUpdates, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { planDetailUpdates, looksLikeAnInventedCode } from '@/lib/detail-import';
-import { matchesProductSearch, duplicatePartNumbers as findDuplicatePartNumbers, compatibilitySuggestions } from '@/lib/product-search';
+import { matchesProductSearch, compatibilitySuggestions } from '@/lib/product-search';
+import { cleanOtherNumbers, partNumberUsers, partsAnsweringTo, sameBrand, splitNumberList } from '@/lib/part-numbers';
 import { averageMarginPercent, marginPercent } from '@/lib/margin';
 import { buildPartsWorksheet, countUnanswered, worksheetToCsv, worksheetFileName } from '@/lib/parts-worksheet';
 import { correctOldestLayerCost, setProductStock } from '@/lib/client-fifo';
@@ -185,8 +187,12 @@ export default function InventoryPage() {
   // running count and the footer wording, and resets whenever the dialog is reopened.
   const [savedThisSession, setSavedThisSession] = useState(0);
 
+  // Set while "Add another brand" is open: the part whose details were copied into the form.
+  const [addingBrandOf, setAddingBrandOf] = useState<Product | null>(null);
+
   const [formData, setFormData] = useState<PartFormData>({
     part_number: '',
+    other_numbers: '',
     oem_number: '',
     hsn_code: '',
     name: '',
@@ -205,15 +211,25 @@ export default function InventoryPage() {
 
   // Warns before creating a likely-accidental duplicate (e.g. re-adding a part because a previous
   // save gave no visible confirmation) without blocking a genuinely intentional re-add — same name,
-  // case-insensitive, only checked while adding a brand-new part, never while editing one.
+  // case-insensitive, only checked while adding a brand-new part, never while editing one. The same
+  // name in another brand is how one part is kept in two brands, so only the same brand counts.
   const possibleDuplicate = !editingProduct && formData.name.trim()
-    ? products.find((p) => p.name.trim().toLowerCase() === formData.name.trim().toLowerCase())
+    ? products.find((p) => p.name.trim().toLowerCase() === formData.name.trim().toLowerCase() && sameBrand(p.brand, formData.brand))
     : undefined;
 
-  // A part number already on another part. Separate from the name check above, and worth its own
-  // warning: a repeated name is usually someone re-adding a part they could not see, while a
-  // repeated number is what makes a catalogue permanently ambiguous to a scanner.
-  const duplicateNumbers = findDuplicatePartNumbers(formData.part_number, products, editingProduct?.id);
+  // The part number already on other parts: in the same brand that is a clash the database refuses
+  // (one number per brand); in another brand it is the same part from another maker, and fine.
+  // Worth its own note apart from the name check: a repeated number in one brand is what makes a
+  // scan of it ambiguous.
+  const numberUsers = partNumberUsers(formData.part_number, formData.brand, products, editingProduct?.id);
+  // The other numbers typed, as they will be saved, and any other part that already answers to one.
+  const typedOtherNumbers = cleanOtherNumbers(splitNumberList(formData.other_numbers), formData.part_number);
+  // Other brands of this same part share its numbers by design and are already named above.
+  const otherNumberUsers = partsAnsweringTo(
+    typedOtherNumbers,
+    products.filter((p) => !numberUsers.otherBrands.includes(p) && !numberUsers.sameBrand.includes(p)),
+    editingProduct?.id,
+  );
 
   // Margin implied by whatever cost and sale price are currently typed into the form. Null until
   // both are genuine positive numbers — a part priced at zero has no meaningful margin, and a
@@ -301,7 +317,8 @@ export default function InventoryPage() {
   const averageMargin = averageMarginPercent(products, (p) => Number(p.sale_price), fifoCostFor);
 
   const suggestPartDetails = async () => {
-    if (!formData.name.trim()) return;
+    // Adding another brand copies the details from that part; a guess would only undo the copy.
+    if (!formData.name.trim() || addingBrandOf) return;
     setSuggesting(true);
     setSuggestFailed(false);
     try {
@@ -327,6 +344,7 @@ export default function InventoryPage() {
 
   const handleOpenAdd = () => {
     setEditingProduct(null);
+    setAddingBrandOf(null);
     setSaveError('');
     setSuggestFailed(false);
     setSavedThisSession(0);
@@ -336,6 +354,7 @@ export default function InventoryPage() {
       // how five different parts came to share SP-239. Typing a real supplier code here still
       // wins; it is only the stand-in that is no longer guessed here.
       part_number: '',
+      other_numbers: '',
       oem_number: '',
       hsn_code: '',
       name: '',
@@ -365,6 +384,10 @@ export default function InventoryPage() {
     try {
       const newCostPrice = Number(formData.cost_price);
       const newStock = Number(formData.current_stock);
+      // Another brand of a part is told apart from it only by its brand.
+      if (addingBrandOf && !formData.brand.trim()) {
+        throw new Error(`Type the brand of this one, so it is kept apart from ${addingBrandOf.name}${addingBrandOf.brand ? ` (${addingBrandOf.brand})` : ''}.`);
+      }
       if (!editingProduct && newStock <= 0) {
         throw new Error('Initial stock must be greater than 0 for a new part — enter the quantity you actually have on hand.');
       }
@@ -374,6 +397,8 @@ export default function InventoryPage() {
       }
       const payload = {
         ...formData,
+        // Saved as a list; the database tidies it the same way (lib/part-numbers.ts).
+        other_numbers: cleanOtherNumbers(splitNumberList(formData.other_numbers), formData.part_number),
         cost_price: newCostPrice,
         mrp: Number(formData.mrp),
         sale_price: Number(formData.sale_price),
@@ -425,9 +450,11 @@ export default function InventoryPage() {
         // fields reset. The part number advances from the one just saved.
         const added = savedThisSession + 1;
         setSavedThisSession(added);
+        setAddingBrandOf(null);
         setFormData((current) => ({
           ...current,
           part_number: nextPartNumber(current.part_number),
+          other_numbers: '',
           name: '',
           hsn_code: '',
           compatibility: '',
@@ -443,9 +470,13 @@ export default function InventoryPage() {
       }
 
       setShowModal(false);
+      const addedBrandOf = addingBrandOf;
+      setAddingBrandOf(null);
       setFeedback(
         editingProduct
           ? 'Part updated successfully.'
+          : addedBrandOf
+            ? `${formData.brand.trim() || 'The new brand'} of ${addedBrandOf.name} added. Both brands now show in the part's window.`
           : savedThisSession > 0
             ? `${savedThisSession + 1} parts added to inventory.`
             : 'New part added to inventory.',
@@ -459,11 +490,13 @@ export default function InventoryPage() {
 
   const handleEdit = (product: Product) => {
     setEditingProduct(product);
+    setAddingBrandOf(null);
     setSaveError('');
     setSuggestFailed(false);
     setSavedThisSession(0);
     setFormData({
       part_number: product.part_number,
+      other_numbers: (product.other_numbers ?? []).join(', '),
       oem_number: product.oem_number,
       hsn_code: product.hsn_code || '',
       name: product.name,
@@ -475,6 +508,34 @@ export default function InventoryPage() {
       sale_price: String(product.sale_price),
       current_stock: String(product.current_stock),
       min_stock: String(product.min_stock),
+      location: product.location,
+    });
+    setShowModal(true);
+  };
+
+  /** The same part in another brand: a new item with its own stock, cost and price, starting from a
+   *  copy of this one's name, numbers, category, fitment, HSN, rack and reorder level. Only the brand,
+   *  the prices and the stock are left for the owner to fill in. */
+  const handleAddBrand = (product: Product) => {
+    setEditingProduct(null);
+    setAddingBrandOf(product);
+    setSaveError('');
+    setSuggestFailed(false);
+    setSavedThisSession(0);
+    setFormData({
+      part_number: product.part_number,
+      other_numbers: (product.other_numbers ?? []).join(', '),
+      oem_number: product.oem_number || '',
+      hsn_code: product.hsn_code || '',
+      name: product.name,
+      brand: '',
+      category: product.category,
+      compatibility: product.compatibility,
+      cost_price: '',
+      mrp: '',
+      sale_price: '',
+      current_stock: '',
+      min_stock: String(product.min_stock ?? ''),
       location: product.location,
     });
     setShowModal(true);
@@ -620,7 +681,7 @@ export default function InventoryPage() {
       setExcludedNew(
         new Set(
           newParts
-            .map((part, index) => (findExistingProduct(products, { partNumber: part.part_number, name: part.name }) ? index : -1))
+            .map((part, index) => (findExistingProduct(products, { partNumber: part.part_number, name: part.name, brand: part.brand }) ? index : -1))
             .filter((index) => index >= 0)
         )
       );
@@ -982,6 +1043,11 @@ export default function InventoryPage() {
                           )}
                         </span>
                       : <span className="text-muted" style={{ fontSize: '12px' }}>no part number</span>}
+                    {(p.other_numbers ?? []).length > 0 && (
+                      <div className="pn-also" title={`Also known as ${(p.other_numbers ?? []).join(', ')}`}>
+                        also {(p.other_numbers ?? []).slice(0, 2).join(', ')}{(p.other_numbers ?? []).length > 2 ? ` +${(p.other_numbers ?? []).length - 2}` : ''}
+                      </div>
+                    )}
                   </td>
                   <td className="hsn-code">{p.hsn_code || '-'}</td>
                   <td style={{ maxWidth: '230px' }}>
@@ -1039,6 +1105,7 @@ export default function InventoryPage() {
                       <RowMenu
                         label={`More for ${p.name}`}
                         items={[
+                          { label: 'Add another brand', icon: <CopyPlus size={15} />, onSelect: () => handleAddBrand(p) },
                           { label: 'Merge with a duplicate', icon: <Merge size={15} />, onSelect: () => setMergeCandidate(p) },
                           { label: 'Delete', icon: <Trash2 size={15} />, danger: true, onSelect: () => { setDeleteError(''); setDeleteCandidate(p); } },
                         ]}
@@ -1073,7 +1140,7 @@ export default function InventoryPage() {
         <PartFormModal
           formData={formData} setFormData={setFormData}
           editingProduct={editingProduct} products={products}
-          categoryOptions={categoryOptions} possibleDuplicate={possibleDuplicate} duplicatePartNumbers={duplicateNumbers}
+          categoryOptions={categoryOptions} possibleDuplicate={possibleDuplicate} numberUsers={numberUsers} otherNumberUsers={otherNumberUsers} addingBrandOf={addingBrandOf}
           draft={draft} draftMargin={draftMargin}
           saveError={saveError} savingProduct={savingProduct} savedThisSession={savedThisSession}
           suggesting={suggesting} suggestFailed={suggestFailed} suggestPartDetails={suggestPartDetails}
@@ -1111,6 +1178,11 @@ export default function InventoryPage() {
             const product = products.find((row) => row.id === productId);
             setDetailPartId(null);
             if (product) handleEdit(product);
+          }}
+          onAddBrand={(productId) => {
+            const product = products.find((row) => row.id === productId);
+            setDetailPartId(null);
+            if (product) handleAddBrand(product);
           }}
         />
       )}

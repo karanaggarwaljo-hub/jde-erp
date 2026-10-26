@@ -28,6 +28,9 @@
 export type SearchablePart = {
   value: string;
   partNumber: string;
+  /** Every other number the part is known by (lib/part-numbers.ts). Typed or scanned, any of them
+   *  finds the part exactly as its part number does. */
+  otherNumbers?: readonly string[];
   name: string;
   brand: string;
   stock: number;
@@ -52,7 +55,13 @@ export type MatchReason =
   | 'brand'
   | 'all-words';
 
-export type PartMatch<T extends SearchablePart = SearchablePart> = { part: T; score: number; why: MatchReason };
+export type PartMatch<T extends SearchablePart = SearchablePart> = {
+  part: T;
+  score: number;
+  why: MatchReason;
+  /** The other number that matched, when it was not the part number, so the list can show it. */
+  via?: string;
+};
 
 // Ordered so that a stronger reason always outranks a weaker one no matter how many weak
 // reasons a part collects. Nothing sums — each part is scored by its single best reason.
@@ -66,28 +75,41 @@ const SCORES: Record<MatchReason, number> = {
   'all-words': 80,
 };
 
-function bestReason(part: SearchablePart, rawQuery: string): MatchReason | null {
-  const code = normalizeCode(rawQuery);
-  const partCode = normalizeCode(part.partNumber);
-  if (code.length > 0) {
-    if (partCode === code) return 'exact-code';
-    if (partCode.startsWith(code)) return 'code-prefix';
+/** How a typed code meets one of the part's numbers, strongest first, and which number it was. */
+function codeReason(part: SearchablePart, code: string): { why: MatchReason; via?: string } | null {
+  if (!code) return null;
+  const numbers = [part.partNumber, ...(part.otherNumbers ?? [])];
+  const checks: Array<[MatchReason, (candidate: string) => boolean]> = [
+    ['exact-code', (candidate) => candidate === code],
+    ['code-prefix', (candidate) => candidate.startsWith(code)],
+    ['code-contains', (candidate) => candidate.includes(code)],
+  ];
+  for (const [why, test] of checks) {
+    const hit = numbers.find((number) => test(normalizeCode(number)));
+    if (hit !== undefined) return { why, via: hit === part.partNumber ? undefined : hit };
   }
+  return null;
+}
+
+function bestReason(part: SearchablePart, rawQuery: string): { why: MatchReason; via?: string } | null {
+  const code = normalizeCode(rawQuery);
+  const byCode = codeReason(part, code);
+  if (byCode && byCode.why !== 'code-contains') return byCode;
 
   const query = normalizeText(rawQuery);
   const name = normalizeText(part.name);
   const brand = normalizeText(part.brand);
-  if (name.startsWith(query)) return 'name-prefix';
-  if (code.length > 0 && partCode.includes(code)) return 'code-contains';
-  if (name.includes(query)) return 'name-contains';
-  if (brand.length > 0 && brand.includes(query)) return 'brand';
+  if (name.startsWith(query)) return { why: 'name-prefix' };
+  if (byCode) return byCode;
+  if (name.includes(query)) return { why: 'name-contains' };
+  if (brand.length > 0 && brand.includes(query)) return { why: 'brand' };
 
   // Last resort: every word typed appears somewhere, in any order. This is what makes
   // "bearing pinion" find "BIG PINION BEARING 803149/10".
   const words = query.split(' ').filter(Boolean);
   if (words.length > 1) {
-    const haystack = `${normalizeText(part.partNumber)} ${name} ${brand}`;
-    if (words.every((word) => haystack.includes(word))) return 'all-words';
+    const haystack = `${normalizeText(part.partNumber)} ${(part.otherNumbers ?? []).map(normalizeText).join(' ')} ${name} ${brand}`;
+    if (words.every((word) => haystack.includes(word))) return { why: 'all-words' };
   }
   return null;
 }
@@ -102,8 +124,8 @@ export function searchParts<T extends SearchablePart>(rawQuery: string, parts: T
 
   const matches: PartMatch<T>[] = [];
   for (const part of parts) {
-    const why = bestReason(part, query);
-    if (why) matches.push({ part, score: SCORES[why], why });
+    const reason = bestReason(part, query);
+    if (reason) matches.push({ part, score: SCORES[reason.why], why: reason.why, ...(reason.via ? { via: reason.via } : {}) });
   }
 
   matches.sort((a, b) => {
@@ -125,7 +147,7 @@ export function searchParts<T extends SearchablePart>(rawQuery: string, parts: T
 export function exactCodeMatches<T extends SearchablePart>(rawQuery: string, parts: T[]): T[] {
   const code = normalizeCode(rawQuery);
   if (!code) return [];
-  return parts.filter((part) => normalizeCode(part.partNumber) === code);
+  return parts.filter((part) => [part.partNumber, ...(part.otherNumbers ?? [])].some((number) => normalizeCode(number) === code));
 }
 
 /**

@@ -851,12 +851,34 @@ export async function listPublishedCatalogProducts(): Promise<Array<Record<strin
   if (!companyId) return [];
   const { data, error } = await getClient()
     .from(supaTable('catalog_products'))
-    .select(PUBLIC_CATALOG_COLUMNS)
+    .select(`${PUBLIC_CATALOG_COLUMNS}, erp_product_id`)
     .eq('publication_status', 'published')
     .eq('company_id', companyId)
     .order('published_at', { ascending: false });
   if (error) throw error;
-  return (data as Array<Record<string, unknown>>) ?? [];
+  return withPartNumbers(companyId, (data as Array<Record<string, unknown>>) ?? []);
+}
+
+/**
+ * Each listing with the other numbers its part in Stock is known by (lib/part-numbers.ts), read live
+ * so the website can never disagree with Stock, and so a customer searching any of them finds it.
+ * Numbers printed on a box are public; the part's id used to look them up is taken back out.
+ */
+async function withPartNumbers(companyId: string, rows: Array<Record<string, unknown>>): Promise<Array<Record<string, unknown>>> {
+  const ids = Array.from(new Set(rows.map((row) => String(row.erp_product_id ?? '')).filter(Boolean)));
+  const numbers = new Map<string, string[]>();
+  if (ids.length > 0) {
+    const { data, error } = await getClient()
+      .from(supaTable('products'))
+      .select('id, other_numbers')
+      .eq('company_id', companyId)
+      .in('id', ids);
+    if (error) throw error;
+    for (const part of (data as Array<{ id: string; other_numbers: string[] | null }>) ?? []) {
+      numbers.set(part.id, part.other_numbers ?? []);
+    }
+  }
+  return rows.map(({ erp_product_id: productId, ...row }) => ({ ...row, other_numbers: numbers.get(String(productId ?? '')) ?? [] }));
 }
 
 /** Server-only: a single published catalog row, safe columns only, plus company_id — the detail
@@ -869,13 +891,15 @@ export async function getPublishedCatalogProduct(id: string): Promise<Record<str
   if (!companyId) return undefined;
   const { data, error } = await getClient()
     .from(supaTable('catalog_products'))
-    .select(`${PUBLIC_CATALOG_COLUMNS}, company_id`)
+    .select(`${PUBLIC_CATALOG_COLUMNS}, company_id, erp_product_id`)
     .eq('id', id)
     .eq('publication_status', 'published')
     .eq('company_id', companyId)
     .maybeSingle();
   if (error) throw error;
-  return (data as Record<string, unknown> | null) ?? undefined;
+  if (!data) return undefined;
+  const [row] = await withPartNumbers(companyId, [data as Record<string, unknown>]);
+  return row;
 }
 
 export type CatalogLeadInput = {
@@ -1259,7 +1283,7 @@ export async function getPartOverviewRows(companyId: string, productId: string):
   const lines = client.from('jde_invoice_items').select('*').eq('company_id', companyId).eq('product_id', productId);
   const [product, products, layers, invoiceItems, poItems, returnItems, catalogRows] = await Promise.all([
     client.from('jde_products').select('*').eq('company_id', companyId).eq('id', productId).maybeSingle(),
-    client.from('jde_products').select('id, part_number, oem_number, name, brand, category, compatibility, current_stock, sale_price').eq('company_id', companyId),
+    client.from('jde_products').select('id, part_number, other_numbers, oem_number, name, brand, category, compatibility, current_stock, sale_price').eq('company_id', companyId),
     client.from('jde_stock_layers').select('*').eq('company_id', companyId).eq('product_id', productId),
     lines,
     client.from('jde_po_items').select('*').eq('company_id', companyId).eq('product_id', productId),

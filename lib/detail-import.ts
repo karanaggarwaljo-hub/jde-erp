@@ -1,4 +1,5 @@
 import type { ImportedProduct } from './client-import';
+import { brandKey } from './part-numbers';
 
 /** Works out which existing part each row of a supplier document refers to, and which of that
  *  part's identifying details it could fill in or correct — the part number, OEM number, HSN
@@ -261,13 +262,20 @@ export function planDetailUpdates(rows: ImportedProduct[], products: DetailMatch
     }
   }
 
-  // A corrected part number must not land on a number another part holds now, or will hold once
-  // this file is applied. Both count: swapping two parts' numbers ends in a clean state, but saved
-  // one part at a time the first save collides with the second part's current number. Compared
-  // with punctuation ignored, as a scan compares them — "SP-258" and "sp258" are one number.
+  // A corrected part number must not land on a number another part of the same brand holds now,
+  // or will hold once this file is applied. Both count: swapping two parts' numbers ends in a clean
+  // state, but saved one part at a time the first save collides with the second part's current
+  // number. Compared with punctuation ignored, as a scan compares them — "SP-258" and "sp258" are
+  // one number. Another brand holding the number is fine: since October 2026 the same part can be
+  // kept in several brands under one number (one number per brand, as the database checks).
   const productById = new Map(products.map((p) => [p.id, p]));
   const offeredNumber = (match: DetailMatch) =>
     match.outcome === 'update' ? match.changes.find((c) => c.field === 'part_number' && isOfferedDetail(c)) : undefined;
+  const brandAfter = (match: DetailMatch) => {
+    const change = match.changes.find((c) => c.field === 'brand' && isOfferedDetail(c));
+    return brandKey(change ? change.to : match.product?.brand);
+  };
+  const holderKey = (number: string, brand: string) => (codeKey(number) ? `${codeKey(number)}|${brand}` : '');
 
   const holders = new Map<string, Set<string>>();
   const hold = (key: string, id: string) => {
@@ -276,23 +284,23 @@ export function planDetailUpdates(rows: ImportedProduct[], products: DetailMatch
     if (set) set.add(id);
     else holders.set(key, new Set([id]));
   };
-  for (const p of products) hold(codeKey(p.part_number), p.id);
+  for (const p of products) hold(holderKey(p.part_number, brandKey(p.brand)), p.id);
   for (const match of matches) {
     const change = offeredNumber(match);
-    if (change && match.product) hold(codeKey(change.to), match.product.id);
+    if (change && match.product) hold(holderKey(change.to, brandAfter(match)), match.product.id);
   }
 
   for (const match of matches) {
     const change = offeredNumber(match);
     if (!change || !match.product) continue;
     const self = match.product.id;
-    const others = Array.from(holders.get(codeKey(change.to)) ?? []).filter((id) => id !== self);
+    const others = Array.from(holders.get(holderKey(change.to, brandAfter(match))) ?? []).filter((id) => id !== self);
     if (others.length === 0) continue;
     change.kind = 'clash';
     change.note = 'already on ' + others.map((id) => productById.get(id)?.name ?? id).join(', ');
     if (!match.changes.some(isOfferedDetail)) {
       match.outcome = 'nothing_to_add';
-      match.reason = 'the only change would give it a part number another part already has';
+      match.reason = 'the only change would give it a part number another part of the same brand already has';
     }
   }
 

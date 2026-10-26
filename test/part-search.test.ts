@@ -132,3 +132,30 @@ test('exactCodeMatches returns every part carrying the code', () => {
   assert.equal(exactCodeMatches('p0012400', CATALOGUE).length, 1);
   assert.deepEqual(exactCodeMatches('nope', CATALOGUE), []);
 });
+
+/** October 2026: a part can carry other numbers, and one number can be kept in several brands. */
+const TWO_BRANDS: PartOption[] = [
+  part('320/A7291', 'Water Separator', { value: '320/A7291 - Water Separator (JCB)', brand: 'JCB', otherNumbers: ['32/925694'] }),
+  part('320/A7291', 'Water Separator', { value: '320/A7291 - Water Separator (Fleetguard)', brand: 'Fleetguard' }),
+  part('SFC-7932', 'Water Separator (Sakura)', { brand: 'Sakura', otherNumbers: ['FS19505'] }),
+];
+
+test('a part is found by one of its other numbers, and the list says which', () => {
+  const [hit] = searchParts('fs-19505', TWO_BRANDS);
+  assert.equal(hit.part.partNumber, 'SFC-7932');
+  assert.equal(hit.why, 'exact-code');
+  assert.equal(hit.via, 'FS19505');
+  // Found by its own part number, nothing is added.
+  assert.equal(searchParts('SFC7932', TWO_BRANDS)[0].via, undefined);
+});
+
+test('a scan of another number resolves to its one part', () => {
+  assert.equal(scannedPart('32925694', TWO_BRANDS)?.brand, 'JCB');
+});
+
+/** Two brands under one number: Enter must wait for a choice, exactly like any shared number. */
+test('a number kept in two brands is never resolved by a keystroke', () => {
+  assert.equal(scannedPart('320-A7291', TWO_BRANDS), null);
+  assert.equal(isAmbiguousCode('320A7291', TWO_BRANDS), true);
+  assert.deepEqual(exactCodeMatches('320/a7291', TWO_BRANDS).map((p) => p.brand), ['JCB', 'Fleetguard']);
+});

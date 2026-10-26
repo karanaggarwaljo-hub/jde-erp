@@ -3,6 +3,7 @@ import { dbErrorMessage, getPartOverviewRows } from '@/lib/db';
 import { buildPartOverview } from '@/lib/part-overview';
 import { findAlternates, type AlternatePart } from '@/lib/part-alternates';
 import { catalogPhotoIndex } from '@/lib/part-photos';
+import { otherBrandsOf } from '@/lib/part-numbers';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +29,17 @@ export async function GET(request: Request) {
     if (!rows.product) return Response.json({ error: 'That part is not in this company.' }, { status: 404 });
 
     const part = rows.product as unknown as AlternatePart;
-    const alternates = findAlternates(part, rows.products as unknown as AlternatePart[]).map((match) => ({
+    // The same part in other brands: its own list, so it is not repeated among the alternates.
+    const otherBrands = otherBrandsOf(part, rows.products as unknown as AlternatePart[]).map((other) => ({
+      id: other.id,
+      part_number: String(other.part_number ?? ''),
+      name: String(other.name ?? ''),
+      brand: String(other.brand ?? ''),
+      current_stock: Number(other.current_stock ?? 0),
+      sale_price: Number(other.sale_price ?? 0),
+    }));
+    const brandIds = new Set(otherBrands.map((other) => other.id));
+    const alternates = findAlternates(part, (rows.products as unknown as AlternatePart[]).filter((other) => !brandIds.has(other.id))).map((match) => ({
       id: match.part.id,
       part_number: String(match.part.part_number ?? ''),
       name: String(match.part.name ?? ''),
@@ -47,7 +58,7 @@ export async function GET(request: Request) {
     const catalogFitment = rows.catalogRows
       .map((row) => String((row as { compatibility?: unknown }).compatibility ?? '').trim())
       .find(Boolean) ?? null;
-    return Response.json({ part: rows.product, overview: buildPartOverview(rows), alternates, catalogPhoto, catalogFitment });
+    return Response.json({ part: rows.product, overview: buildPartOverview(rows), alternates, otherBrands, catalogPhoto, catalogFitment });
   } catch (error) {
     console.error('GET /api/inventory/part failed:', error);
     return Response.json({ error: dbErrorMessage(error, 'Could not load this part.') }, { status: 500 });

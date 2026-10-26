@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, ClipboardList, Copy, MessageCircle, Minus, PackageX, Plus, Printer, ShoppingCart, Sparkles, Trash2, X } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
-import { partLabel } from '@/lib/purchase-entry';
+import { partLabeler } from '@/lib/purchase-entry';
 import { DRAFT_STATUS, CANCELLED_STATUS } from '@/lib/sales-types';
 import { shopDay } from '@/lib/logbook';
 import { tallyDate } from '@/lib/tally-invoice';
@@ -153,16 +153,20 @@ export default function StockPlanning() {
   // The one supplier a purchase can be made for: the one picked, or the only one on the sheet.
   const purchaseSupplier = filter !== ALL ? filter : suppliersOnSheet.length === 1 ? suppliersOnSheet[0] : null;
 
+  // Each part's label, unique even for one part kept in two brands; Purchases matches the draft's
+  // lines back to their parts by it (lib/trade-history.ts partLabeler).
+  const labelOf = useMemo(() => partLabeler(products), [products]);
   const partOptions = useMemo(() => products.map((product) => ({
     id: product.id,
-    value: partLabel(String(product.part_number ?? ''), product.name),
+    value: labelOf(product),
+    otherNumbers: Array.isArray(product.other_numbers) ? (product.other_numbers as string[]) : [],
     partNumber: String(product.part_number ?? ''),
     name: product.name,
     brand: String(product.brand ?? ''),
     stock: Number(product.current_stock) || 0,
     price: Number(product.cost_price) || 0,
     photo: photoFor(product)?.url ?? null,
-  })), [products, photoFor]);
+  })), [products, photoFor, labelOf]);
 
   const addPart = (part: (typeof partOptions)[number]) => {
     const plan = plansById.get(part.id);
@@ -187,7 +191,13 @@ export default function StockPlanning() {
     const draft: PurchaseDraft = {
       companyId: activeCompany.id,
       supplier: purchaseSupplier,
-      lines: draftLines.map((line) => ({ description: partLabel(line.partNumber, line.name), quantity: line.qty, unit_price: plansById.get(line.partId)?.lastCost ?? 0 })),
+      lines: draftLines.map((line) => {
+        const part = products.find((product) => product.id === line.partId);
+        const description = part
+          ? labelOf(part)
+          : `${line.partNumber} - ${line.name}`;
+        return { description, quantity: line.qty, unit_price: plansById.get(line.partId)?.lastCost ?? 0 };
+      }),
     };
     try { sessionStorage.setItem(PURCHASE_DRAFT_KEY, JSON.stringify(draft)); } catch { /* the purchase opens empty instead */ }
     router.push('/purchases?record=purchase');

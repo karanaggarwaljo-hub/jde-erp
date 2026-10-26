@@ -16,6 +16,7 @@ import PartPicker from '@/components/PartPicker';
 import PartPhoto from '@/components/PartPhoto';
 import { money } from '@/lib/money';
 import { planPartMerge, type MergeFill } from '@/lib/part-merge';
+import { brandLabel, sameBrand } from '@/lib/part-numbers';
 import { mergeParts, type MergePartsResult } from '@/lib/client-part-merge';
 import type { Product } from '@/lib/inventory-types';
 
@@ -27,7 +28,8 @@ export type MergePartModalProps = {
   onMerged: (result: MergePartsResult, removed: Product) => void;
 };
 
-const describe = (p: Product) => (p.part_number ? `${p.part_number} — ${p.name}` : p.name);
+// The brand is named too, so the same part in two brands reads as two entries here.
+const describe = (p: Product) => `${p.part_number ? `${p.part_number} — ${p.name}` : p.name}${p.brand ? ` (${p.brand})` : ''}`;
 const stockOf = (p: Product) => Number(p.current_stock) || 0;
 const fillText = (fill: MergeFill) => `${fill.label} ${fill.money ? `₹${money(Number(fill.value))}` : fill.value}`;
 const photoLine = { display: 'inline-flex', alignItems: 'center', gap: 8, verticalAlign: 'middle' } as const;
@@ -46,6 +48,7 @@ export default function MergePartModal({ duplicate, products, companyId, onClose
       .map((p) => ({
         value: describe(p),
         partNumber: p.part_number,
+        otherNumbers: p.other_numbers ?? [],
         name: p.name,
         brand: p.brand,
         stock: stockOf(p),
@@ -101,6 +104,17 @@ export default function MergePartModal({ duplicate, products, companyId, onClose
               <p style={{ marginBottom: 10 }}>
                 These become one part. <strong>{describe(keep)}</strong> stays; <strong>{describe(remove)}</strong> is removed.
               </p>
+              {/* Merging is for one part entered twice. Two brands of a part are kept apart on
+                  purpose, each with its own stock and price, so say so before they are joined. */}
+              {!sameBrand(keep.brand, remove.brand) && (
+                <div className="alert alert-warning" role="alert" style={{ marginBottom: 12 }}>
+                  <span>
+                    These are two different brands ({brandLabel(keep.brand)} and {brandLabel(remove.brand)}). If this is the same part
+                    from two makers, keep them apart: each brand has its own stock and price, and its window lists the other.
+                    Merge only if one of them was entered with the wrong brand.
+                  </span>
+                </div>
+              )}
               <div className="flex gap-2" style={{ flexWrap: 'wrap', marginBottom: 14 }}>
                 <button type="button" className="btn btn-secondary btn-sm" disabled={merging}
                   onClick={() => { setSwapped((value) => !value); setChosenNumber(null); }}>

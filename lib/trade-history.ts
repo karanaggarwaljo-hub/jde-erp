@@ -26,6 +26,9 @@ export type TradedLine = {
   documentId: string;
   partNumber: string;
   name: string;
+  /** The part's label where it is known (partLabeler), so two brands of one part keep their own
+   *  last price. Without it the label is worked out from the number and name. */
+  label?: string;
   /** Unit price on a sale, unit cost on a purchase. */
   rate: number;
 };
@@ -41,6 +44,29 @@ export type LastTraded = {
  *  rebuild lines from saved items, so a reopened document lines up with the catalogue. */
 export function partLabel(partNumber: string, name: string): string {
   return `${partNumber} - ${name}`;
+}
+
+/** The minimum a part needs to be labelled. */
+export type LabelledPart = { id?: string; part_number?: string | null; name?: string | null; brand?: string | null };
+
+/**
+ * Each part's label, made unique. Normally "number - name", as it always was. When two parts share
+ * both the number and the name, which is how the same part is kept in two brands (October 2026),
+ * each of them gets its brand added: "320/A7291 - Water Separator (JCB)". Lines on a bill or a
+ * purchase are matched back to their part by this label, so two identical labels would always have
+ * billed the first brand. Parts with no twin keep their label unchanged, so nothing else moves.
+ */
+export function partLabeler(parts: readonly LabelledPart[]): (part: LabelledPart) => string {
+  const counts = new Map<string, number>();
+  for (const part of parts) {
+    const base = partLabel(part.part_number ?? '', part.name ?? '');
+    counts.set(base, (counts.get(base) ?? 0) + 1);
+  }
+  return (part) => {
+    const base = partLabel(part.part_number ?? '', part.name ?? '');
+    const brand = String(part.brand ?? '').trim();
+    return (counts.get(base) ?? 0) > 1 && brand ? `${base} (${brand})` : base;
+  };
 }
 
 export function buildLastTradedIndex(
@@ -65,7 +91,7 @@ export function buildLastTradedIndex(
     if (!document) continue;
     if (!Number.isFinite(line.rate)) continue;
 
-    const key = partLabel(line.partNumber, line.name);
+    const key = line.label ?? partLabel(line.partNumber, line.name);
     const previous = index.get(key);
     const isNewer =
       !previous ||
@@ -76,14 +102,15 @@ export function buildLastTradedIndex(
   return index;
 }
 
-/** A part's current number and name, looked up by id. */
-export type NamedPart = { part_number: string; name: string };
+/** A part's current number, name and label, looked up by id. */
+export type NamedPart = { part_number: string; name: string; label: string };
 
 /** Products by id, so a saved line can be traced to the part it was for. */
-export function indexProductsById<T extends { id: string; part_number?: string | null; name?: string | null }>(products: T[]): Map<string, NamedPart> {
+export function indexProductsById<T extends { id: string; part_number?: string | null; name?: string | null; brand?: string | null }>(products: T[]): Map<string, NamedPart> {
+  const labelOf = partLabeler(products);
   const index = new Map<string, NamedPart>();
   for (const product of products) {
-    index.set(product.id, { part_number: product.part_number ?? '', name: product.name ?? '' });
+    index.set(product.id, { part_number: product.part_number ?? '', name: product.name ?? '', label: labelOf(product) });
   }
   return index;
 }
@@ -101,13 +128,13 @@ export function indexProductsById<T extends { id: string; part_number?: string |
  * A line's product_id never changes, so it is used whenever it still points at a part. A line with
  * no part behind it, or whose part has since been deleted, keeps its saved text.
  */
-export function currentIdentity<T extends { product_id?: string | null; part_number: string; name: string }>(item: T, byId: Map<string, NamedPart>): T {
+export function currentIdentity<T extends { product_id?: string | null; part_number: string; name: string }>(item: T, byId: Map<string, NamedPart>): T & { label?: string } {
   const current = item.product_id ? byId.get(item.product_id) : undefined;
-  return current ? { ...item, part_number: current.part_number, name: current.name } : item;
+  return current ? { ...item, part_number: current.part_number, name: current.name, label: current.label } : item;
 }
 
-/** The picker label for a saved line, under the part's current number and name where it has one. */
+/** The picker label for a saved line, under the part's current label where it has one. */
 export function savedLineLabel(item: { product_id?: string | null; part_number: string; name: string }, byId: Map<string, NamedPart>): string {
   const current = currentIdentity(item, byId);
-  return partLabel(current.part_number, current.name);
+  return current.label ?? partLabel(current.part_number, current.name);
 }

@@ -24,7 +24,8 @@ import {
 import { parseSpreadsheetFile, fileToBase64, hashFile, SPREADSHEET_ACCEPT, isSpreadsheetFileName, SCANNABLE_TYPES, type ImportedLine } from '@/lib/client-import';
 import { matchImportedLine, normalizeImportText, planFieldUpdates, type MatchableProduct } from '@/lib/import-matching';
 import { savePurchase, receivePurchaseStock, recordPurchasePayment } from '@/lib/client-purchases';
-import { buildLastPaidIndex, partLabel } from '@/lib/purchase-entry';
+import { buildLastPaidIndex, partLabeler } from '@/lib/purchase-entry';
+import { brandKey, hasNumber } from '@/lib/part-numbers';
 import { getReturnablePurchaseItems, recordPurchaseReturn } from '@/lib/client-purchase-returns';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { usePartPhotos } from '@/lib/usePartPhotos';
@@ -54,7 +55,7 @@ type PurchaseTab = 'purchases' | 'invoices';
 
 // Only this page reads these two: a product row as Inventory stores it, and the goods-received
 // note the save writes. Everything the dialogs also need lives in lib/purchase-types.ts.
-type Product = { id: string; company_id: string; part_number: string; oem_number: string; hsn_code: string; brand: string; name: string; category: string; cost_price: number; sale_price: number; current_stock: number; image_url?: string | null };
+type Product = { id: string; company_id: string; part_number: string; other_numbers?: string[] | null; oem_number: string; hsn_code: string; brand: string; name: string; category: string; cost_price: number; sale_price: number; current_stock: number; image_url?: string | null };
 type Grn = { id: string; company_id: string; po_number: string; supplier: string; received_at: string; status: string };
 
 /** Which purchase orders the table is showing. Purely a view filter — it never changes what is
@@ -170,8 +171,12 @@ export default function PurchasesPage() {
   //
   // Numbers are coerced here rather than at each use: Postgres numeric columns arrive as strings
   // over the REST API, and the cost warnings compare them.
+  // Each part's label, unique even for one part kept in two brands (lib/trade-history.ts). A line
+  // is matched back to its part by this label, so resolveProduct uses the same one.
+  const labelOf = useMemo(() => partLabeler(products), [products]);
   const partOptions = useMemo(() => products.map((product) => ({
-    value: partLabel(product.part_number, product.name),
+    value: labelOf(product),
+    otherNumbers: product.other_numbers ?? [],
     price: Number(product.cost_price) || 0,
     salePrice: Number(product.sale_price) || 0,
     category: product.category,
@@ -180,7 +185,7 @@ export default function PurchasesPage() {
     brand: product.brand,
     stock: Number(product.current_stock) || 0,
     photo: photoFor(product)?.url ?? null,
-  })), [products, photoFor]);
+  })), [products, photoFor, labelOf]);
   const supplierOptions = suppliers.map((s) => s.name);
 
   // Which purchases have their supplier bill kept, for the Bill / Attach bill button. Asked again
@@ -423,10 +428,11 @@ export default function PurchasesPage() {
    *  plain natural-language and can contain " - " for unrelated reasons (e.g. "LOADER CUTTER KIT
    *  - JCB", where JCB is a brand, not a part number). Splitting there mangled real line items
    *  into a part "number" like "PIN" named "12400" instead of one part named "PIN - 12400". */
-  async function resolveProduct(description: string, unitCost: number, knownProducts: Product[], splitOnDash = true, source?: ImportedLine): Promise<Product | null> {
+  async function resolveProduct(description: string, unitCost: number, knownProducts: Product[], splitOnDash = true, source?: ImportedLine, forceNew = false): Promise<Product | null> {
     const trimmed = description.trim();
     if (!trimmed) return null;
-    const existing = knownProducts.find((p) => `${p.part_number} - ${p.name}` === trimmed);
+    const knownLabel = partLabeler(knownProducts);
+    const existing = forceNew ? undefined : knownProducts.find((p) => knownLabel(p) === trimmed);
     if (existing) return existing;
 
     const separatorIndex = splitOnDash ? trimmed.indexOf(' - ') : -1;
@@ -440,9 +446,19 @@ export default function PurchasesPage() {
     // A code already on the shelf means this IS that part, whatever the supplier called it on this
     // document. Reusing it is the whole point of a part number; creating a second part with the
     // same code is how five different things ended up sharing SP-239.
-    if (partNumber) {
-      const sameCode = knownProducts.find((p) => (p.part_number ?? '').trim().toLowerCase() === partNumber.toLowerCase());
-      if (sameCode) return sameCode;
+    // Its other numbers count as well. When one number is kept in several brands, the brand on the
+    // document decides which; a brand not yet stocked under that number becomes a new item of its
+    // own, because each brand keeps its own stock and cost.
+    // Unless the owner said on the review screen that this is a part not on file yet, such as a new
+    // brand of a number already stocked: then it is made, whatever shares its number.
+    if (partNumber && !forceNew) {
+      const sameCode = knownProducts.filter((p) => hasNumber(p, partNumber));
+      const documentBrand = brandKey(source?.brand);
+      const match = documentBrand
+        // A part with no brand recorded is taken to be this one rather than made twice.
+        ? sameCode.find((p) => brandKey(p.brand) === documentBrand) ?? sameCode.find((p) => !brandKey(p.brand))
+        : sameCode[0];
+      if (match) return match;
     }
 
     // Blank part number means "give it one": the database picks the next free code for this
@@ -689,7 +705,7 @@ export default function PurchasesPage() {
       const items = [];
       // Field updates are collected here and applied only after the purchase itself is safely
       // recorded — enriching a part for a purchase that then failed to save would be a lie.
-      const enrichments: { product: MatchableProduct; fills: Record<string, string | number> }[] = [];
+      const enrichments: { product: MatchableProduct; fills: Record<string, string | number | string[]> }[] = [];
 
       for (const [index, line] of importPreview.lines.entries()) {
         if (!line.description.trim()) continue;
@@ -701,7 +717,7 @@ export default function PurchasesPage() {
         const matchedProduct = review?.matchedProduct
           // false: this description is raw AI-scanned invoice text, not a manually-typed
           // "part number - name" pair — see resolveProduct's own comment for why that matters.
-          ?? await resolveProduct(line.description, line.unit_price, knownProducts, false, line);
+          ?? await resolveProduct(line.description, line.unit_price, knownProducts, false, line, importLinks[index] === NEW_PART);
 
         if (review?.matchedProduct) {
           const plan = planFieldUpdates(line, review.matchedProduct);
