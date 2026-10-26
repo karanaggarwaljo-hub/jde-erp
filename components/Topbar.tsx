@@ -13,18 +13,26 @@ type Product = { current_stock: number; min_stock: number };
 type Customer = { balance: number };
 type Supplier = { balance: number };
 
+// Every screen, by the names the menu uses, with the other words people use for them. Inventory is
+// called Stock in the menu, Stock Planning is What to Order, and Analytics is a tab on Reports, so
+// the old names are kept as keywords and still find them.
 const searchTargets = [
-  { label: 'Dashboard', detail: 'Executive overview', href: '/dashboard', keywords: 'dashboard overview performance' },
-  { label: 'Inventory', detail: 'Parts, OEM numbers and stock', href: '/inventory', keywords: 'inventory part oem stock sp-001 sp-006' },
-  { label: 'Sales', detail: 'Invoices, quotations and returns', href: '/sales', keywords: 'sales invoice quotation customer inv qt' },
-  { label: 'Purchases', detail: 'Purchase orders and GRNs', href: '/purchases', keywords: 'purchase supplier po grn procurement' },
-  { label: 'Customers', detail: 'Customer accounts and receivables', href: '/customers', keywords: 'customer receivable dealer garage' },
-  { label: 'Suppliers', detail: 'Vendors and payables', href: '/suppliers', keywords: 'supplier vendor payable' },
-  { label: 'Expenses', detail: 'Operating costs', href: '/expenses', keywords: 'expense rent salary transport utilities' },
-  { label: 'Job Cards', detail: 'Machines in for repair and the parts they take', href: '/jobs', keywords: 'job card repair machine service workshop mechanic parts taken' },
-  { label: 'Bills & Invoices', detail: 'Invoices issued and supplier bills uploaded', href: '/documents', keywords: 'bill invoice pdf document supplier bill upload download print' },
-  { label: 'Reports', detail: 'Financial and operational reports', href: '/reports', keywords: 'report profit loss gst stock valuation' },
-  { label: 'Analytics', detail: 'Demand forecast and trends', href: '/analytics', keywords: 'analytics ai forecast demand' },
+  { label: 'Home', detail: 'Big buttons for the everyday jobs', href: '/dashboard', keywords: 'home dashboard overview start' },
+  { label: 'Day Book', detail: 'Everything that happened, day by day', href: '/daybook', keywords: 'day book daybook today cash in out' },
+  { label: 'Sales', detail: 'Bills, quotations and returns', href: '/sales', keywords: 'sales bill invoice quotation return credit note customer inv qt' },
+  { label: 'Purchases', detail: 'Stock you bought, and supplier bills', href: '/purchases', keywords: 'purchase buy supplier po grn bill' },
+  { label: 'Expenses', detail: 'Rent, salary, freight', href: '/expenses', keywords: 'expense rent salary transport freight electricity' },
+  { label: 'Stock', detail: 'Parts, prices and how many are on the shelf', href: '/inventory', keywords: 'stock inventory part oem price shelf' },
+  { label: 'Customers', detail: 'Who you sell to and who owes you', href: '/customers', keywords: 'customer receivable owe collect dealer garage' },
+  { label: 'Suppliers', detail: 'Who you buy from and who you owe', href: '/suppliers', keywords: 'supplier vendor payable owe pay' },
+  { label: 'Reports', detail: 'Profit, GST, stock value, AI advice', href: '/reports', keywords: 'report profit loss gst stock value unpaid aging analytics ai advice forecast' },
+  { label: 'Job Cards', detail: 'Machines in for repair', href: '/jobs', keywords: 'job card repair machine service workshop mechanic' },
+  { label: 'Bills & Invoices', detail: 'Bills given and supplier bills kept', href: '/documents', keywords: 'bill invoice pdf document supplier bill download print' },
+  { label: 'Cheques', detail: 'Cheques given and received', href: '/cheques', keywords: 'cheque check bank' },
+  { label: 'What to Order', detail: 'A list of parts to buy', href: '/stock-planning', keywords: 'what to order reorder stock planning requirement low' },
+  { label: 'Log Book', detail: 'Who did what, and when', href: '/logbook', keywords: 'log book audit history who' },
+  { label: 'Website Catalog', detail: 'Your parts on your website', href: '/catalog-admin', keywords: 'website catalog catalogue online publish' },
+  { label: 'Settings', detail: 'Company details, people, backups', href: '/settings', keywords: 'settings company users people backup drive' },
 ];
 
 type TopbarProps = {
@@ -58,10 +66,10 @@ function NotificationPopover({ onNavigate }: { onNavigate: () => void }) {
   const newLeadsCount = catalogLeads.filter((lead) => lead.status === 'new').length;
 
   const notifications = [
-    ...(lowStockCount > 0 ? [{ href: '/inventory', text: `${lowStockCount} part(s) need reordering`, tag: 'Inventory' }] : []),
-    ...(overdueCustomerCount > 0 ? [{ href: '/customers', text: `${overdueCustomerCount} customer payment(s) outstanding`, tag: 'Receivables' }] : []),
-    ...(payableSupplierCount > 0 ? [{ href: '/purchases', text: `${payableSupplierCount} supplier payment(s) outstanding`, tag: 'Payables' }] : []),
-    ...(newLeadsCount > 0 ? [{ href: '/catalog-admin/leads', text: `${newLeadsCount} new catalog quote request(s)`, tag: 'Website Catalog' }] : []),
+    ...(lowStockCount > 0 ? [{ href: '/stock-planning', text: `${lowStockCount} ${lowStockCount === 1 ? 'part needs' : 'parts need'} ordering`, tag: 'What to Order' }] : []),
+    ...(overdueCustomerCount > 0 ? [{ href: '/customers', text: `${overdueCustomerCount} ${overdueCustomerCount === 1 ? 'customer owes' : 'customers owe'} you money`, tag: 'To collect' }] : []),
+    ...(payableSupplierCount > 0 ? [{ href: '/suppliers', text: `You owe ${payableSupplierCount} ${payableSupplierCount === 1 ? 'supplier' : 'suppliers'}`, tag: 'To pay' }] : []),
+    ...(newLeadsCount > 0 ? [{ href: '/catalog-admin/leads', text: `${newLeadsCount} new quote ${newLeadsCount === 1 ? 'request' : 'requests'} from your website`, tag: 'Website Catalog' }] : []),
   ];
 
   return (
@@ -183,7 +191,7 @@ export default function Topbar({ currentUser, onMenuClick }: TopbarProps) {
                 ref={searchRef}
                 aria-label="Universal search"
                 type="text"
-                placeholder="Search app pages — Inventory, Sales, Purchases..."
+                placeholder="Go to a screen: Stock, Sales, Purchases…"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />

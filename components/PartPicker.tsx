@@ -192,7 +192,7 @@ export default function PartPicker<T extends PickablePart>({ parts, onPick, onCu
         <div className="part-picker-list part-picker-empty">
           <div className="flex items-center gap-2">
             <AlertTriangle size={14} className="text-muted" aria-hidden="true" />
-            <span className="text-muted text-sm">Nothing in Inventory matches “{query.trim()}”.</span>
+            <span className="text-muted text-sm">Nothing in Stock matches “{query.trim()}”.</span>
           </div>
           {onCustom && (
             <button

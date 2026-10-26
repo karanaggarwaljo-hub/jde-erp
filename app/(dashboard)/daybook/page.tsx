@@ -23,6 +23,7 @@ import { getDayBook } from '@/lib/client-daybook';
 import { groupByDay, DAYBOOK_LABELS, type DayBookEntry, type DayBookKind, type DayBookTotals } from '@/lib/daybook';
 import DayBookDays, { niceDate } from '@/components/DayBookDays';
 import { wholeMoney } from '@/lib/money';
+import SummaryLine from '@/components/SummaryLine';
 
 function todayIso(): string {
   const now = new Date();
@@ -40,12 +41,13 @@ type RangeName = 'today' | 'yesterday' | 'week' | 'month' | 'custom';
 
 // In the order a counter day usually runs: selling and taking money first, then buying and paying.
 // "in" and "out" only colour the tile, matching the Money in and Money out figures further down.
+// The same words as Home's big buttons, so each job has one name wherever it is started from.
 const RECORD_ACTIONS: Array<{ kind: EntryKind; label: string; hint: string; icon: LucideIcon; direction: 'in' | 'out' }> = [
-  { kind: 'sale', label: 'New sale', hint: 'Bill a customer', icon: ShoppingCart, direction: 'in' },
+  { kind: 'sale', label: 'Make a bill', hint: 'Sell parts to a customer', icon: ShoppingCart, direction: 'in' },
   { kind: 'payment-in', label: 'Money received', hint: 'A customer paid you', icon: HandCoins, direction: 'in' },
-  { kind: 'purchase', label: 'New purchase', hint: 'Stock came in', icon: Truck, direction: 'out' },
+  { kind: 'purchase', label: 'Buy stock', hint: 'Parts came in from a supplier', icon: Truck, direction: 'out' },
   { kind: 'supplier-payment', label: 'Pay a supplier', hint: 'You paid for stock', icon: Banknote, direction: 'out' },
-  { kind: 'expense', label: 'Expense', hint: 'Rent, salary, freight', icon: Wallet, direction: 'out' },
+  { kind: 'expense', label: 'Add an expense', hint: 'Rent, salary, freight', icon: Wallet, direction: 'out' },
 ];
 
 export default function DayBookPage() {
@@ -116,9 +118,7 @@ export default function DayBookPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title flex items-center gap-2"><BookOpen size={20} /> Day Book</h1>
-          <p className="page-subtitle">
-            Everything that happened in the business, day by day. Record something below and it shows up here.
-          </p>
+          <p className="page-subtitle">Everything that happened in the shop, day by day.</p>
         </div>
       </div>
 
@@ -167,31 +167,20 @@ export default function DayBookPage() {
 
       {error && <div className="alert alert-danger mb-4" role="alert">{error}</div>}
 
+      {/* The period's money, as one line where four number boxes used to be. Billed is said plainly
+          apart from the money: it is what was invoiced, not what was collected. */}
       {totals && (
-        <div className="kpi-grid mb-4">
-          <div className="kpi-card">
-            <div className="kpi-label">Money in</div>
-            <div className="kpi-value text-success">₹{wholeMoney(totals.cashIn)}</div>
-            <div className="kpi-context">Cash and transfers that actually arrived</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Money out</div>
-            <div className="kpi-value text-danger">₹{wholeMoney(totals.cashOut)}</div>
-            <div className="kpi-context">Paid to suppliers, expenses and refunds</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Net</div>
-            <div className={'kpi-value ' + (totals.netCash >= 0 ? 'text-success' : 'text-danger')}>
-              ₹{wholeMoney(Math.abs(totals.netCash))}
-            </div>
-            <div className="kpi-context">{totals.netCash >= 0 ? 'More came in than went out' : 'More went out than came in'}</div>
-          </div>
-          <div className="kpi-card">
-            <div className="kpi-label">Billed</div>
-            <div className="kpi-value">₹{wholeMoney(totals.sold)}</div>
-            {/* Said plainly: this is what was invoiced, not what was collected. */}
-            <div className="kpi-context">Sales written, paid or on account</div>
-          </div>
+        <div className="card card-sm mb-4">
+          <SummaryLine facts={[
+            { value: `₹${wholeMoney(totals.cashIn)}`, label: 'came in', tone: 'good', hint: 'Cash and transfers that actually arrived' },
+            { value: `₹${wholeMoney(totals.cashOut)}`, label: 'went out', tone: totals.cashOut > 0 ? 'bad' : undefined, hint: 'Paid to suppliers, expenses and refunds' },
+            {
+              value: `₹${wholeMoney(Math.abs(totals.netCash))}`,
+              label: totals.netCash >= 0 ? 'more came in than went out' : 'more went out than came in',
+              tone: totals.netCash >= 0 ? 'good' : 'bad',
+            },
+            { value: `₹${wholeMoney(totals.sold)}`, label: 'billed', hint: 'Sales written, paid or on account' },
+          ]} />
         </div>
       )}
 
@@ -215,7 +204,7 @@ export default function DayBookPage() {
         <div className="card"><div className="empty-state" style={{ padding: '36px 20px' }}>
           <p className="empty-state-title">Nothing recorded {from === to ? niceDate(from, todayIso()).toLowerCase() : 'in this period'}</p>
           <p className="empty-state-desc">
-            Use Record something above, and the entry appears here as soon as it is saved.
+            Use the buttons above, and the entry appears here as soon as it is saved.
           </p>
         </div></div>
       )}

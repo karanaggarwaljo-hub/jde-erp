@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { CalendarRange, Download, Printer, TrendingUp, TrendingDown, ShoppingBag, Wallet, Receipt, IndianRupee, AlertCircle, PackageCheck, Percent } from 'lucide-react';
 import { printCurrentPage } from '@/lib/client-export';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import AIReportSummary from '@/components/AIReportSummary';
+import AIInsightsCard from '@/components/AIInsightsCard';
 import ProfitReport from '@/components/reports/ProfitReport';
 import { AGE_BUCKETS, agingFrom, type AgeBucket } from '@/lib/aging';
 import { invoiceBalanceDue } from '@/lib/invoice-balance';
@@ -17,12 +18,24 @@ import {
 import { costOfSales, grossProfit, gstPosition, outputTaxSplit, type GstPosition, type OutputTaxSplit, type PeriodConsumption, type PeriodInvoiceItem } from '@/lib/period-accounts';
 import { isCountedSale } from '@/lib/sales-types';
 
-type ReportType = 'pnl' | 'profit' | 'sales' | 'stock' | 'gst' | 'aging';
+type ReportType = 'pnl' | 'profit' | 'sales' | 'stock' | 'gst' | 'aging' | 'advice';
+
+/** The tabs, in plain words. AI Advice is what the Analytics screen used to be: the owner chose to
+ *  fold it in here rather than keep a screen that mostly repeated this one and What to Order. */
+const REPORT_TABS: Array<{ key: ReportType; label: string }> = [
+  { key: 'pnl', label: 'Profit & Loss' },
+  { key: 'profit', label: 'Profit by Part' },
+  { key: 'sales', label: 'Sales' },
+  { key: 'stock', label: 'Stock Value' },
+  { key: 'gst', label: 'GST' },
+  { key: 'aging', label: 'Unpaid Bills' },
+  { key: 'advice', label: 'AI Advice' },
+];
 
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; status: string; settlement_write_off: number; gst_amount: number | null; place_of_supply?: string | null };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string; gst_amount: number | null };
 type Expense = { amount: number; date: string };
-type Product = { id: string; category: string; current_stock: number; cost_price: number; sale_price: number };
+type Product = { id: string; name: string; part_number: string; brand: string; category: string; current_stock: number; cost_price: number; sale_price: number };
 
 const BUCKET_COLORS: Record<AgeBucket, string> = { '0-30': 'var(--color-success)', '31-60': 'var(--chart-amber)', '61-90': 'var(--chart-orange)', '90+': 'var(--color-danger)' };
 const BUCKET_BG: Record<AgeBucket, string> = { '0-30': 'var(--color-success-bg)', '31-60': 'var(--amber-tint)', '61-90': 'color-mix(in srgb, var(--chart-orange) 12%, var(--surface))', '90+': 'var(--color-danger-bg)' };
@@ -128,6 +141,21 @@ function GstLiabilityPanel({ title, subtitle, position, split }: { title: string
 
 export default function ReportsPage() {
   const [reportType, setReportType] = useState<ReportType>('pnl');
+  // The old Analytics address sends people to ?tab=advice. Read once on arrival, straight from
+  // window.location as lib/use-entry-intent.ts does, so the page needs no Suspense wrapper.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const tab = REPORT_TABS.find((each) => each.key === params.get('tab'));
+      if (!tab) return;
+      setReportType(tab.key);
+      // Taken out of the address once used, so a refresh after choosing another tab keeps that one.
+      params.delete('tab');
+      const rest = params.toString();
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
   const [feedback, setFeedback] = useState('');
   // Which stretch of time the figures below cover. Read once from the browser's own clock, so
   // "this month" means the month the person is standing in, not the month it is in UTC.
@@ -207,6 +235,12 @@ export default function ReportsPage() {
   const stockCategoryMix = stockRows
     .map(([category, row], index) => ({ category, amount: row.cost, share: totalCostValue > 0 ? Math.round((row.cost / totalCostValue) * 100) : 0, color: CATEGORY_COLORS[index % CATEGORY_COLORS.length] }))
     .sort((a, b) => b.amount - a.amount);
+  // AI Advice's list of the parts holding the most money, valued by the same batch rule.
+  const topByStockValue = products
+    .map((product) => ({ ...product, value: stockValueFor(product) }))
+    .filter((product) => product.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
 
   // Only what the invoices and purchase orders themselves record. This used to divide every total
   // by 1.18 and call the difference tax collected, whichever rate the documents actually carried —
@@ -286,8 +320,9 @@ export default function ReportsPage() {
     figures_are_as_of_today_not_for_the_period: true,
   };
 
-  // The Profit tab loads and summarises its own figures (components/reports/ProfitReport.tsx).
-  const summaryData: Record<Exclude<ReportType, 'profit'>, unknown> = {
+  // The Profit tab loads and summarises its own figures (components/reports/ProfitReport.tsx), and
+  // AI Advice is itself the AI's answer, so neither has a summary or a CSV export here.
+  const summaryData: Record<Exclude<ReportType, 'profit' | 'advice'>, unknown> = {
     // The AI is handed exactly what is on screen, including what is NOT known. It used to be told a
     // gross margin derived from purchases and described it back as healthy trading.
     pnl: {
@@ -314,11 +349,10 @@ export default function ReportsPage() {
   return <div>
     <div className="page-header">
       <div>
-        <div className="eyebrow">Financial reporting</div>
         <h1 className="page-title">Reports</h1>
         <p className="page-subtitle">{periodLine}</p>
       </div>
-      <div className="flex gap-2"><button className="btn btn-secondary" onClick={printCurrentPage}><Printer size={16} /> Print Report</button>{reportType !== 'profit' && <a className="btn btn-primary" href={`/api/export?type=${reportType}${period.start ? `&from=${period.start}` : ''}${period.end ? `&to=${period.end}` : ''}`} download onClick={() => setFeedback('Report export started.')}><Download size={16} /> Export CSV</a>}</div>
+      <div className="flex gap-2"><button className="btn btn-secondary" onClick={printCurrentPage}><Printer size={16} /> Print</button>{reportType !== 'profit' && reportType !== 'advice' && <a className="btn btn-primary" href={`/api/export?type=${reportType}${period.start ? `&from=${period.start}` : ''}${period.end ? `&to=${period.end}` : ''}`} download onClick={() => setFeedback('Report export started.')}><Download size={16} /> Export CSV</a>}</div>
     </div>
     {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
     {dataError && (
@@ -328,8 +362,8 @@ export default function ReportsPage() {
       </div>
     )}
 
-    {/* Which period every trading figure below covers. Stock Valuation and Aging deliberately
-        ignore it — both answer "right now", and each says so on its own panel. */}
+    {/* Which period every trading figure below covers. Stock Value, Unpaid Bills and AI Advice
+        ignore it: they answer "right now" or look at every record, and each says so on its own panel. */}
     <div className="flex items-center gap-2 mb-4" style={{ flexWrap: 'wrap' }}>
       <CalendarRange size={16} color="var(--text-muted)" />
       <div className="tabs report-tabs">
@@ -382,11 +416,47 @@ export default function ReportsPage() {
     )}
 
     <div className="flex items-center justify-between gap-4 mb-6" style={{ flexWrap: 'wrap' }}>
-      <div className="tabs report-tabs"><button className={`tab ${reportType === 'pnl' ? 'active' : ''}`} onClick={() => setReportType('pnl')}>Profit & Loss</button><button className={`tab ${reportType === 'profit' ? 'active' : ''}`} onClick={() => setReportType('profit')}>Profit by Part</button><button className={`tab ${reportType === 'sales' ? 'active' : ''}`} onClick={() => setReportType('sales')}>Sales Summary</button><button className={`tab ${reportType === 'stock' ? 'active' : ''}`} onClick={() => setReportType('stock')}>Stock Valuation</button><button className={`tab ${reportType === 'gst' ? 'active' : ''}`} onClick={() => setReportType('gst')}>GST Summary</button><button className={`tab ${reportType === 'aging' ? 'active' : ''}`} onClick={() => setReportType('aging')}>Aging</button></div>
+      <div className="tabs report-tabs">
+        {REPORT_TABS.map((tab) => (
+          <button key={tab.key} type="button" className={`tab ${reportType === tab.key ? 'active' : ''}`} onClick={() => setReportType(tab.key)}>{tab.label}</button>
+        ))}
+      </div>
       <span className="text-muted text-sm">All figures in ₹, as billed — invoice and purchase totals as entered, not cash received</span>
     </div>
 
-    {reportType !== 'profit' && <AIReportSummary reportType={reportType} data={summaryData[reportType]} />}
+    {reportType !== 'profit' && reportType !== 'advice' && <AIReportSummary reportType={reportType} data={summaryData[reportType]} />}
+
+    {reportType === 'advice' && <>
+      <p className="text-muted text-sm mb-4">The AI looks at every record on file, not only the period chosen above. Stock figures are as of today.</p>
+      <AIInsightsCard />
+      <div className="grid-2 mb-6">
+        <div className="card">
+          <div className="card-header"><h3 className="card-title">Parts holding the most money</h3><span className="badge badge-success">At cost</span></div>
+          <div className="ranked-list">
+            {topByStockValue.length === 0 && <p className="text-muted text-sm">No stock on the shelf for this company yet.</p>}
+            {topByStockValue.map((product, index) => (
+              <div key={product.id} className="ranked-row">
+                <span className="rank-number">#{index + 1}</span>
+                <div className="ranked-copy"><strong>{product.name}</strong><small>{[product.part_number, product.brand].filter(Boolean).join(' · ')}</small></div>
+                <div className="ranked-value"><strong>₹{Math.round(product.value).toLocaleString('en-IN')}</strong><small>{product.current_stock} in stock</small></div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="card">
+          <div className="card-header"><h3 className="card-title">Stock value by category</h3><span className="badge badge-info">At cost</span></div>
+          <div className="category-bars">
+            {stockCategoryMix.every((row) => row.amount === 0) && <p className="text-muted text-sm">No stock on the shelf for this company yet.</p>}
+            {stockCategoryMix.filter((row) => row.amount > 0).map((row) => (
+              <div key={row.category}>
+                <div className="flex justify-between mb-1"><strong>{row.category || 'No category'}</strong><span>₹{Math.round(row.amount).toLocaleString('en-IN')} ({row.share}%)</span></div>
+                <div className="progress-track"><div style={{ width: `${row.share}%`, background: row.color }} /></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>}
 
     {reportType === 'profit' && activeCompany && (
       <ProfitReport companyId={activeCompany.id} companyName={activeCompany.name} period={period} periodLabel={periodRange} />
@@ -396,7 +466,7 @@ export default function ReportsPage() {
       {receivablesAging.totals['90+'] > 0 && <div className="alert alert-warning mb-4">
         <AlertCircle size={16} />
         <span>₹{receivablesAging.totals['90+'].toLocaleString()} of this revenue was invoiced more than 90 days ago and is still unpaid.</span>
-        <button type="button" className="alert-action" onClick={() => setReportType('aging')}>Open aging report</button>
+        <button type="button" className="alert-action" onClick={() => setReportType('aging')}>See unpaid bills</button>
       </div>}
       <div className="kpi-grid">
         <Kpi title="Sales (incl. GST)" value={`₹${totalRevenue.toLocaleString()}`} note={changeOn(totalRevenue, priorRevenue)} icon={TrendingUp} color="var(--color-success)" bg="var(--color-success-bg)" />
@@ -580,7 +650,7 @@ export default function ReportsPage() {
       {!isAllTime(period) && <div className="alert alert-info mb-4" role="status">This one is as of right now, not {periodRange} — what is owed is owed today, however far back it was billed.</div>}
       <div className="grid-2">
         <div className="card">
-          <div className="card-header"><h3 className="card-title">Receivables Aging</h3><span className="badge badge-danger">₹{totalReceivablesDue.toLocaleString()} outstanding</span></div>
+          <div className="card-header"><h3 className="card-title">Customers who owe you</h3><span className="badge badge-danger">₹{totalReceivablesDue.toLocaleString()} outstanding</span></div>
           <div className="grid-4 mb-4">
             {AGE_BUCKETS.map((bucket) => <Kpi key={bucket} title={`${bucket} days`} value={`₹${receivablesAging.totals[bucket].toLocaleString()}`} icon={AlertCircle} color={BUCKET_COLORS[bucket]} bg={BUCKET_BG[bucket]} />)}
           </div>
@@ -602,7 +672,7 @@ export default function ReportsPage() {
           </table></div>
         </div>
         <div className="card">
-          <div className="card-header"><h3 className="card-title">Payables Aging</h3><span className="badge badge-warning">₹{totalPayablesDue.toLocaleString()} owed</span></div>
+          <div className="card-header"><h3 className="card-title">Suppliers you owe</h3><span className="badge badge-warning">₹{totalPayablesDue.toLocaleString()} owed</span></div>
           <div className="grid-4 mb-4">
             {AGE_BUCKETS.map((bucket) => <Kpi key={bucket} title={`${bucket} days`} value={`₹${payablesAging.totals[bucket].toLocaleString()}`} icon={AlertCircle} color={BUCKET_COLORS[bucket]} bg={BUCKET_BG[bucket]} />)}
           </div>

@@ -140,7 +140,7 @@ export default function PurchaseFormModal(props: PurchaseFormModalProps) {
             <div className="tbl-toolbar" style={{ display: 'block' }}>
               <div className="tbl-toolbar-title" style={{ marginBottom: '8px' }}>
                 <strong>Item details</strong>
-                <small>Anything not already in Inventory is added as a new part when this is saved</small>
+                <small>Anything not already in Stock is added as a new part when this is saved</small>
               </div>
               <PartPicker
                 parts={partOptions}
@@ -190,7 +190,7 @@ export default function PurchaseFormModal(props: PurchaseFormModalProps) {
                           ) : (
                             <>
                               <strong style={{ fontSize: '13px' }}>{line.description}</strong>
-                              <div className="text-muted text-sm mt-1">New part — will be added to Inventory</div>
+                              <div className="text-muted text-sm mt-1">New part — will be added to Stock</div>
                             </>
                           )}
                           {warnings.map((warning) => (

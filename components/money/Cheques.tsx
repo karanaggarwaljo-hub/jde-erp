@@ -145,7 +145,6 @@ export default function Cheques() {
     <div>
       <div className="page-header">
         <div>
-          <div className="eyebrow">Money</div>
           <h1 className="page-title">Cheques</h1>
           <p className="page-subtitle">Cheques you have given and received, and when each one is due.</p>
         </div>

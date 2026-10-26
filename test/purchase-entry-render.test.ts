@@ -105,7 +105,7 @@ test('a line with no cost says what that would do to the stock value', () => {
 test('a part not in the catalogue renders as a new part', () => {
   const markup = render([{ description: 'HYDRAULIC SEAL KIT', quantity: 1, unit_price: 1200 }]);
   assert.match(markup, /HYDRAULIC SEAL KIT/);
-  assert.match(markup, /New part — will be added to Inventory/);
+  assert.match(markup, /New part — will be added to Stock/);
 });
 
 test('a supplier not on file is called out before the purchase is saved', () => {

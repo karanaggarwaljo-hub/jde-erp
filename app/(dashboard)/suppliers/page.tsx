@@ -1,7 +1,9 @@
 'use client';
 
 import { Fragment, FormEvent, useMemo, useState } from 'react';
-import { Plus, Search, Phone, Mail, Sparkles, IndianRupee, Truck, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Search, Phone, Mail, Sparkles, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
+import SummaryLine from '@/components/SummaryLine';
+import { money, wholeMoney } from '@/lib/money';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { useEntryIntent } from '@/lib/use-entry-intent';
@@ -80,8 +82,6 @@ export default function SuppliersPage() {
       supplier.gstin.toLowerCase().includes(query)
     );
   });
-
-  const totalPayables = suppliers.reduce((total, supplier) => total + supplier.balance, 0);
 
   const saveSupplier = async (event: FormEvent) => {
     event.preventDefault();
@@ -167,7 +167,10 @@ export default function SuppliersPage() {
   // Headline figures — a straight roll-up of the supplier rows this page already loaded. There is
   // no month-on-month movement here because the page holds no historical series to compare with.
   const owing = suppliers.filter((supplier) => balanceOf(supplier) > 0);
-  const settled = suppliers.filter((supplier) => balanceOf(supplier) <= 0);
+  // For the title line: what is owed, and apart from it what was paid in advance. Netted together,
+  // an advance to one supplier would hide a debt to another.
+  const youOwe = suppliers.reduce((sum, supplier) => sum + Math.max(0, balanceOf(supplier)), 0);
+  const paidAhead = suppliers.reduce((sum, supplier) => sum + Math.max(0, -balanceOf(supplier)), 0);
   const largestCreditor = owing.reduce<Supplier | null>(
     (top, supplier) => (!top || balanceOf(supplier) > balanceOf(top) ? supplier : top),
     null,
@@ -207,68 +210,38 @@ export default function SuppliersPage() {
   return <div>
     <div className="page-header">
       <div>
-        <div className="eyebrow">Accounts payable</div>
-        <h1 className="page-title">Supplier &amp; Vendor Directory</h1>
-        <p className="page-subtitle">Manage spare parts manufacturers, distributors, payment terms and payables</p>
+        <h1 className="page-title">Suppliers</h1>
+        {/* The headline figures, as one line where three number boxes and a warning strip used to be. */}
+        {suppliers.length > 0 ? (
+          <SummaryLine facts={[
+            { value: String(suppliers.length), label: suppliers.length === 1 ? 'supplier' : 'suppliers' },
+            { value: `₹${wholeMoney(youOwe)}`, label: 'to pay', tone: youOwe > 0 ? 'warn' : 'good', hint: 'What you owe suppliers, added up' },
+            ...(paidAhead > 0 ? [{ value: `₹${wholeMoney(paidAhead)}`, label: 'paid ahead', hint: 'Suppliers you have paid more than they billed' }] : []),
+            ...(owing.length > 0 ? [{
+              value: String(owing.length),
+              label: owing.length === 1 ? 'is waiting to be paid' : 'are waiting to be paid',
+              hint: largestCreditor ? `Most: ${largestCreditor.name}, ₹${money(balanceOf(largestCreditor))}` : undefined,
+            }] : []),
+          ]} />
+        ) : (
+          <p className="page-subtitle">The companies you buy parts from, and what you owe each one</p>
+        )}
       </div>
-      <button className="btn btn-primary" onClick={() => setShowModal(true)}><Plus size={16} /> Add Supplier</button>
+      <button className="btn btn-primary" onClick={() => setShowModal(true)}><Plus size={16} /> Add a supplier</button>
     </div>
 
     {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
     {pickSupplierPrompt && (
       <div className="alert alert-info mb-4" role="status">
-        Find the supplier you paid and press <strong>Pay Vendor</strong> on their row. Only suppliers you still owe are shown.
-      </div>
-    )}
-
-    {/* auto-fit rather than the shared auto-fill so three cards stretch across the row
-        instead of leaving two empty tracks on a wide screen. */}
-    {suppliers.length > 0 && (
-      <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
-          <div className="flex justify-between items-center">
-            <span className="kpi-label">Total payable</span>
-            <div className="kpi-icon-wrap"><IndianRupee size={18} /></div>
-          </div>
-          <div className="kpi-value">₹{totalPayables.toLocaleString()}</div>
-          <span className="kpi-context">Sum of every supplier balance on file</span>
-        </div>
-
-        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-blue)', '--kpi-color-bg': 'var(--color-info-bg)' } as React.CSSProperties}>
-          <div className="flex justify-between items-center">
-            <span className="kpi-label">Suppliers awaiting payment</span>
-            <div className="kpi-icon-wrap"><Truck size={18} /></div>
-          </div>
-          <div className="kpi-value">{owing.length}</div>
-          <span className="kpi-context">of {suppliers.length} vendors · {settled.length} settled</span>
-        </div>
-
-        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-red)', '--kpi-color-bg': 'var(--rose-tint)' } as React.CSSProperties}>
-          <div className="flex justify-between items-center">
-            <span className="kpi-label">Largest balance</span>
-            <div className="kpi-icon-wrap"><TrendingUp size={18} /></div>
-          </div>
-          <div className="kpi-value">₹{(largestCreditor ? balanceOf(largestCreditor) : 0).toLocaleString()}</div>
-          <span className="kpi-context">{largestCreditor ? largestCreditor.name : 'No supplier is carrying a balance'}</span>
-        </div>
-      </div>
-    )}
-
-    {owing.length > 0 && (
-      <div className="alert alert-warning mb-4">
-        <AlertTriangle size={16} style={{ flex: 'none', marginTop: '1px' }} />
-        <span>
-          {owing.length} supplier{owing.length > 1 ? 's are' : ' is'} awaiting payment, ₹{totalPayables.toLocaleString()} in total.
-        </span>
-        <button type="button" className="alert-action" onClick={() => selectFilter('balance')}>Show who we owe</button>
+        Find the supplier you paid and press <strong>Pay</strong> on their row. Only suppliers you still owe are shown.
       </div>
     )}
 
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
       <div className="tbl-toolbar">
         <div className="tbl-toolbar-title">
-          <strong>Supplier ledger</strong>
-          <small>Payable balances, credit terms and contact details</small>
+          <strong>All suppliers</strong>
+          <small>What you owe each one, their credit terms and how to reach them</small>
         </div>
         <div className="tbl-tools">
           <div className="tabs" role="tablist" aria-label="Filter suppliers">
@@ -300,7 +273,7 @@ export default function SuppliersPage() {
           <div className="empty-state-icon"><Truck size={22} /></div>
           <div className="empty-state-title">{loading ? 'Loading suppliers…' : 'No suppliers yet'}</div>
           <p className="empty-state-desc">
-            {loading ? 'Fetching vendors for the active company.' : 'Add your first supplier to get started.'}
+            {loading ? 'Fetching suppliers for the active company.' : 'Add your first supplier to get started.'}
           </p>
         </div>
       ) : filtered.length === 0 ? (
@@ -375,7 +348,7 @@ export default function SuppliersPage() {
                       </td>
                       <td>
                         <div className="flex items-center gap-2">
-                          <button className="btn btn-secondary btn-sm" disabled={!supplier.balance} onClick={() => openPayment(supplier)}>Pay Vendor</button>
+                          <button className="btn btn-secondary btn-sm" disabled={!supplier.balance} onClick={() => openPayment(supplier)}>Pay</button>
                           <button className="btn btn-ghost btn-sm" aria-label={`Draft payment follow-up for ${supplier.name}`} title="Draft a payment follow-up message" disabled={!supplier.balance} onClick={() => setReminderSupplier(supplier)}><Sparkles size={14} /></button>
                         </div>
                       </td>
@@ -419,7 +392,7 @@ export default function SuppliersPage() {
     </form></div></div>}
 
     {paymentSupplier && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="payment-modal-title"><form onSubmit={recordPayment}>
-      <div className="modal-header"><h3 id="payment-modal-title" className="modal-title">Record Vendor Payment</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingPayment} onClick={() => setPaymentSupplier(null)}>✕</button></div>
+      <div className="modal-header"><h3 id="payment-modal-title" className="modal-title">Pay a supplier</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingPayment} onClick={() => setPaymentSupplier(null)}>✕</button></div>
       <div className="modal-body flex flex-col gap-4"><p>Outstanding balance for <strong>{paymentSupplier.name}</strong>: ₹{paymentSupplier.balance.toLocaleString()}</p><div className="form-group"><label className="form-label">Payment Amount (₹)</label><input type="number" min="1" max={paymentSupplier.balance} className="form-input" disabled={savingPayment} value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} /></div>{activeCompany && <MoneyPicker companyId={activeCompany.id} direction="out" value={paymentMoney} onChange={setPaymentMoney} disabled={savingPayment} />}
         {paymentError && <p className="form-error" role="alert">{paymentError}</p>}
       </div>

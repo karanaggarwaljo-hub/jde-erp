@@ -1,7 +1,9 @@
 'use client';
 
 import { Fragment, useMemo, useState } from 'react';
-import { Plus, Phone, Mail, MapPin, Sparkles, Tag, IndianRupee, Users, TrendingUp, AlertTriangle, ChevronLeft, ChevronRight, MessageCircle, Gauge } from 'lucide-react';
+import { Plus, Phone, Mail, MapPin, Sparkles, Tag, Users, ChevronLeft, ChevronRight, MessageCircle, Gauge } from 'lucide-react';
+import SummaryLine from '@/components/SummaryLine';
+import { money, wholeMoney } from '@/lib/money';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
 import SegmentOfferModal from '@/components/SegmentOfferModal';
@@ -174,7 +176,10 @@ export default function CustomersPage() {
   // Every figure below is a straight roll-up of the customer rows on screen.
   const owing = customers.filter((customer) => balanceOf(customer) > 0);
   const settled = customers.filter((customer) => balanceOf(customer) <= 0);
-  const totalOutstanding = customers.reduce((sum, customer) => sum + balanceOf(customer), 0);
+  // For the title line: what is owed, and apart from it what was paid in advance. Netted together,
+  // one customer's advance would hide another's debt.
+  const owedToYou = customers.reduce((sum, customer) => sum + Math.max(0, balanceOf(customer)), 0);
+  const paidAhead = customers.reduce((sum, customer) => sum + Math.max(0, -balanceOf(customer)), 0);
   const largestDebtor = owing.reduce<Customer | null>(
     (top, customer) => (!top || balanceOf(customer) > balanceOf(top) ? customer : top),
     null,
@@ -208,57 +213,39 @@ export default function CustomersPage() {
     <div>
       <div className="page-header">
         <div>
-          <div className="eyebrow">Accounts receivable</div>
           <h1 className="page-title">Customers</h1>
-          <p className="page-subtitle">Track accounts receivable, GST numbers and purchase histories</p>
+          {/* The headline figures, as one line where three number boxes and a warning strip used to be. */}
+          {customers.length > 0 ? (
+            <SummaryLine facts={[
+              { value: String(customers.length), label: customers.length === 1 ? 'customer' : 'customers' },
+              { value: `₹${wholeMoney(owedToYou)}`, label: 'to collect', tone: owedToYou > 0 ? 'warn' : 'good', hint: 'What customers owe you, added up' },
+              ...(paidAhead > 0 ? [{ value: `₹${wholeMoney(paidAhead)}`, label: 'paid ahead', hint: 'Customers who have paid more than they were billed' }] : []),
+              ...(owing.length > 0 ? [{
+                value: String(owing.length),
+                label: owing.length === 1 ? 'owes you' : 'owe you',
+                hint: largestDebtor ? `Most: ${largestDebtor.name}, ₹${money(balanceOf(largestDebtor))}` : undefined,
+              }] : []),
+            ]} />
+          ) : (
+            <p className="page-subtitle">The people and garages you sell to, and what each one owes you</p>
+          )}
         </div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}><Plus size={16} /> Add New Customer</button>
+        <button className="btn btn-primary" onClick={() => setShowModal(true)}><Plus size={16} /> Add a customer</button>
       </div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
 
-      {/* auto-fit rather than the shared auto-fill so three cards stretch across the row
-          instead of leaving two empty tracks on a wide screen. */}
-      {customers.length > 0 && (
-        <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-          <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
-            <div className="flex justify-between items-center">
-              <span className="kpi-label">Total outstanding</span>
-              <div className="kpi-icon-wrap"><IndianRupee size={18} /></div>
-            </div>
-            <div className="kpi-value">₹{totalOutstanding.toLocaleString()}</div>
-            <span className="kpi-context">Sum of every customer balance on file</span>
-          </div>
-
-          <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-blue)', '--kpi-color-bg': 'var(--color-info-bg)' } as React.CSSProperties}>
-            <div className="flex justify-between items-center">
-              <span className="kpi-label">Customers who owe</span>
-              <div className="kpi-icon-wrap"><Users size={18} /></div>
-            </div>
-            <div className="kpi-value">{owing.length}</div>
-            <span className="kpi-context">of {customers.length} accounts · {settled.length} settled</span>
-          </div>
-
-          <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-red)', '--kpi-color-bg': 'var(--rose-tint)' } as React.CSSProperties}>
-            <div className="flex justify-between items-center">
-              <span className="kpi-label">Largest balance</span>
-              <div className="kpi-icon-wrap"><TrendingUp size={18} /></div>
-            </div>
-            <div className="kpi-value">₹{(largestDebtor ? balanceOf(largestDebtor) : 0).toLocaleString()}</div>
-            <span className="kpi-context">{largestDebtor ? largestDebtor.name : 'No customer is carrying a balance'}</span>
-          </div>
-        </div>
-      )}
-
+      {/* Only when somebody owes money: an empty box saying nobody does was one more thing to read. */}
+      {collectionQueue.length > 0 && (
       <section className="card mb-6" aria-labelledby="collections-queue-title">
         <div className="card-header">
           <div>
-            <h2 id="collections-queue-title" className="card-title">Collections to review</h2>
-            <p className="text-muted text-sm">Start with the oldest unpaid invoices. Draft a reminder, then record the payment once it arrives.</p>
+            <h2 id="collections-queue-title" className="card-title">Who owes you money</h2>
+            <p className="text-muted text-sm">Oldest unpaid bill first. Send a reminder, then record the money when it comes.</p>
           </div>
           <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             {agedReceivables.length > 0 && <span className="badge badge-warning">{agedReceivables.length} aged</span>}
-            <span className={totalReceivables > 0 ? 'badge badge-danger' : 'badge badge-success'}>₹{totalReceivables.toLocaleString('en-IN')} due</span>
+            <span className={totalReceivables > 0 ? 'badge badge-danger' : 'badge badge-success'}>₹{money(totalReceivables)} due</span>
           </div>
         </div>
         <div className="table-wrap" style={{ borderLeft: 'none', borderRight: 'none', borderBottom: 'none', borderRadius: 0 }}>
@@ -270,8 +257,8 @@ export default function CustomersPage() {
                   <td><div className="font-semibold">{customer.name}</div><div className="text-muted text-sm">{customer.phone || customer.email || 'No contact details'}</div></td>
                   <td>{oldestInvoice ? <><span className="text-brand font-semibold">{oldestInvoice.id}</span><div className="text-muted text-sm">{openCount} open invoice{openCount === 1 ? '' : 's'} · {oldestInvoice.date}</div></> : <span className="text-muted">No linked open invoice</span>}</td>
                   <td>{oldestInvoice ? <span className={daysOutstanding > 30 ? 'badge badge-danger' : daysOutstanding > 0 ? 'badge badge-warning' : 'badge badge-info'}>{daysOutstanding === 0 ? 'Due today' : `${daysOutstanding} days`}</span> : <span className="text-muted">—</span>}</td>
-                  <td className="text-right"><strong className="text-danger">₹{Number(customer.balance).toLocaleString('en-IN')}</strong>{creditState(customer.balance, customer.credit_limit).over && <div><span className="badge badge-danger">Over limit</span></div>}</td>
-                  <td className="text-center"><div className="flex gap-1 justify-center">{whatsappReminder(customer) ? <a className="btn btn-secondary btn-sm" href={whatsappReminder(customer)!} target="_blank" rel="noopener noreferrer" title="Opens WhatsApp with the reminder and the open bills typed in"><MessageCircle size={14} /> WhatsApp</a> : null}<button className="btn btn-secondary btn-sm" onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /> Draft reminder</button><button className="btn btn-ghost btn-sm" onClick={() => openPayment(customer)}>Record received</button></div></td>
+                  <td className="text-right"><strong className="text-danger">₹{money(Number(customer.balance))}</strong>{creditState(customer.balance, customer.credit_limit).over && <div><span className="badge badge-danger">Over limit</span></div>}</td>
+                  <td className="text-center"><div className="flex gap-1 justify-center">{whatsappReminder(customer) ? <a className="btn btn-secondary btn-sm" href={whatsappReminder(customer)!} target="_blank" rel="noopener noreferrer" title="Opens WhatsApp with the reminder and the open bills typed in"><MessageCircle size={14} /> WhatsApp</a> : null}<button className="btn btn-secondary btn-sm" onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /> Draft reminder</button><button className="btn btn-ghost btn-sm" onClick={() => openPayment(customer)}>Money received</button></div></td>
                 </tr>
               ))}
               {collectionQueue.length === 0 && <tr><td colSpan={5}><div className="empty-state"><p className="empty-state-title">{loading || invoicesLoading ? 'Loading collections…' : 'No customer payments need follow-up'}</p><p className="empty-state-desc">{loading || invoicesLoading ? 'Checking customer balances and open invoices.' : 'All customer balances are cleared. New outstanding invoices will appear here.'}</p></div></td></tr>}
@@ -280,22 +267,13 @@ export default function CustomersPage() {
         </div>
         {collectionQueue.length > 8 && <p className="text-muted text-sm" style={{ padding: '12px 16px 0' }}>Showing the first 8 priorities out of {collectionQueue.length} customers with money due.</p>}
       </section>
-
-      {owing.length > 0 && (
-        <div className="alert alert-warning mb-4">
-          <AlertTriangle size={16} style={{ flex: 'none', marginTop: '1px' }} />
-          <span>
-            {owing.length} customer{owing.length > 1 ? 's are' : ' is'} carrying a balance, ₹{totalOutstanding.toLocaleString()} in total.
-          </span>
-          <button type="button" className="alert-action" onClick={() => selectFilter('balance')}>Show who owes</button>
-        </div>
       )}
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         <div className="tbl-toolbar">
           <div className="tbl-toolbar-title">
-            <strong>Customer ledger</strong>
-            <small>Outstanding balances, GST numbers and contact details</small>
+            <strong>All customers</strong>
+            <small>What each one owes, their GST number and how to reach them</small>
           </div>
           <div className="tbl-tools">
             <div className="tabs" role="tablist" aria-label="Filter customers">

@@ -6,6 +6,7 @@ import {
   FLAG_TEXT, billTotals, duplicateBillNumbers, matchBills,
   type BillablePurchase, type MatchedBill, type PurchaseLine, type ReturnToSupplier,
 } from '@/lib/bill-matching';
+import SummaryLine from '@/components/SummaryLine';
 
 const money = (value: number) => `₹${Math.round(value).toLocaleString('en-IN')}`;
 
@@ -66,15 +67,14 @@ export default function SupplierBillsPanel({ purchases, lines, returns, loading 
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="kpi-grid">
-        <Tile label="Billed" value={money(totals.billed)} note={`${totals.count} purchase${totals.count === 1 ? '' : 's'}`} />
-        <Tile label="Paid" value={money(totals.paid)} note={totals.credited > 0 ? `${money(totals.credited)} credited back` : 'nothing credited back'} />
-        <Tile label="Still owed" value={money(totals.outstanding)} note="bills less credits less payments" />
-        <Tile
-          label="Needs checking"
-          value={`${totals.flagged}`}
-          note={totals.flagged === 0 ? 'nothing to look at' : 'bills where something does not add up'}
-        />
+      {/* The totals, as one line where four number boxes used to be. */}
+      <div className="card card-sm">
+        <SummaryLine facts={[
+          { value: money(totals.billed), label: 'billed', hint: `${totals.count} purchase${totals.count === 1 ? '' : 's'}` },
+          { value: money(totals.paid), label: 'paid', hint: totals.credited > 0 ? `${money(totals.credited)} credited back` : 'Nothing credited back' },
+          { value: money(totals.outstanding), label: 'still owed', tone: totals.outstanding > 0 ? 'warn' : 'good', hint: 'Bills less credits less payments' },
+          { value: `${totals.flagged}`, label: 'to check', tone: totals.flagged > 0 ? 'bad' : 'good', hint: totals.flagged === 0 ? 'Nothing to look at' : 'Bills where something does not add up' },
+        ]} />
       </div>
 
       {duplicates.length > 0 && (
@@ -157,16 +157,6 @@ export default function SupplierBillsPanel({ purchases, lines, returns, loading 
         A purchase is either received or not — receiving one bill in two separate deliveries is not
         recorded yet, so this checks each bill as a whole.
       </p>
-    </div>
-  );
-}
-
-function Tile({ label, value, note }: { label: string; value: string; note: string }) {
-  return (
-    <div className="kpi-card">
-      <span className="kpi-label">{label}</span>
-      <div className="kpi-value">{value}</div>
-      <div className="kpi-context">{note}</div>
     </div>
   );
 }

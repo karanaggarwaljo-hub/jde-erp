@@ -14,14 +14,10 @@ import {
   Pencil,
   Trash2,
   Ban,
-  ArrowRight,
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
-  IndianRupee,
   Receipt,
-  TrendingUp,
-  Package,
   AlertTriangle,
   CheckCircle2,
   X,
@@ -50,6 +46,8 @@ import ReceivePaymentModal from '@/components/ReceivePaymentModal';
 import { useEntryIntent } from '@/lib/use-entry-intent';
 import { money, paise, round2 } from '@/lib/money';
 import InvoiceFormModal from '@/components/sales/InvoiceFormModal';
+import SummaryLine, { type SummaryFact } from '@/components/SummaryLine';
+import RowMenu from '@/components/RowMenu';
 import { amountReceived, billTotals, lineDiscountAmount, lineDiscountPercent, lineGross, lineNet } from '@/lib/invoice-totals';
 import {
   DRAFT_STATUS,
@@ -361,19 +359,9 @@ export default function SalesPage() {
   // Sales that happened: neither parked drafts nor cancelled bills.
   const liveInvoices = invoices.filter((invoice) => !isDraft(invoice) && !isCancelled(invoice));
   const draftInvoices = invoices.filter(isDraft);
-  const draftInvoiceIds = new Set(draftInvoices.map((invoice) => invoice.id));
 
   const totalRevenue = liveInvoices.reduce((t, inv) => t + Number(inv.total || 0), 0);
-  const avgOrderValue = liveInvoices.length > 0 ? totalRevenue / liveInvoices.length : 0;
   const outstandingDue = liveInvoices.reduce((t, inv) => t + invoiceBalanceDue(inv), 0);
-  const productRevenue = new Map<string, number>();
-  for (const item of invoiceItems) {
-    // Line items belonging to a draft are left out for the same reason: nothing has been sold yet.
-    if (draftInvoiceIds.has(item.invoice_id)) continue;
-    productRevenue.set(item.name, (productRevenue.get(item.name) ?? 0) + Number(item.line_total || 0));
-  }
-  const topProduct = Array.from(productRevenue.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
-  const topProductRevenue = topProduct ? (productRevenue.get(topProduct) ?? 0) : 0;
 
   // One definition of paid / partly paid / unpaid for the whole screen, so the KPI contexts, the
   // filter tabs and the row badges can never disagree with each other.
@@ -570,7 +558,7 @@ export default function SalesPage() {
 
     const unmatchedLine = quoteLines.find((line) => line.part.trim() && !line.custom && !partOptions.some((part) => part.value === line.part));
     if (unmatchedLine) {
-      setQuotationError(`"${unmatchedLine.part}" doesn't match a part in Inventory — pick one from the dropdown list.`);
+      setQuotationError(`"${unmatchedLine.part}" doesn't match a part in Stock — pick one from the dropdown list.`);
       return;
     }
     const items = quoteItemPayload(quoteLines);
@@ -791,7 +779,7 @@ export default function SalesPage() {
 
     const unmatchedLine = lines.find((line) => line.part.trim() && !line.custom && !partOptions.some((part) => part.value === line.part));
     if (unmatchedLine) {
-      setInvoiceError(`"${unmatchedLine.part}" doesn't match a part in Inventory — pick one from the dropdown list.`);
+      setInvoiceError(`"${unmatchedLine.part}" doesn't match a part in Stock — pick one from the dropdown list.`);
       return;
     }
 
@@ -852,7 +840,7 @@ export default function SalesPage() {
           : `${draftId} parked as a draft for ${customerLabel} — stock is reserved, nothing is billed yet.`
       );
     } catch (error) {
-      setInvoiceError(error instanceof Error ? error.message : 'Failed to park this sale as a draft — please check Sales and Inventory before retrying.');
+      setInvoiceError(error instanceof Error ? error.message : 'Failed to park this sale as a draft — please check Sales and Stock before retrying.');
     } finally {
       setSavingDraft(false);
     }
@@ -864,7 +852,7 @@ export default function SalesPage() {
 
     const unmatchedLine = lines.find((line) => line.part.trim() && !line.custom && !partOptions.some((part) => part.value === line.part));
     if (unmatchedLine) {
-      setInvoiceError(`"${unmatchedLine.part}" doesn't match a part in Inventory — pick one from the dropdown list.`);
+      setInvoiceError(`"${unmatchedLine.part}" doesn't match a part in Stock — pick one from the dropdown list.`);
       return;
     }
 
@@ -983,7 +971,7 @@ Save it anyway?`,
       window.open(`/sales/invoice/${createdId}`, '_blank');
       finishEntry();
     } catch (error) {
-      setInvoiceError(error instanceof Error ? error.message : 'Failed to save this invoice — please check Sales and Inventory before retrying.');
+      setInvoiceError(error instanceof Error ? error.message : 'Failed to save this invoice — please check Sales and Stock before retrying.');
     } finally {
       setSavingInvoice(false);
     }
@@ -1147,9 +1135,14 @@ Save it anyway?`,
     }
   };
 
-  const ledgerSummary = invoices.length > 0
-    ? ` · ${liveInvoices.length} ${liveInvoices.length === 1 ? 'invoice' : 'invoices'} on file${dueCount > 0 ? `, ${dueCount} still carrying a balance` : ''}${draftInvoices.length > 0 ? `, ${draftInvoices.length} ${draftInvoices.length === 1 ? 'draft parked' : 'drafts parked'}` : ''}`
-    : '';
+  // The headline figures, as one line under the title where five number boxes and a warning strip
+  // used to be. The average bill and the best-selling part are on Reports.
+  const summaryFacts: SummaryFact[] = invoices.length === 0 ? [] : [
+    { value: String(liveInvoices.length), label: liveInvoices.length === 1 ? 'bill' : 'bills', hint: `${settledCount} paid · ${partialCount} part paid · ${unpaidCount} unpaid` },
+    { value: `₹${money(totalRevenue)}`, label: 'sold', hint: 'Billed across every invoice recorded for this company' },
+    { value: `₹${money(outstandingDue)}`, label: 'to collect', tone: outstandingDue > 0 ? 'warn' : 'good', hint: dueCount > 0 ? `${dueCount} ${dueCount === 1 ? 'bill is' : 'bills are'} unpaid or part paid` : 'Every bill is paid' },
+    ...(draftInvoices.length > 0 ? [{ value: String(draftInvoices.length), label: draftInvoices.length === 1 ? 'draft' : 'drafts', hint: 'Bills parked before saving, such as a job card still in the shop' }] : []),
+  ];
 
   const openSalesReturn = async (invoice: Invoice) => {
     if (!activeCompany) return;
@@ -1230,14 +1223,15 @@ ${stockLine}`)) return;
     <div>
       <div className="page-header">
         <div>
-          <div className="eyebrow">Accounts receivable</div>
-          <h1 className="page-title">Sales Management</h1>
-          <p className="page-subtitle">Invoices, billing and quotations{ledgerSummary}</p>
+          <h1 className="page-title">Sales</h1>
+          {summaryFacts.length > 0
+            ? <SummaryLine facts={summaryFacts} />
+            : <p className="page-subtitle">Your bills, quotations and returns</p>}
         </div>
         <div className="flex gap-2">
-          <button className="btn btn-secondary" onClick={() => openReceivePayment()}><Wallet size={16} /> Receive Payment</button>
-          <button className="btn btn-secondary" onClick={openQuotation}><Plus size={16} /> Create Quotation</button>
-          <button className="btn btn-primary" onClick={() => openInvoice()}><Plus size={16} /> Create Sales Invoice</button>
+          <button className="btn btn-secondary" onClick={() => openReceivePayment()}><Wallet size={16} /> Money received</button>
+          <button className="btn btn-secondary" onClick={openQuotation}><Plus size={16} /> New quotation</button>
+          <button className="btn btn-primary" onClick={() => openInvoice()}><Plus size={16} /> Make a bill</button>
         </div>
       </div>
 
@@ -1274,7 +1268,7 @@ ${stockLine}`)) return;
             className={`tab ${activeTab === 'credits' ? 'active' : ''}`}
             onClick={() => setActiveTab('credits')}
           >
-            Credit Notes <span className="tab-count">{salesReturns.length}</span>
+            Returns <span className="tab-count">{salesReturns.length}</span>
           </button>
           <button
             type="button"
@@ -1290,83 +1284,6 @@ ${stockLine}`)) return;
 
       {activeTab === 'invoices' && (
         <>
-          {/* Headline figures, every one of them summed from the invoices and line items this page
-              has already loaded — there is no month-on-month delta or trend line here because the
-              page holds no historical series to compare against. */}
-          {invoices.length > 0 && (
-            <div className="kpi-grid">
-              <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
-                <div className="flex justify-between items-center">
-                  <span className="kpi-label">Total Revenue</span>
-                  <div className="kpi-icon-wrap"><IndianRupee size={18} /></div>
-                </div>
-                <div className="kpi-value">₹{money(totalRevenue)}</div>
-                <span className="kpi-context">Billed across every invoice recorded for this company</span>
-              </div>
-
-              <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-blue)', '--kpi-color-bg': 'var(--color-info-bg)' } as React.CSSProperties}>
-                <div className="flex justify-between items-center">
-                  <span className="kpi-label">Transactions</span>
-                  <div className="kpi-icon-wrap"><Receipt size={18} /></div>
-                </div>
-                <div className="kpi-value">{invoices.length}</div>
-                <span className="kpi-context">{settledCount} paid · {partialCount} partial · {unpaidCount} unpaid</span>
-              </div>
-
-              <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-green)', '--kpi-color-bg': 'var(--em-tint)' } as React.CSSProperties}>
-                <div className="flex justify-between items-center">
-                  <span className="kpi-label">Avg. Order Value</span>
-                  <div className="kpi-icon-wrap"><TrendingUp size={18} /></div>
-                </div>
-                <div className="kpi-value">₹{Number(avgOrderValue).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</div>
-                <span className="kpi-context">Total revenue divided by {invoices.length} {invoices.length === 1 ? 'invoice' : 'invoices'}</span>
-              </div>
-
-              <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-red)', '--kpi-color-bg': 'var(--rose-tint)' } as React.CSSProperties}>
-                <div className="flex justify-between items-center">
-                  <span className="kpi-label">Outstanding Due</span>
-                  <div className="kpi-icon-wrap"><AlertTriangle size={18} /></div>
-                </div>
-                <div className="kpi-value">₹{money(outstandingDue)}</div>
-                <div className={`kpi-change ${dueCount > 0 ? 'negative' : 'positive'}`}>
-                  {dueCount > 0 ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
-                  <span>{dueCount > 0 ? `${dueCount} open` : 'All settled'}</span>
-                </div>
-                <span className="kpi-context">Billed but not yet received</span>
-              </div>
-
-              <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-violet)', '--kpi-color-bg': 'var(--panel-2)' } as React.CSSProperties}>
-                <div className="flex justify-between items-center">
-                  <span className="kpi-label">Top Product</span>
-                  <div className="kpi-icon-wrap"><Package size={18} /></div>
-                </div>
-                <div className="kpi-value truncate" style={{ fontSize: '16px' }}>{topProduct ?? '—'}</div>
-                <span className="kpi-context">
-                  {topProduct
-                    ? `₹${money(topProductRevenue)} across recorded invoice lines`
-                    : 'No invoice line items recorded yet'}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {outstandingDue > 0 && (
-            <div className="alert alert-warning mb-4" role="status">
-              <AlertTriangle size={16} style={{ flex: 'none', marginTop: '1px' }} />
-              <span>
-                ₹{money(outstandingDue)} is outstanding across {dueCount} {dueCount === 1 ? 'invoice' : 'invoices'}
-                {unpaidCount > 0 && partialCount > 0 ? ` — ${unpaidCount} with nothing received and ${partialCount} part paid` : ''}.
-              </span>
-              <button
-                type="button"
-                className="alert-action"
-                onClick={() => { setPaymentFilter(unpaidCount > 0 ? 'unpaid' : 'partial'); setPage(1); }}
-              >
-                {unpaidCount > 0 ? 'Show unpaid' : 'Show part paid'} <ArrowRight size={14} />
-              </button>
-            </div>
-          )}
-
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <div className="tbl-toolbar">
               <div className="tbl-toolbar-title">
@@ -1487,46 +1404,50 @@ ${stockLine}`)) return;
                           ? <span className="badge badge-warning"><AlertTriangle size={12} />Due ₹{money(balance)}</span>
                           : <span className="badge badge-danger"><XCircle size={12} />Unpaid</span>}
                     </td>
-                    <td className="text-center"><div className="flex justify-between gap-1 items-center">
+                    {/* View and Print are the everyday two. The rest, in words, are behind the "⋯" button,
+                        and one that cannot be used says why instead of only hinting on hover. */}
+                    <td className="text-center"><div className="flex gap-1 items-center" style={{ justifyContent: 'flex-end' }}>
                       <button className="btn btn-ghost btn-sm" aria-label={`View ${invoice.id}`} title="View invoice" onClick={() => setViewingInvoice(invoice)}><Eye size={14} /></button>
-                      {!isCancelled(invoice) && <>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        aria-label={`Edit ${invoice.id}`}
-                        title={returnCount > 0
-                          ? `Edit unavailable — ${returnCount} return${returnCount === 1 ? '' : 's'} recorded against this invoice. Delete the return first if it really must be changed.`
-                          : writtenOff > 0
-                            ? 'Edit unavailable — this invoice was settled short, so its amounts are fixed'
-                            : items.length > 0 ? 'Edit invoice' : "Edit unavailable — this invoice predates line-item tracking"}
-                        disabled={items.length === 0 || writtenOff > 0 || returnCount > 0}
-                        style={items.length === 0 || writtenOff > 0 || returnCount > 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
-                        onClick={() => items.length > 0 && writtenOff === 0 && returnCount === 0 && openEditInvoice(invoice)}
-                      ><Pencil size={14} /></button>
-                      {!isDraft(invoice) && <button
-                        className="btn btn-ghost btn-sm"
-                        aria-label={`Return items from ${invoice.id}`}
-                        title={items.length > 0 ? 'Create partial return / credit note' : 'Return unavailable — this invoice predates line-item tracking'}
-                        disabled={items.length === 0 || loadingReturn}
-                        style={items.length === 0 ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
-                        onClick={() => items.length > 0 && openSalesReturn(invoice)}
-                      ><Undo2 size={14} /></button>}
-                      </>}
                       <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={() => window.open(`/sales/invoice/${invoice.id}`, '_blank')}><Printer size={14} /></button>
-                      {activeCompany && (
-                        <button className="btn btn-ghost btn-sm" aria-label={`Saved PDF of ${invoice.id}`} title="Open the saved PDF — works on any device signed in to the ERP"
-                          onClick={() => window.open(`/api/sales/invoice-pdf?companyId=${encodeURIComponent(activeCompany.id)}&invoiceId=${encodeURIComponent(invoice.id)}`, '_blank')}><FileDown size={14} /></button>
-                      )}
-                      {!isCancelled(invoice) && !isDraft(invoice) && (
-                        <button className="btn btn-ghost btn-sm" aria-label={`Cancel ${invoice.id}`}
-                          title="Cancel invoice — it keeps its number and stays on record, marked cancelled"
-                          style={{ color: 'var(--color-danger)' }}
-                          onClick={() => { setCancelReason(''); setCancelError(''); setCancelCandidate(invoice); }}><Ban size={14} /></button>
-                      )}
-                      {!isCancelled(invoice) && <button className="btn btn-ghost btn-sm" aria-label={`Delete ${invoice.id}`}
-                        title={returnCount > 0 ? 'Delete unavailable — goods have been returned against this invoice' : 'Delete invoice'}
-                        disabled={returnCount > 0}
-                        style={returnCount > 0 ? { color: 'var(--color-danger)', opacity: 0.4, cursor: 'not-allowed' } : { color: 'var(--color-danger)' }}
-                        onClick={() => returnCount === 0 && setDeleteCandidate(invoice)}><Trash2 size={14} /></button>}
+                      <RowMenu
+                        label={`More for ${invoice.id}`}
+                        items={[
+                          ...(!isCancelled(invoice) ? [{
+                            label: 'Edit',
+                            icon: <Pencil size={15} />,
+                            disabledReason: returnCount > 0
+                              ? `Goods were returned against it. Delete the return first.`
+                              : writtenOff > 0
+                                ? 'It was settled short, so its amounts are fixed'
+                                : items.length === 0 ? 'It is older than line-by-line bills' : undefined,
+                            onSelect: () => openEditInvoice(invoice),
+                          }] : []),
+                          ...(!isCancelled(invoice) && !isDraft(invoice) ? [{
+                            label: 'Return goods',
+                            icon: <Undo2 size={15} />,
+                            disabledReason: items.length === 0 ? 'It is older than line-by-line bills' : loadingReturn ? 'Opening another return…' : undefined,
+                            onSelect: () => openSalesReturn(invoice),
+                          }] : []),
+                          ...(activeCompany ? [{
+                            label: 'Open the saved PDF',
+                            icon: <FileDown size={15} />,
+                            onSelect: () => window.open(`/api/sales/invoice-pdf?companyId=${encodeURIComponent(activeCompany.id)}&invoiceId=${encodeURIComponent(invoice.id)}`, '_blank'),
+                          }] : []),
+                          ...(!isCancelled(invoice) && !isDraft(invoice) ? [{
+                            label: 'Cancel this bill',
+                            icon: <Ban size={15} />,
+                            danger: true,
+                            onSelect: () => { setCancelReason(''); setCancelError(''); setCancelCandidate(invoice); },
+                          }] : []),
+                          ...(!isCancelled(invoice) ? [{
+                            label: 'Delete',
+                            icon: <Trash2 size={15} />,
+                            danger: true,
+                            disabledReason: returnCount > 0 ? 'Goods were returned against it' : undefined,
+                            onSelect: () => setDeleteCandidate(invoice),
+                          }] : []),
+                        ]}
+                      />
                     </div></td>
                   </tr>;
                 })}
@@ -1823,7 +1744,7 @@ ${stockLine}`)) return;
           <div className="card card-sm bg-surface">
             <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Quoted Parts</h4>
             {partOptions.length === 0
-              ? <p className="text-muted text-sm">Add parts in Inventory before creating a quotation.</p>
+              ? <p className="text-muted text-sm">Add parts in Stock before creating a quotation.</p>
               : <PartPicker parts={partOptions} onPick={addQuotePart} onCustom={addQuoteCustomLine} disabled={savingQuotation || savingQuoteDraft} />}
             <div style={{ overflowX: 'auto', marginTop: '10px' }}>
               <table className="erp-table" style={{ minWidth: '620px' }}>
@@ -1845,7 +1766,7 @@ ${stockLine}`)) return;
                           <div className="text-muted text-sm mt-1">{matched.brand ? `${matched.brand} · ` : ''}{matched.stock} in stock</div>
                         </> : <>
                           <strong style={{ fontSize: '13px' }}>{line.part}</strong>
-                          <div className="text-muted text-sm mt-1">One-off line — not in Inventory</div>
+                          <div className="text-muted text-sm mt-1">One-off line — not in Stock</div>
                         </>}
                       </td>
                       <td><input required type="number" min="1" className="form-input" style={{ textAlign: 'right' }} aria-label={`Quantity on quoted line ${index + 1}`} value={line.qty} onChange={(event) => updateQuoteLine(index, { qty: Number(event.target.value) })} /></td>

@@ -98,7 +98,6 @@ export default function JobCards() {
     <div>
       <div className="page-header">
         <div>
-          <div className="eyebrow">Repairs</div>
           <h1 className="page-title">Job Cards</h1>
           <p className="page-subtitle">Machines in for repair. Parts the customer takes during the job go on one bill, paid in one go when the machine is ready.</p>
         </div>

@@ -206,7 +206,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                   autoFocus
                 />
               ) : (
-                <span className="text-muted text-sm">Add parts in Inventory before creating an invoice.</span>
+                <span className="text-muted text-sm">Add parts in Stock before creating an invoice.</span>
               )}
             </div>
 
@@ -252,7 +252,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                           ) : (
                             <>
                               <strong style={{ fontSize: '13px' }}>{line.part}</strong>
-                              <div className="text-muted text-sm mt-1">One-off line — not in Inventory, so no stock moves</div>
+                              <div className="text-muted text-sm mt-1">One-off line — not in Stock, so no stock moves</div>
                             </>
                           )}
                           {warnings.map((warning) => (
@@ -353,7 +353,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                   {lines.length === 0 && (
                     <tr><td colSpan={7}><div className="empty-state" style={{ padding: '28px 20px' }}>
                       <p className="empty-state-title">{partOptions.length === 0 ? 'No parts to sell yet' : 'Nothing on this invoice yet'}</p>
-                      <p className="empty-state-desc">{partOptions.length === 0 ? 'Add parts in Inventory before creating an invoice.' : 'Scan a barcode or type a part number in the box above, then press Enter.'}</p>
+                      <p className="empty-state-desc">{partOptions.length === 0 ? 'Add parts in Stock before creating an invoice.' : 'Scan a barcode or type a part number in the box above, then press Enter.'}</p>
                     </div></td></tr>
                   )}
                 </tbody>

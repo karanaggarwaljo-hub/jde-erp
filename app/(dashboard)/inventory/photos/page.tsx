@@ -115,7 +115,7 @@ export default function PartPhotosPage() {
     <div style={{ maxWidth: 720, margin: '0 auto' }}>
       <div className="page-header">
         <div>
-          <Link href="/inventory" className="btn btn-ghost btn-sm" style={{ paddingLeft: 0 }}><ArrowLeft size={14} /> Inventory</Link>
+          <Link href="/inventory" className="btn btn-ghost btn-sm" style={{ paddingLeft: 0 }}><ArrowLeft size={14} /> Stock</Link>
           <h1 className="page-title">Part photos</h1>
           <p className="page-subtitle">{withPhoto} of {parts.length} parts have a photo. To change one, choose All parts and find it.{driveOn === true ? ' Each photo is also saved to your Google Drive, in Parts catalogue.' : driveOn === false ? ' Connect Google Drive in Settings to keep a copy of every photo there too.' : ''}</p>
         </div>

@@ -1,5 +1,5 @@
 /**
- * Opening an entry form straight from the Day Book, and coming back to it once the entry is saved.
+ * Opening an entry form straight from the Day Book or Home, and coming back there once it is saved.
  *
  * The Day Book's buttons used to only take you to the Sales, Purchases or Expenses screen. There the
  * form still had to be found and opened, and nothing brought you back to the Day Book afterwards to
@@ -19,8 +19,9 @@ const ROUTES: Record<EntryKind, { path: string; record: string }> = {
 };
 
 /** The only places a screen may send someone back to. A value read from an address is never used as
- *  a destination itself, so a crafted link cannot send anyone somewhere else after they save. */
-const RETURN_PLACES = { daybook: '/daybook' } as const;
+ *  a destination itself, so a crafted link cannot send anyone somewhere else after they save.
+ *  Home's big buttons open the same forms as the Day Book's tiles and come back to Home. */
+const RETURN_PLACES = { daybook: '/daybook', home: '/dashboard' } as const;
 export type ReturnPlace = keyof typeof RETURN_PLACES;
 
 /** The link that opens a form for this kind of entry and returns to `back` once it is saved. */

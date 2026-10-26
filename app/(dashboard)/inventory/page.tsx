@@ -11,12 +11,8 @@ import {
   AlertTriangle,
   Upload,
   Download,
-  Boxes,
-  LayoutGrid,
-  Percent,
   CheckCircle2,
   XCircle,
-  ArrowRight,
   Merge,
   Camera,
 } from 'lucide-react';
@@ -45,6 +41,9 @@ import { usePartPhotos } from '@/lib/usePartPhotos';
 import { savePartPhoto } from '@/lib/client-part-photo';
 import type { MergePartsResult } from '@/lib/client-part-merge';
 import ImportFromFileModal from '@/components/inventory/ImportFromFileModal';
+import SummaryLine from '@/components/SummaryLine';
+import MoreActions from '@/components/MoreActions';
+import RowMenu from '@/components/RowMenu';
 import type {
   CostSheetImport,
   ImportMode,
@@ -114,6 +113,7 @@ export default function InventoryPage() {
   // one per-unit number cannot say that. See lib/stock-value.ts.
   const fifoCostFor = fifoCostLookup(stockLayers);
   const [search, setSearch] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [stockFilter, setStockFilter] = useState<StockFilter>('all');
   const [showModal, setShowModal] = useState(false);
@@ -130,6 +130,21 @@ export default function InventoryPage() {
   const [photoError, setPhotoError] = useState('');
   const photoInputRef = useRef<HTMLInputElement>(null);
   const photoFor = usePartPhotos();
+
+  // Home's "Find a part" button arrives with ?find=1: put the cursor in the search box, ready to
+  // type, and take the request out of the address so a refresh does not repeat it. Read straight
+  // from window.location, as lib/use-entry-intent.ts does, so the page needs no Suspense wrapper.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('find') !== '1') return;
+      params.delete('find');
+      const rest = params.toString();
+      window.history.replaceState(window.history.state, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
+      searchInputRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
   const [feedback, setFeedback] = useState('');
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
@@ -803,20 +818,17 @@ export default function InventoryPage() {
     }
   };
 
-  // Both halves of this sentence count real rows, and the alert itself is skipped when both are
-  // zero — nothing on this screen ever announces a shortage that isn't there.
-  const reorderSentence = `${[
-    lowStockCount > 0 ? `${lowStockCount} ${lowStockCount === 1 ? 'part is' : 'parts are'} at or below reorder level` : '',
-    outOfStockCount > 0
-      ? (lowStockCount > 0
-        ? `${outOfStockCount} ${outOfStockCount === 1 ? 'is' : 'are'} fully out of stock`
-        : `${outOfStockCount} ${outOfStockCount === 1 ? 'part is' : 'parts are'} fully out of stock`)
-      : '',
-  ].filter(Boolean).join(', and ')}.`;
-
-  const catalogueSummary = products.length > 0
-    ? ` · ${products.length} ${products.length === 1 ? 'part' : 'parts'}${brandCount > 0 ? ` across ${brandCount} ${brandCount === 1 ? 'brand' : 'brands'}` : ''}`
-    : '';
+  // The headline figures, as one line under the title where four number boxes and a warning strip
+  // used to be. Every one counts real rows; a figure that would only ever say zero is left out.
+  const summaryFacts = [
+    { value: String(products.length), label: products.length === 1 ? 'part' : 'parts', hint: brandCount > 0 ? `Across ${brandCount} ${brandCount === 1 ? 'brand' : 'brands'}` : undefined },
+    { value: `₹${wholeMoney(stockValue)}`, label: 'stock value', hint: "Stock on hand, valued at each part's oldest purchase batch still on the shelf" },
+    ...(lowStockCount > 0 ? [{ value: String(lowStockCount), label: 'running low', tone: 'warn' as const, hint: 'At or below their own reorder level' }] : []),
+    ...(outOfStockCount > 0 ? [{ value: String(outOfStockCount), label: 'out of stock', tone: 'bad' as const }] : []),
+    ...(averageMargin !== null
+      ? [{ value: `${averageMargin.toFixed(1)}%`, label: 'average margin', hint: `Across ${marginParts.length} ${marginParts.length === 1 ? 'part' : 'parts'} that have both a cost and a sale price` }]
+      : []),
+  ];
 
   return (
     <div
@@ -839,31 +851,34 @@ export default function InventoryPage() {
         </div>
       )}
 
-      {/* Header */}
+      {/* Header: the one button people come here for, with the occasional ones under More. */}
       <div className="page-header">
         <div>
-          <div className="eyebrow">Stock control</div>
-          <h1 className="page-title">Spare Parts Inventory</h1>
-          <p className="page-subtitle">Track stock levels, locations & pricing{catalogueSummary}</p>
+          <h1 className="page-title">Stock</h1>
+          <SummaryLine facts={summaryFacts} />
         </div>
         <div className="flex gap-2">
-          <button className="btn btn-secondary" onClick={downloadWorksheet} disabled={products.length === 0}
-            title={worksheetPending > 0
-              ? `Download a spreadsheet of all ${products.length} parts — ${worksheetPending} still need a real part number`
-              : 'Download a spreadsheet of all your parts'}>
-            <Download size={16} /> Parts Worksheet{worksheetPending > 0 ? ` (${worksheetPending})` : ''}
-          </button>
-          <label className="btn btn-secondary" style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
-            <Upload size={16} /> {importing ? 'Reading…' : 'Import from File'}
-            <input type="file" accept={`${SPREADSHEET_ACCEPT},${SCANNABLE_IMPORT_ACCEPT}`} hidden disabled={importing} onChange={handleFileImport} />
-          </label>
-          <Link href="/inventory/photos" className="btn btn-secondary" title="Go through your parts and add or change their photos">
-            <Camera size={16} /> Part Photos
-          </Link>
+          <MoreActions>
+            <Link href="/inventory/photos" prefetch={false}>
+              <Camera size={16} /> <span>Part photos<small>Add or change the photos of your parts</small></span>
+            </Link>
+            <label style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
+              <Upload size={16} /> <span>{importing ? 'Reading…' : 'Import from a file'}<small>A spreadsheet, photo or PDF of a parts list. You can also drop it anywhere on this page.</small></span>
+              <input type="file" accept={`${SPREADSHEET_ACCEPT},${SCANNABLE_IMPORT_ACCEPT}`} hidden disabled={importing} onChange={handleFileImport} />
+            </label>
+            <button type="button" onClick={downloadWorksheet} disabled={products.length === 0}>
+              <Download size={16} />
+              <span>
+                Download parts worksheet
+                <small>{worksheetPending > 0
+                  ? `A spreadsheet of all ${products.length} parts. ${worksheetPending} still need a real part number.`
+                  : 'A spreadsheet of all your parts'}</small>
+              </span>
+            </button>
+          </MoreActions>
           <button className="btn btn-primary" onClick={handleOpenAdd}>
-            <Plus size={16} /> Add New Part
+            <Plus size={16} /> Add a part
           </button>
-          <span className="text-muted text-sm" style={{ alignSelf: 'center' }}>or drop a spreadsheet, photo or PDF anywhere on this page</span>
         </div>
       </div>
 
@@ -878,65 +893,6 @@ export default function InventoryPage() {
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
       {importError && <div className="alert alert-danger mb-4" role="alert">{importError}</div>}
       {photoError && <div className="alert alert-danger mb-4" role="alert">{photoError}</div>}
-
-      {/* Headline figures. Each one is summed from the parts this page already loaded — there is
-          no month-on-month delta or trend line here because the page holds no historical series
-          to compare against, and an invented one would be worse than none. */}
-      <div className="kpi-grid">
-        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
-          <div className="flex justify-between items-center">
-            <span className="kpi-label">Stock Value</span>
-            <div className="kpi-icon-wrap"><Boxes size={18} /></div>
-          </div>
-          <div className="kpi-value">₹{wholeMoney(stockValue)}</div>
-          <span className="kpi-context">Stock on hand, valued at each part&apos;s oldest open purchase batch</span>
-        </div>
-
-        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-blue)', '--kpi-color-bg': 'var(--color-info-bg)' } as React.CSSProperties}>
-          <div className="flex justify-between items-center">
-            <span className="kpi-label">Total Parts</span>
-            <div className="kpi-icon-wrap"><LayoutGrid size={18} /></div>
-          </div>
-          <div className="kpi-value">{products.length}</div>
-          <span className="kpi-context">{brandCount > 0 ? `Across ${brandCount} ${brandCount === 1 ? 'brand' : 'brands'}` : 'No brand recorded yet'}</span>
-        </div>
-
-        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-amber)', '--kpi-color-bg': 'var(--amber-tint)' } as React.CSSProperties}>
-          <div className="flex justify-between items-center">
-            <span className="kpi-label">Low Stock</span>
-            <div className="kpi-icon-wrap"><AlertTriangle size={18} /></div>
-          </div>
-          <div className="kpi-value">{lowStockCount}</div>
-          <div className={`kpi-change ${lowStockCount > 0 ? 'negative' : 'positive'}`}>
-            {lowStockCount > 0 ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
-            <span>{lowStockCount > 0 ? 'Needs action' : 'All stocked'}</span>
-          </div>
-          <span className="kpi-context">At or below their own reorder level{outOfStockCount > 0 ? ` · ${outOfStockCount} fully out` : ''}</span>
-        </div>
-
-        <div className="kpi-card" style={{ '--kpi-color': 'var(--chart-green)', '--kpi-color-bg': 'var(--em-tint)' } as React.CSSProperties}>
-          <div className="flex justify-between items-center">
-            <span className="kpi-label">Avg. Margin</span>
-            <div className="kpi-icon-wrap"><Percent size={18} /></div>
-          </div>
-          <div className="kpi-value">{averageMargin === null ? '—' : `${averageMargin.toFixed(1)}%`}</div>
-          <span className="kpi-context">
-            {averageMargin === null
-              ? 'Needs a cost and a sale price on at least one part'
-              : `Across ${marginParts.length} ${marginParts.length === 1 ? 'part' : 'parts'} that have both a cost and a sale price`}
-          </span>
-        </div>
-      </div>
-
-      {(lowStockCount > 0 || outOfStockCount > 0) && (
-        <div className="alert alert-warning mb-4" role="status">
-          <AlertTriangle size={16} style={{ flex: 'none' }} />
-          <span>{reorderSentence}</span>
-          {/* Goes to the Purchases screen, which is where restocking is actually recorded — it is
-              real navigation, not a button that quietly does nothing. */}
-          <Link className="alert-action" href="/purchases">Record a purchase <ArrowRight size={14} /></Link>
-        </div>
-      )}
 
       {/* Product Table */}
       <div className="table-wrap">
@@ -964,8 +920,10 @@ export default function InventoryPage() {
             <div className="search-bar" style={{ minWidth: '220px' }}>
               <Search className="search-bar-icon" size={16} />
               <input
+                ref={searchInputRef}
                 type="text"
-                placeholder="Search by part no, OEM, name, brand, or what it fits (e.g. 3DX, BS4)"
+                aria-label="Find a part"
+                placeholder="Find a part: its number, name, brand or what it fits (e.g. 3DX)"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -1068,8 +1026,9 @@ export default function InventoryPage() {
                     </span>
                   </td>
                   <td className="text-center">
-                    <div className="flex justify-between gap-1 items-center">
-                      <button className="btn btn-ghost btn-sm" aria-label={`Edit ${p.name}`} onClick={() => handleEdit(p)}>
+                    {/* Edit and the photo are the everyday two; merging and deleting are in words behind "⋯". */}
+                    <div className="flex gap-1 items-center" style={{ justifyContent: 'flex-end' }}>
+                      <button className="btn btn-ghost btn-sm" aria-label={`Edit ${p.name}`} title="Edit" onClick={() => handleEdit(p)}>
                         <Edit size={14} />
                       </button>
                       {/* Change (or add) the photo straight from the row; the owner could not find how. */}
@@ -1077,12 +1036,13 @@ export default function InventoryPage() {
                         title={p.image_url ? 'Change photo' : 'Add photo'} disabled={photoSaving === p.id} onClick={() => pickPhotoFor(p.id)}>
                         <Camera size={14} />
                       </button>
-                      <button className="btn btn-ghost btn-sm" aria-label={`Merge ${p.name} with another part`} title="Same part entered twice? Merge it with the other entry" onClick={() => setMergeCandidate(p)}>
-                        <Merge size={14} />
-                      </button>
-                      <button className="btn btn-ghost btn-sm" aria-label={`Delete ${p.name}`} style={{ color: 'var(--color-danger)' }} onClick={() => { setDeleteError(''); setDeleteCandidate(p); }}>
-                        <Trash2 size={14} />
-                      </button>
+                      <RowMenu
+                        label={`More for ${p.name}`}
+                        items={[
+                          { label: 'Merge with a duplicate', icon: <Merge size={15} />, onSelect: () => setMergeCandidate(p) },
+                          { label: 'Delete', icon: <Trash2 size={15} />, danger: true, onSelect: () => { setDeleteError(''); setDeleteCandidate(p); } },
+                        ]}
+                      />
                     </div>
                   </td>
                 </tr>

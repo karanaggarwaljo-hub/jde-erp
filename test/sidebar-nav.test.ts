@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { footerItems, isCurrentScreen, isMenu, navGroups, screensIn } from '../components/sidebar-nav';
+import { footerItems, isCurrentScreen, isMenu, navItems, screensIn } from '../components/sidebar-nav';
 
-const everyScreen = [...navGroups.flatMap((group) => screensIn(group.items)), ...footerItems];
+const everyScreen = [...screensIn(navItems), ...footerItems];
 
 /** Tidying the menu must not lose a screen along the way. This is the list it reached before. */
 test('the menu still reaches every screen it reached before', () => {
   const before = [
     '/dashboard', '/daybook', '/inventory', '/sales', '/purchases',
-    '/customers', '/suppliers', '/expenses', '/reports', '/analytics',
+    '/customers', '/suppliers', '/expenses', '/reports',
+    // '/analytics' became the AI Advice tab on Reports, October 2026, at the owner's choice.
     '/catalog-admin', '/settings',
     // Added October 2026: every activity with its time, who and which device.
     '/logbook',
@@ -30,39 +31,33 @@ test('every screen appears in the menu exactly once', () => {
   assert.equal(new Set(hrefs).size, hrefs.length);
 });
 
-/** The owner asked why Website Catalog was pinned at the foot of the menu. A pinned row takes room
- *  from the list on a short screen, so it scrolls with the rest now, and only Settings is pinned. */
-test('Website Catalog scrolls with the rest of the menu, and only Settings is pinned', () => {
-  const inList = navGroups.flatMap((group) => screensIn(group.items)).map((item) => item.name);
-  assert.ok(inList.includes('Website Catalog'));
-  assert.deepEqual(footerItems.map((item) => item.name), ['Settings']);
+/** The owner asked for an ERP a school child could use: one short list in plain words, the
+ *  everyday screens each a row of their own, and only the occasional ones tucked under More. */
+test('the menu is one plain list, in the order of a working day, with More last', () => {
+  assert.deepEqual(navItems.map((entry) => entry.name), [
+    'Home', 'Day Book', 'Sales', 'Purchases', 'Expenses', 'Stock', 'Customers', 'Suppliers', 'Reports', 'More',
+  ]);
+  const more = navItems[navItems.length - 1];
+  assert.ok(isMenu(more));
+  assert.deepEqual(more.items.map((item) => item.name), [
+    'Job Cards', 'Bills & Invoices', 'Cheques', 'What to Order', 'Log Book', 'Website Catalog',
+  ]);
+  assert.equal(navItems.filter(isMenu).length, 1);
 });
 
-test('every group has a heading', () => {
-  for (const group of navGroups) assert.ok(group.label.trim().length > 0);
+test('Settings is the only row pinned at the foot of the menu', () => {
+  assert.deepEqual(footerItems.map((item) => item.name), ['Settings']);
 });
 
 /** On the tablet-width menu the icon is the only label left, so two rows must never look alike.
  *  Sales and Purchases used a shopping cart and a shopping bag, close to the same shape. */
 test('no two rows share an icon', () => {
-  const menus = navGroups.flatMap((group) => group.items).filter(isMenu);
+  const menus = navItems.filter(isMenu);
   const icons = [...everyScreen.map((item) => item.icon), ...menus.map((menu) => menu.icon)];
   assert.equal(new Set(icons).size, icons.length);
 });
 
-/** The Day Book starts sales, purchases and expenses itself, so the owner asked for the three rows
- *  to become one that opens to show them. */
-test('Sales, Job Cards, Purchases, Expenses and Bills & Invoices share one Transactions row, after the rest of daily work', () => {
-  const daily = navGroups[0].items;
-  assert.deepEqual(daily.map((entry) => entry.name), ['Dashboard', 'Day Book', 'Inventory', 'Transactions']);
-  const transactions = daily[3];
-  assert.ok(isMenu(transactions));
-  assert.deepEqual(transactions.items.map((item) => item.name), ['Sales', 'Job Cards', 'Purchases', 'Expenses', 'Bills & Invoices']);
-  const menus = navGroups.flatMap((group) => group.items).filter(isMenu);
-  assert.equal(menus.length, 1);
-});
-
-/** The Transactions row opens by itself on these screens, including a page inside one of them. */
+/** More opens by itself on these screens, including a page inside one of them. */
 test('a screen is current on its own address and on the pages beneath it, and nowhere else', () => {
   assert.ok(isCurrentScreen('/sales', '/sales'));
   assert.ok(isCurrentScreen('/sales/invoice/INV-1013', '/sales'));

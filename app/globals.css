@@ -315,37 +315,26 @@ input, textarea, select { font-family: inherit; }
   scrollbar-color: var(--line-2) transparent;
 }
 
-/* One group of related screens under its heading. The small gap keeps a highlighted row and a
-   hovered neighbour from running together into one block. */
+/* The menu's one list of screens. It used to be four groups under small uppercase headings; the
+   owner asked for something simpler. The small gap keeps a highlighted row and a hovered neighbour
+   from running together into one block. */
 .sidebar-group {
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-
-/* Structural eyebrow label — one of the two places uppercase + tracking is still allowed.
-   Indented to line up with the icons beneath it, so each heading reads as owning its rows. */
-.sidebar-section-label {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--ink-4);
-  padding: 18px 12px 6px;
-}
-
-.sidebar-group:first-child .sidebar-section-label {
-  padding-top: 8px;
+  padding-top: 4px;
 }
 
 .sidebar-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: 12px;
+  /* Larger than before: with the headings gone there is room for rows that are easy to read and
+     to hit, which matters more to a busy counter than fitting more on the screen. */
+  padding: 10px 12px;
   border-radius: var(--radius-md);
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: 14.5px;
   font-weight: 500;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -372,12 +361,12 @@ input, textarea, select { font-family: inherit; }
 }
 
 .sidebar-item-icon {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
 }
 
-/* Transactions: one row that opens to show Sales, Purchases and Expenses beneath it. */
+/* More: one row that opens to show the screens used now and then. */
 .sidebar-menu-toggle {
   width: 100%;
   background: none;
@@ -414,7 +403,9 @@ input, textarea, select { font-family: inherit; }
 }
 
 .sidebar-subitem {
-  font-size: 13px;
+  font-size: 14px;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 /* Settings and Sign Out, pinned below the list. Every other screen scrolls with the menu. */
@@ -554,30 +545,107 @@ input, textarea, select { font-family: inherit; }
 }
 
 /* ===================================================
-
-Dashboard Priorities & Insights
+   Home
+   The first screen: one big button per everyday job, four figures, what needs attention.
    =================================================== */
-.attention-section {
-  background: var(--amber-tint);
-  border: 1px solid var(--amber-line);
-  border-radius: var(--radius-lg);
-  padding: 16px;
-  margin-bottom: 24px;
-}
-
-.attention-heading {
-  display: flex;
+.home-heading { color: var(--ink); font-size: 16px; font-weight: 700; margin-bottom: 12px; }
+.home-actions { margin-bottom: 24px; }
+.home-action-grid { display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.home-action {
   align-items: center;
-  justify-content: space-between;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sh-1);
+  color: var(--ink);
+  display: flex;
   gap: 16px;
-  margin-bottom: 12px;
+  min-height: 92px;
+  padding: 18px 20px;
+  text-decoration: none;
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.home-action:hover { background: var(--surface-2); box-shadow: var(--sh-2); }
+.home-action:focus-visible { box-shadow: var(--ring); outline: none; }
+.home-action-icon { align-items: center; border-radius: 14px; display: flex; flex-shrink: 0; height: 54px; justify-content: center; width: 54px; }
+.home-action-in .home-action-icon { background: var(--em-tint); color: var(--em); }
+.home-action-out .home-action-icon { background: var(--amber-tint); color: var(--amber-2); }
+.home-action-find .home-action-icon { background: var(--color-info-bg); color: var(--ind); }
+.home-action-in:hover { border-color: var(--em-line); }
+.home-action-out:hover { border-color: var(--amber-line); }
+.home-action-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.home-action-text strong { font-size: 17px; font-weight: 700; }
+.home-action-text small { color: var(--ink-3); font-size: 13px; }
+
+.home-figures { display: grid; gap: 14px; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 24px; }
+.home-figure {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sh-1);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 18px;
+  text-decoration: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.home-figure:hover { border-color: var(--line-3); box-shadow: var(--sh-2); }
+.home-figure:focus-visible { box-shadow: var(--ring); outline: none; }
+.home-figure-label { color: var(--ink-3); font-size: 13px; font-weight: 600; }
+.home-figure-value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.home-figure small { color: var(--ink-3); font-size: 12px; }
+.home-figure.warn .home-figure-value { color: var(--amber-2); }
+.home-figure.bad .home-figure-value { color: var(--rose); }
+
+.home-attention-list { display: flex; flex-direction: column; gap: 10px; }
+.home-attention {
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--amber);
+  border-radius: var(--radius-md);
+  display: flex;
+  gap: 12px;
+  padding: 12px 14px;
+}
+.home-attention.danger { border-left-color: var(--rose); }
+.home-attention-icon { color: var(--amber-2); display: flex; flex-shrink: 0; }
+.home-attention.danger .home-attention-icon { color: var(--rose); }
+.home-attention-text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.home-attention-text strong { font-size: 14px; }
+.home-attention-text small { color: var(--ink-3); font-size: 12.5px; }
+
+@media (max-width: 1024px) {
+  .home-action-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .home-figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .home-action-grid { gap: 10px; }
+  .home-action { flex-direction: column; align-items: flex-start; gap: 8px; min-height: 0; padding: 12px 14px; }
+  .home-action-icon { border-radius: 12px; height: 40px; width: 40px; }
+  .home-action-text small { font-size: 12px; }
+  .home-figures { gap: 10px; }
+  .home-figure { padding: 12px 14px; }
+  .home-figure-value { font-size: 21px; }
+  .home-action-text strong { font-size: 15.5px; }
+  /* The words take the whole width and the button drops below them, in line with the words. */
+  .home-attention { flex-wrap: wrap; }
+  .home-attention-text { flex: 1 1 calc(100% - 40px); }
+  .home-attention > .btn { margin-left: 30px; }
 }
 
-.attention-heading h2 {
-  color: var(--ink);
-  font-size: 15px;
-  font-weight: 700;
-}
+/* A screen's headline figures as one line under its title (components/SummaryLine.tsx), where three
+   or four big number boxes used to be. */
+.summary-line { color: var(--ink-2); display: flex; flex-wrap: wrap; font-size: 14px; gap: 4px 0; margin-top: 4px; }
+.summary-fact { white-space: nowrap; }
+.summary-fact + .summary-fact::before { color: var(--ink-4); content: '·'; margin: 0 10px; }
+.summary-fact strong { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 700; }
+.summary-fact.bad strong { color: var(--rose); }
+.summary-fact.warn strong { color: var(--amber-2); }
+.summary-fact.good strong { color: var(--em); }
+.summary-fact[title] { cursor: help; }
 
 .eyebrow {
   color: var(--amber-2);
@@ -585,12 +653,6 @@ Dashboard Priorities & Insights
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-}
-
-.attention-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
 }
 
 .attention-item {
@@ -626,19 +688,6 @@ Dashboard Priorities & Insights
   grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
   gap: 16px;
 }
-
-.low-stock-list { display: flex; flex-direction: column; gap: 10px; }
-
-/* Low stock is a warning, not a failure — amber tint, not rose. */
-.low-stock-item {
-  background: var(--amber-tint);
-  border-left: 3px solid var(--amber);
-  border-radius: var(--radius-md);
-  font-variant-numeric: tabular-nums;
-  padding: 10px 12px;
-}
-
-.reorder-quantity { color: var(--ink-3); display: block; font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 5px; }
 
 .invoice-summary { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 12px 16px; flex-wrap: wrap; gap: 12px; }
 .invoice-total { color: var(--ink); font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -1435,12 +1484,9 @@ Modal
 @media (max-width: 1024px) {
   :root { --sidebar-width: 72px; }
   .sidebar-logo-text,
-  .sidebar-section-label,
   .sidebar-item span { display: none; }
   .sidebar-item { justify-content: center; padding: 10px; }
   .sidebar-logo { justify-content: center; padding: 0; }
-  /* With the group names hidden, a hairline between groups keeps the icons in their clusters. */
-  .sidebar-group + .sidebar-group { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; }
   /* No room to indent on the icon-only menu, so an opened row's screens sit on a shaded panel. */
   .sidebar-menu-chevron { display: none; }
   .sidebar-submenu { margin: 2px 0 4px; padding-left: 0; border-left: 0; background: var(--panel-2); border-radius: var(--radius-md); }
@@ -1460,9 +1506,7 @@ Modal
   }
   .erp-sidebar.open .sidebar-logo { justify-content: flex-start; padding: 0 20px; }
   .erp-sidebar.open .sidebar-logo-text { display: flex; }
-  .erp-sidebar.open .sidebar-section-label { display: block; }
-  .erp-sidebar.open .sidebar-item { justify-content: flex-start; padding: 8px 12px; }
-  .erp-sidebar.open .sidebar-group + .sidebar-group { border-top: 0; margin-top: 0; padding-top: 0; }
+  .erp-sidebar.open .sidebar-item { justify-content: flex-start; padding: 10px 12px; }
   .erp-sidebar.open .sidebar-item span { display: inline; }
   .erp-sidebar.open .sidebar-menu-chevron { display: block; }
   .erp-sidebar.open .sidebar-submenu { margin: 2px 0 4px 20px; padding-left: 8px; border-left: 1px solid var(--line-2); background: none; border-radius: 0; }
@@ -1470,7 +1514,7 @@ Modal
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .form-grid-2, .form-grid-3, .form-grid-4, .form-grid-5 { grid-template-columns: 1fr; }
   .grid-3, .grid-4 { grid-template-columns: 1fr 1fr; }
-  .attention-grid, .dashboard-split { grid-template-columns: 1fr; }
+  .dashboard-split { grid-template-columns: 1fr; }
   .keyboard-hint, .profile-copy, .profile-trigger > svg, .topbar-actions > .btn { display: none; }
   .topbar-actions { gap: 6px; }
   .report-tabs { overflow-x: auto; }
@@ -2212,3 +2256,93 @@ button.part-photo.is-empty:hover svg { opacity: 0.85; }
 .fitment-edit { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .fitment-edit { gap: 8px; }
 .fitment-edit .form-input { flex: 1 1 240px; min-width: 0; }
+
+/* ===================================================
+   More: a screen's occasional actions behind one button (components/MoreActions.tsx)
+   =================================================== */
+.more-actions { position: relative; }
+.more-actions > summary { cursor: pointer; list-style: none; }
+.more-actions > summary::-webkit-details-marker { display: none; }
+.more-actions-menu {
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  box-shadow: var(--sh-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 260px;
+  max-width: min(340px, calc(100vw - 32px));
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+}
+.more-actions-menu > a,
+.more-actions-menu > button,
+.more-actions-menu > label {
+  align-items: flex-start;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  gap: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  text-decoration: none;
+  width: 100%;
+}
+.more-actions-menu > * > svg { color: var(--ink-3); flex-shrink: 0; margin-top: 2px; }
+.more-actions-menu > a:hover,
+.more-actions-menu > button:hover:not(:disabled),
+.more-actions-menu > label:hover { background: var(--panel-2); }
+.more-actions-menu > button:disabled { cursor: not-allowed; opacity: .5; }
+.more-actions-menu small { color: var(--ink-3); display: block; font-size: 12px; font-weight: 400; margin-top: 2px; }
+/* On a phone the title row wraps and More sits at the left, so the list opens to the right of it. */
+@media (max-width: 640px) {
+  .more-actions-menu { left: 0; right: auto; }
+}
+
+/* The "⋯" list at the end of a table row (components/RowMenu.tsx): the row's less common actions,
+   in words. Fixed to the window so the table's own box cannot clip it. */
+.row-menu {
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  box-shadow: var(--sh-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(320px, calc(100vw - 16px));
+  min-width: 220px;
+  padding: 6px;
+  position: fixed;
+  z-index: 60;
+}
+.row-menu-item {
+  align-items: flex-start;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  gap: 10px;
+  padding: 9px 12px;
+  text-align: left;
+  width: 100%;
+}
+.row-menu-item > svg { color: var(--ink-3); flex-shrink: 0; margin-top: 2px; }
+.row-menu-item:hover:not(:disabled) { background: var(--panel-2); }
+.row-menu-item.danger, .row-menu-item.danger > svg { color: var(--rose); }
+.row-menu-item:disabled { cursor: not-allowed; opacity: .55; }
+.row-menu-item small { color: var(--ink-3); display: block; font-size: 12px; font-weight: 400; margin-top: 2px; }
