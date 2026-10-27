@@ -1,6 +1,7 @@
 import { GoogleGenAI, createPartFromBase64, createUserContent } from '@google/genai';
 import { aiFailureResponse, friendlyAiErrorMessage } from '@/lib/ai/friendly-error';
 import { updateRow, uploadCatalogImage } from '@/lib/db';
+import { requireOwnCompanyRow } from '@/lib/auth/dal';
 
 export const dynamic = 'force-dynamic';
 // Fetching a reference image, calling Gemini, and writing the result to Supabase can together
@@ -57,6 +58,10 @@ export async function POST(request: Request) {
   if (typeof catalogId !== 'string' || !catalogId) {
     return Response.json({ error: 'catalogId is required' }, { status: 400 });
   }
+  // Only a listing id came with this request — without this, any signed-in staff member could
+  // replace (or mark failed) another company's catalogue photo by sending its id.
+  const access = await requireOwnCompanyRow('catalog_products', catalogId);
+  if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
   if (typeof prompt !== 'string' || !prompt.trim()) {
     return Response.json({ error: 'prompt is required' }, { status: 400 });
   }
