@@ -5,13 +5,10 @@ import { Plus, Search, Phone, Mail, Sparkles, Truck, ChevronLeft, ChevronRight }
 import SummaryLine from '@/components/SummaryLine';
 import { money, wholeMoney } from '@/lib/money';
 import { useCompanyTable } from '@/lib/useCompanyTable';
-import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { useEntryIntent } from '@/lib/use-entry-intent';
 import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import PaymentReminderModal from '@/components/PaymentReminderModal';
-import MoneyPicker from '@/components/money/MoneyPicker';
-import type { MoneyChoice } from '@/lib/money-book';
-import { shopDay } from '@/lib/logbook';
+import PaySupplierDialog, { type SupplierPaid } from '@/components/money/PaySupplierDialog';
 
 type Supplier = { id: string; company_id: string; name: string; category: string; phone: string; email: string; gstin: string; terms: number; balance: number };
 type PurchaseOrder = { id: string; supplier: string; date: string; total: number; paid: number; status: string };
@@ -47,15 +44,9 @@ export default function SuppliersPage() {
   const { rows: purchaseOrders, reload: reloadPurchaseOrders } = useCompanyTable<PurchaseOrder>('purchase_orders');
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [paymentSupplier, setPaymentSupplier] = useState<Supplier | null>(null);
-  const [paymentAmount, setPaymentAmount] = useState(0);
-  // Whether the supplier was paid by cheque, and its details (the cheque register).
-  const [paymentMoney, setPaymentMoney] = useState<MoneyChoice | null>(null);
-  // Fixed when the dialog opens and reused by every retry of that same payment, so a double-click
-  // or a re-submit after a timeout lands on the payment already recorded instead of a second one.
-  const [paymentReference, setPaymentReference] = useState('');
-  const [savingPayment, setSavingPayment] = useState(false);
-  const [paymentError, setPaymentError] = useState('');
+  // The payment window: open for one supplier (their Pay button), or open asking which ('' — from
+  // Home's or the Day Book's "Pay a supplier"). See components/money/PaySupplierDialog.tsx.
+  const [paying, setPaying] = useState<string | null>(null);
   const [savingSupplier, setSavingSupplier] = useState(false);
   const [supplierError, setSupplierError] = useState('');
   const [reminderSupplier, setReminderSupplier] = useState<Supplier | null>(null);
@@ -100,56 +91,18 @@ export default function SuppliersPage() {
     }
   };
 
-  const openPayment = (supplier: Supplier) => {
-    setPaymentSupplier(supplier);
-    setPaymentAmount(supplier.balance);
-    setPaymentReference(crypto.randomUUID());
-    setPaymentError('');
-  };
+  const openPayment = (supplier: Supplier) => setPaying(supplier.id);
 
-  const recordPayment = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!paymentSupplier || savingPayment || !activeCompany) return;
-    setPaymentError('');
-    setSavingPayment(true);
-    const paid = Math.min(Math.max(paymentAmount, 0), paymentSupplier.balance);
-
-    try {
-      // One request, one database transaction. The purchase orders, the payment record, its
-      // per-order allocations and the payable balance either all move or none of them do
-      // (jde_pay_supplier). This screen used to PATCH each purchase order from here in a loop and
-      // then adjust the balance separately, so a connection failure partway through could leave
-      // orders marked paid while nothing came off what the supplier was owed — and a retry made
-      // it worse rather than better.
-      const res = await fetch('/api/suppliers/payments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          companyId: activeCompany.id,
-          supplierId: paymentSupplier.id,
-          date: shopDay(new Date()),
-          amount: paid,
-          note: '',
-          reference: paymentReference,
-          money: paymentMoney,
-        }),
-      });
-      const result = await parseJsonOrThrow(res, 'Failed to record this payment.');
-      await Promise.all([reloadSuppliers(), reloadPurchaseOrders()]);
-      const orders = (result as { orders_paid?: number }).orders_paid ?? 0;
-      setFeedback(
-        `₹${paid.toLocaleString()} payment recorded for ${paymentSupplier.name}` +
-          (orders > 0 ? ` against ${orders} purchase order${orders > 1 ? 's' : ''}.` : '.')
-      );
-      setPaymentSupplier(null);
-      setPickSupplierPrompt(false);
-      finishEntry();
-    } catch (error) {
-      // Nothing partial can be left behind now — the payment either landed whole or not at all.
-      setPaymentError(error instanceof Error ? error.message : 'Failed to record this payment.');
-    } finally {
-      setSavingPayment(false);
-    }
+  // Saved: the window has already written the payment (and any cheques) in one go.
+  const paymentDone = async (paid: SupplierPaid) => {
+    setPaying(null);
+    await Promise.all([reloadSuppliers(), reloadPurchaseOrders()]);
+    setFeedback(
+      `₹${paid.amount.toLocaleString('en-IN')} paid to ${paid.supplierName}` +
+        (paid.cheques > 0 ? ` with ${paid.cheques} ${paid.cheques === 1 ? 'cheque' : 'cheques'}, now in the Cheques list` : '') +
+        (paid.ordersPaid > 0 ? `, against ${paid.ordersPaid} purchase order${paid.ordersPaid > 1 ? 's' : ''}.` : '.'),
+    );
+    finishEntry();
   };
 
   // How many purchase orders this vendor still has open. Counted with exactly the same test the
@@ -181,13 +134,11 @@ export default function SuppliersPage() {
     setPage(1);
   };
 
-  // Paying needs a supplier, so arriving from the Day Book shows only the suppliers still owed and
-  // says which button to press, rather than opening a payment for nobody. Saving the payment then
-  // brings the owner back to the Day Book.
-  const [pickSupplierPrompt, setPickSupplierPrompt] = useState(false);
+  // Arriving from Home's or the Day Book's "Pay a supplier" opens the payment window straight away,
+  // asking which supplier. Saving it brings the owner back to where they came from.
   const { finishEntry } = useEntryIntent(SUPPLIER_ENTRY_KINDS, () => {
     selectFilter('balance');
-    setPickSupplierPrompt(true);
+    setPaying('');
   });
 
   // Tab counts are taken from the search result rather than the whole directory, so the number on
@@ -231,11 +182,6 @@ export default function SuppliersPage() {
     </div>
 
     {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
-    {pickSupplierPrompt && (
-      <div className="alert alert-info mb-4" role="status">
-        Find the supplier you paid and press <strong>Pay</strong> on their row. Only suppliers you still owe are shown.
-      </div>
-    )}
 
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
       <div className="tbl-toolbar">
@@ -391,13 +337,15 @@ export default function SuppliersPage() {
       </div><div className="modal-footer"><span className="text-muted text-sm" style={{ marginRight: 'auto' }}>{SAVE_SHORTCUT_HINT}</span><button type="button" className="btn btn-secondary" disabled={savingSupplier} onClick={() => setShowModal(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={savingSupplier}>{savingSupplier ? 'Saving…' : 'Save Supplier'}</button></div>
     </form></div></div>}
 
-    {paymentSupplier && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="payment-modal-title"><form onSubmit={recordPayment}>
-      <div className="modal-header"><h3 id="payment-modal-title" className="modal-title">Pay a supplier</h3><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingPayment} onClick={() => setPaymentSupplier(null)}>✕</button></div>
-      <div className="modal-body flex flex-col gap-4"><p>Outstanding balance for <strong>{paymentSupplier.name}</strong>: ₹{paymentSupplier.balance.toLocaleString()}</p><div className="form-group"><label className="form-label">Payment Amount (₹)</label><input type="number" min="1" max={paymentSupplier.balance} className="form-input" disabled={savingPayment} value={paymentAmount} onChange={(event) => setPaymentAmount(Number(event.target.value))} /></div>{activeCompany && <MoneyPicker companyId={activeCompany.id} direction="out" value={paymentMoney} onChange={setPaymentMoney} disabled={savingPayment} />}
-        {paymentError && <p className="form-error" role="alert">{paymentError}</p>}
-      </div>
-      <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingPayment} onClick={() => setPaymentSupplier(null)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={savingPayment}>{savingPayment ? 'Recording…' : 'Record Payment'}</button></div>
-    </form></div></div>}
+    {paying !== null && activeCompany && (
+      <PaySupplierDialog
+        companyId={activeCompany.id}
+        suppliers={suppliers}
+        supplierId={paying || undefined}
+        onClose={() => setPaying(null)}
+        onPaid={(paid) => { void paymentDone(paid); }}
+      />
+    )}
 
     {reminderSupplier && (
       <PaymentReminderModal

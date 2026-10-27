@@ -2356,3 +2356,43 @@ button.part-photo.is-empty:hover svg { opacity: 0.85; }
 .row-menu-item.danger, .row-menu-item.danger > svg { color: var(--rose); }
 .row-menu-item:disabled { cursor: not-allowed; opacity: .55; }
 .row-menu-item small { color: var(--ink-3); display: block; font-size: 12px; font-weight: 400; margin-top: 2px; }
+
+/* ===================================================
+   Paying a supplier (components/money/PaySupplierDialog.tsx)
+   =================================================== */
+/* "How did you pay?": two big choices side by side. */
+.pay-how { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; }
+.pay-how-choice {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  color: var(--ink-2);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  gap: 8px;
+  justify-content: center;
+  min-height: 48px;
+  padding: 10px 12px;
+  text-align: center;
+}
+.pay-how-choice:hover:not(:disabled) { background: var(--surface-2); border-color: var(--line-3); }
+.pay-how-choice.active { background: var(--amber-tint); border-color: var(--amber); color: var(--amber-3); }
+.pay-how-choice:focus-visible { box-shadow: var(--ring); outline: none; }
+
+/* The cheques of one payment, one row each: number, date, amount. */
+.cheque-rows { display: flex; flex-direction: column; gap: 6px; }
+.cheque-row { align-items: center; display: grid; gap: 6px; grid-template-columns: 22px minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1fr) 32px; }
+.cheque-row-head { color: var(--ink-3); font-size: 12px; font-weight: 600; }
+.cheque-row-index { color: var(--ink-3); font-size: 13px; font-weight: 700; text-align: center; }
+.cheque-row .form-input { min-width: 0; padding-left: 8px; padding-right: 8px; }
+@media (max-width: 640px) {
+  .pay-how { grid-template-columns: 1fr; }
+  /* On a phone each cheque is two lines: its number and amount, then the date across the width. */
+  .cheque-row { grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 32px; }
+  .cheque-row > input[type='date'] { grid-column: 2 / 5; grid-row: 2; }
+  .cheque-row-head { display: none; }
+}

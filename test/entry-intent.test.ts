@@ -20,6 +20,12 @@ test('an entry started from Home returns to Home', () => {
   );
 });
 
+/** The Cheques page's "Cheque received" opens Money received and comes back to Cheques. */
+test('an entry started from the Cheques page returns there', () => {
+  assert.equal(entryLink('payment-in', 'cheques'), '/sales?record=payment&back=cheques');
+  assert.equal(parseEntryIntent('?record=payment&back=cheques', ['payment'] as const).returnTo, '/cheques');
+});
+
 test('a screen reads the form it was asked to open and where to return', () => {
   assert.deepEqual(
     parseEntryIntent('?record=sale&back=daybook', ['sale', 'payment'] as const),

@@ -549,6 +549,25 @@ export async function paySupplier(input: PaySupplierInput): Promise<PaySupplierR
   return data as PaySupplierResult;
 }
 
+/** One cheque's share of a payment made with several (jde_pay_supplier_in_parts). */
+export type PaySupplierPart = PaySupplierResult & { part: number };
+
+/** Records a payment made with several cheques: one supplier payment per cheque, all in one
+ *  transaction, so either every cheque's payment is kept or none is. Part i carries the reference
+ *  `<reference>:<i>`, so a retry returns the payments already recorded. */
+export async function paySupplierInParts(input: Omit<PaySupplierInput, 'amount'> & { amounts: number[] }): Promise<PaySupplierPart[]> {
+  const { data, error } = await getClient().rpc('jde_pay_supplier_in_parts', {
+    p_company_id: input.companyId,
+    p_supplier_id: input.supplierId,
+    p_date: input.date,
+    p_amounts: input.amounts,
+    p_note: input.note,
+    p_reference: input.reference,
+  });
+  if (error) throw error;
+  return (data as PaySupplierPart[]) ?? [];
+}
+
 export type WriteOffInvoiceBalanceInput = {
   companyId: string;
   invoiceId: string;

@@ -2,6 +2,37 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-10-27 — Cheques made simple: give several cheques for one big payment
+
+You said adding a cheque was hard. You also pay big supplier bills with several cheques, and the ERP
+allowed only one cheque per payment. Both are fixed.
+
+**Giving cheques**
+- The Cheques page has two new buttons: **Give cheques** and **Cheque received**. You no longer have
+  to find the "Paid by cheque" tick inside another screen.
+- **Give cheques** opens one simple window: pick the supplier (each one shows what you owe), the
+  amount, and then your cheques. Each cheque has its number, the date written on it and its amount.
+- **Several cheques for one payment:** press **Add another cheque**, or let the ERP split the amount
+  for you. Press 2, 3, 4 or 6 and it makes that many equal cheques, dated a month apart (or a week,
+  15 days, or all the same date). The last cheque takes any rupees left over.
+- Cheque numbers fill in from your cheque book when it is on the Cheques page (More → Cheque books),
+  using the next unused leaves. Without a book, type the first number and the rest count on from it.
+- Under the cheques the window says whether they add up to the amount. If they don't, it says by how
+  much, and it won't save until they do.
+- All the cheques are saved together, or none at all, so a half-saved payment can't happen. Pressing
+  Save twice doesn't pay twice.
+- Each cheque is its own line in the Cheques list, with its own date. Mark each one Cleared when it
+  is paid. **If one cheque bounces, only that cheque's amount is owed again.** The others stay paid.
+- If you have no bank in the ERP yet, type your bank's name once in the window and it is added.
+
+**Paying a supplier the usual way** uses the same window. Pay on a supplier's row, and "Pay a
+supplier" on Home or in the Day Book, all open it. It asks "How did you pay?" with two big choices,
+**Cash, UPI or bank transfer** or **Cheque**. From Home it now asks which supplier straight away,
+instead of sending you to find the supplier's row.
+
+**Cheque received** opens the Money received form, where you tick "Received by cheque", and brings
+you back to the Cheques page afterwards.
+
 ## 2026-10-26 — A part can have several part numbers, and the same part can be kept in several brands
 
 You said two things made adding parts hard. Some parts have more than one part number, but the ERP
