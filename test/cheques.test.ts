@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bookLeaves, leavesOf, nextLeaf, registerOrder, summarise, type ChequeBook, type ChequeRow } from '../lib/cheques';
+import { bookLeaves, leavesOf, nextLeaf, nextLeaves, registerOrder, summarise, type ChequeBook, type ChequeRow } from '../lib/cheques';
 
 const today = '2026-10-18';
 const cheque = (overrides: Partial<ChequeRow>): ChequeRow => ({
@@ -54,4 +54,14 @@ test('the register lists cheques still to clear first, by the date on them', () 
     cheque({ id: 'soon', cheque_date: '2026-10-19' }),
   ]).map((row) => row.id);
   assert.deepEqual(order, ['soon', 'late', 'cleared']);
+});
+
+/** Paying with several cheques: the next free leaves in order, skipping any already written. */
+test('several free leaves are offered in order, skipping used ones and running into the next book', () => {
+  const used = [cheque({ cheque_no: '000101' }), cheque({ id: 'x', cheque_no: '000103' })];
+  assert.deepEqual(nextLeaves([book], used, 'hdfc', 3), ['000102', '000104', '000105']);
+  const second: ChequeBook = { ...book, id: 'b2', first_no: '000201', last_no: '000202', received_on: '2026-10-10' };
+  const nearlyFull = bookLeaves(book).slice(0, 9).map((no, index) => cheque({ id: String(index), cheque_no: no }));
+  assert.deepEqual(nextLeaves([book, second], nearlyFull, 'hdfc', 3), ['000110', '000201', '000202']);
+  assert.deepEqual(nextLeaves([book], [], 'sbi', 2), []);
 });

@@ -84,6 +84,20 @@ export function nextLeaf(books: ChequeBook[], cheques: ChequeRow[], accountId: s
   return null;
 }
 
+/** The next `count` unused leaves in a bank's cheque books, in order — for paying with several
+ *  cheques at once. Fewer when the books run out. */
+export function nextLeaves(books: ChequeBook[], cheques: ChequeRow[], accountId: string, count: number): string[] {
+  const own = books.filter((book) => book.account_id === accountId).sort((a, b) => a.received_on.localeCompare(b.received_on) || Number(a.first_no) - Number(b.first_no));
+  const free: string[] = [];
+  for (const book of own) {
+    for (const leaf of leavesOf(book, cheques)) {
+      if (free.length >= count) return free;
+      if (!leaf.cheque) free.push(leaf.no);
+    }
+  }
+  return free;
+}
+
 export function dueDate(cheque: ChequeRow): string {
   return (cheque.cheque_date || cheque.issued_on).slice(0, 10);
 }

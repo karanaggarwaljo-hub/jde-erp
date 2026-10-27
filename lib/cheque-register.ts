@@ -45,6 +45,8 @@ export async function registerChequeFor(companyId: string, by: string, table: Mo
   try {
     const source = await getMoneySourceRow(companyId, table, id);
     if (!source) return;
+    // A repeated submission returns the payment already recorded; its cheque is already entered.
+    if (await getChequeForSource(companyId, table, id)) return;
     await insertCheque({
       company_id: companyId,
       direction,

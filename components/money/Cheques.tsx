@@ -1,7 +1,10 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowDownLeft, ArrowUpRight, BookCheck, CalendarDays, Check, List, MoreHorizontal, Plus, Search, ShieldCheck, Trash2, XCircle } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowDownLeft, ArrowUpRight, BookCheck, CalendarDays, Check, HandCoins, List, MoreHorizontal, Plus, ScrollText, Search, ShieldCheck, Trash2, XCircle } from 'lucide-react';
+import PaySupplierDialog from '@/components/money/PaySupplierDialog';
+import { entryLink } from '@/lib/entry-intent';
 import { useCompany } from '@/components/CompanyProvider';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -53,7 +56,9 @@ export default function Cheques() {
   const [dialog, setDialog] = useState<Dialog>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const { rows: suppliers } = useCompanyTable<{ id: string; name: string }>('suppliers');
+  // "Give cheques": the supplier payment window, starting on Cheque (components/money/PaySupplierDialog.tsx).
+  const [giving, setGiving] = useState(false);
+  const { rows: suppliers, reload: reloadSuppliers } = useCompanyTable<{ id: string; name: string; balance: number }>('suppliers');
 
   useEffect(() => {
     if (!companyId) return;
@@ -148,6 +153,9 @@ export default function Cheques() {
           <h1 className="page-title">Cheques</h1>
           <p className="page-subtitle">Cheques you have given and received, and when each one is due.</p>
         </div>
+        {/* The two everyday jobs as buttons of their own: entering a cheque used to mean finding the
+            "Paid by cheque" tick inside another screen's payment form. */}
+        <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
         <div style={{ position: 'relative' }} data-menu>
           <button type="button" className="btn btn-secondary" aria-haspopup="menu" aria-expanded={menu === 'page'} onClick={() => setMenu(menu === 'page' ? null : 'page')}>
             <MoreHorizontal size={15} /> More
@@ -160,6 +168,13 @@ export default function Cheques() {
               <MenuItem icon={<ShieldCheck size={14} />} onClick={() => { setMenu(null); setDialog({ type: 'security', direction: 'in' }); }}>Security cheque taken</MenuItem>
             </MenuList>
           )}
+        </div>
+        <Link href={entryLink('payment-in', 'cheques')} prefetch={false} className="btn btn-secondary" title="A customer paid you by cheque">
+          <HandCoins size={15} /> Cheque received
+        </Link>
+        <button type="button" className="btn btn-primary" onClick={() => { setMessage(''); setGiving(true); }} title="Pay a supplier with one cheque or several">
+          <ScrollText size={15} /> Give cheques
+        </button>
         </div>
       </div>
 
@@ -211,7 +226,7 @@ export default function Cheques() {
           {rows.length === 0 && (
             <div className="empty-state">
               <p className="empty-state-title">{view === 'upcoming' ? 'No cheque is waiting to clear' : 'Nothing here yet'}</p>
-              {view === 'upcoming' && <p className="empty-state-desc">Tick &ldquo;Paid by cheque&rdquo; when you pay a supplier, or &ldquo;Received by cheque&rdquo; when a customer pays, and the cheque shows up here.</p>}
+              {view === 'upcoming' && <p className="empty-state-desc">Press <strong>Give cheques</strong> to pay a supplier with one cheque or several, or <strong>Cheque received</strong> when a customer pays you by cheque.</p>}
             </div>
           )}
           {rows.map((cheque) => {
@@ -264,6 +279,23 @@ export default function Cheques() {
         </div>
       )}
 
+      {giving && companyId && (
+        <PaySupplierDialog
+          companyId={companyId}
+          suppliers={suppliers}
+          startWithCheques
+          onClose={() => setGiving(false)}
+          onPaid={(paid) => {
+            setGiving(false);
+            setMessage(paid.cheques > 0
+              ? `${paid.cheques} ${paid.cheques === 1 ? 'cheque' : 'cheques'} for ₹${paid.amount.toLocaleString('en-IN')} given to ${paid.supplierName}.`
+              : `₹${paid.amount.toLocaleString('en-IN')} paid to ${paid.supplierName}.`);
+            setView('upcoming');
+            setReloadKey((key) => key + 1);
+            void reloadSuppliers();
+          }}
+        />
+      )}
       {dialog?.type === 'books' && data && (
         <BooksDialog books={data.books} cheques={data.cheques} bankName={bankName} busy={busy} onClose={() => setDialog(null)}
           onAdd={() => setDialog({ type: 'book' })}

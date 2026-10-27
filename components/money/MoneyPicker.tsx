@@ -9,7 +9,8 @@ type Bank = { id: string; name: string };
 
 const bankCache = new Map<string, Promise<Bank[]>>();
 
-function loadBanks(companyId: string): Promise<Bank[]> {
+/** The company's banks, read once per company and shared by every payment form. */
+export function loadBanks(companyId: string): Promise<Bank[]> {
   let pending = bankCache.get(companyId);
   if (!pending) {
     pending = fetch(`/api/money/accounts?companyId=${encodeURIComponent(companyId)}`)

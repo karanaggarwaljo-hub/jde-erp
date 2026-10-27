@@ -20,8 +20,9 @@ const ROUTES: Record<EntryKind, { path: string; record: string }> = {
 
 /** The only places a screen may send someone back to. A value read from an address is never used as
  *  a destination itself, so a crafted link cannot send anyone somewhere else after they save.
- *  Home's big buttons open the same forms as the Day Book's tiles and come back to Home. */
-const RETURN_PLACES = { daybook: '/daybook', home: '/dashboard' } as const;
+ *  Home's big buttons open the same forms as the Day Book's tiles and come back to Home, and the
+ *  Cheques page's "Cheque received" comes back to the Cheques page. */
+const RETURN_PLACES = { daybook: '/daybook', home: '/dashboard', cheques: '/cheques' } as const;
 export type ReturnPlace = keyof typeof RETURN_PLACES;
 
 /** The link that opens a form for this kind of entry and returns to `back` once it is saved. */
