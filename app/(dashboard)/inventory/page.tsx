@@ -16,11 +16,13 @@ import {
   Merge,
   Camera,
   CopyPlus,
+  Tags,
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { money, wholeMoney } from '@/lib/money';
 import { useCompany } from '@/components/CompanyProvider';
-import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sheetFromScannedParts, fileToBase64, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
+import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sheetFromScannedParts, fileToBase64, toNewPartRecord, SPREADSHEET_ACCEPT, SPREADSHEET_EXTENSIONS, SCANNABLE_IMPORT_ACCEPT, isSpreadsheetFileName, isScannableFileName, type SheetForCostUpdate, type ImportedProduct, type ScannedPart } from '@/lib/client-import';
+import { fieldsInSheet, priceListCsv, priceListFileName, sheetSaveSteps, type SheetRowPlan } from '@/lib/stock-sheet';
 import { planCostUpdates, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { planDetailUpdates, looksLikeAnInventedCode } from '@/lib/detail-import';
 import { matchesProductSearch, compatibilitySuggestions } from '@/lib/product-search';
@@ -43,6 +45,8 @@ import { usePartPhotos } from '@/lib/usePartPhotos';
 import { savePartPhoto } from '@/lib/client-part-photo';
 import type { MergePartsResult } from '@/lib/client-part-merge';
 import ImportFromFileModal from '@/components/inventory/ImportFromFileModal';
+import StockSheetModal from '@/components/inventory/StockSheetModal';
+import UploadListModal from '@/components/inventory/UploadListModal';
 import SummaryLine from '@/components/SummaryLine';
 import MoreActions from '@/components/MoreActions';
 import RowMenu from '@/components/RowMenu';
@@ -136,14 +140,23 @@ export default function InventoryPage() {
   // Home's "Find a part" button arrives with ?find=1: put the cursor in the search box, ready to
   // type, and take the request out of the address so a refresh does not repeat it. Read straight
   // from window.location, as lib/use-entry-intent.ts does, so the page needs no Suspense wrapper.
+  // The "Upload a stock or price list" window: where the list to start from is downloaded and the
+  // file is chosen.
+  const [showUpload, setShowUpload] = useState(false);
+  // Home's "Upload a stock list" button arrives with ?upload=1 and opens the upload window the same
+  // way. A file picker cannot be opened without a click, so the window is what opens.
   useEffect(() => {
     const timer = setTimeout(() => {
       const params = new URLSearchParams(window.location.search);
-      if (params.get('find') !== '1') return;
+      const find = params.get('find') === '1';
+      const upload = params.get('upload') === '1';
+      if (!find && !upload) return;
       params.delete('find');
+      params.delete('upload');
       const rest = params.toString();
       window.history.replaceState(window.history.state, '', `${window.location.pathname}${rest ? `?${rest}` : ''}`);
-      searchInputRef.current?.focus();
+      if (upload) setShowUpload(true);
+      else searchInputRef.current?.focus();
     }, 0);
     return () => clearTimeout(timer);
   }, []);
@@ -157,7 +170,9 @@ export default function InventoryPage() {
   const [costSheet, setCostSheet] = useState<CostSheetImport | null>(null);
   // One file can mean two different jobs. Which one is proposed from the file's own content —
   // rows that match parts already stocked are a price list; rows that don't are a parts list.
-  const [importMode, setImportMode] = useState<ImportMode>('costs');
+  const [importMode, setImportMode] = useState<ImportMode>('update');
+  // Which of the three narrower jobs suits this file, for when the owner asks for something else.
+  const [fallbackMode, setFallbackMode] = useState<ImportMode>('costs');
   // Individual field changes the owner has unticked, keyed "row:field". Storing exclusions
   // rather than selections means a change that appears after re-reading is offered by default
   // instead of being silently skipped.
@@ -671,6 +686,12 @@ export default function InventoryPage() {
       const detailUpdates = planDetailUpdates(newParts, products).filter((m) => m.outcome === 'update').length;
       if (!costColumnGuess && detailUpdates > 0) mode = 'details';
 
+      // A file with any stock or price in it opens on the one everyday job: update what is here,
+      // add what is not. The three narrower jobs above stay one click away, on the mode worked out
+      // for them, behind "Do something else with this file".
+      setFallbackMode(mode);
+      if (fieldsInSheet(newParts).length > 0) mode = 'update';
+
       setExcludedDetails(new Set());
       setCostColumn(costColumnGuess);
       setIdColumn(idColumnGuess);
@@ -687,6 +708,7 @@ export default function InventoryPage() {
       );
       setImportMode(mode);
       setCostSheet({ fileName: file.name, sheet, newParts, guessedFields });
+      setShowUpload(false);
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Failed to read the file.');
     } finally {
@@ -714,13 +736,6 @@ export default function InventoryPage() {
         ? `Worksheet downloaded — ${worksheetPending} of ${products.length} parts still need a real part number. Fill in the "Part No" column, then bring it back through Import from File.`
         : `Worksheet downloaded — all ${products.length} parts already have a part number.`
     );
-  };
-
-  const handleFileImport = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    // Cleared before the await so picking the same file twice in a row still fires onChange.
-    event.target.value = '';
-    if (file) void beginImport(file);
   };
 
   // Only react to an actual file being dragged in — dragging selected text or a link across the
@@ -783,6 +798,83 @@ export default function InventoryPage() {
     };
   }, []);
 
+  /** Saves an uploaded stock and price list: the parts already here are updated, then the rows
+   *  that matched nothing are added as new parts. Each updated part is saved by the same steps its
+   *  own Edit form uses (lib/stock-sheet.ts sheetSaveSteps). Updates go first, so that if adding
+   *  the new parts is refused the message can say plainly which half happened. */
+  const applySheetPlan = async (updates: SheetRowPlan[], additions: ImportedProduct[]) => {
+    if (!costSheet) return;
+    const fileName = costSheet.fileName;
+    const parts = (count: number) => `${count} ${count === 1 ? 'part' : 'parts'}`;
+    setApplyingCosts(true);
+    setPlannedProducts(products);
+    setCostProgress({ done: 0, total: updates.length + additions.length });
+    setImportError('');
+    try {
+      const result = await saveEach(
+        updates,
+        async (plan) => {
+          const steps = sheetSaveSteps(plan);
+          if (!steps) return;
+          if (steps.patch) await update(steps.partId, steps.patch, { reload: false });
+          if (steps.setStock) await setProductStock(steps.partId, steps.setStock.target, steps.setStock.unitCost);
+          else if (steps.correctCost !== undefined) await correctOldestLayerCost(steps.partId, steps.correctCost);
+        },
+        { concurrency: IMPORT_SAVES_AT_ONCE, onSaved: (done) => setCostProgress({ done, total: updates.length + additions.length }) }
+      );
+      if (result.failed) {
+        await Promise.all([reload(), reloadStockLayers()]);
+        setImportError(
+          `${result.error instanceof Error ? result.error.message : 'Saving stopped.'} `
+          + `${result.done} of ${parts(updates.length)} were updated before this stopped${additions.length > 0 ? ', and no new parts were added' : ''}. `
+          + 'Upload the same file again to do the rest: the parts already updated will show as already the same.'
+        );
+        return;
+      }
+      if (additions.length > 0) {
+        try {
+          const res = await fetch('/api/local/products?bulk=1', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rows: additions.map((product) => ({ ...toNewPartRecord(product), company_id: activeCompany?.id })) }),
+          });
+          await parseJsonOrThrow(res, 'Failed to add the new parts.');
+        } catch (err) {
+          await Promise.all([reload(), reloadStockLayers()]);
+          setImportError(
+            `${updates.length > 0 ? `${parts(updates.length)} were updated. ` : ''}The ${additions.length} new ${additions.length === 1 ? 'part was' : 'parts were'} not added: `
+            + (err instanceof Error ? err.message : 'the new parts could not be saved.')
+          );
+          return;
+        }
+      }
+      await Promise.all([reload(), reloadStockLayers()]);
+      const done = [
+        updates.length > 0 ? `updated ${parts(updates.length)}` : '',
+        additions.length > 0 ? `added ${additions.length} new ${additions.length === 1 ? 'part' : 'parts'}` : '',
+      ].filter(Boolean).join(' and ');
+      setFeedback(`${done.charAt(0).toUpperCase()}${done.slice(1)} from ${fileName}.`);
+      setCostSheet(null);
+    } finally {
+      setApplyingCosts(false);
+      setPlannedProducts(null);
+    }
+  };
+
+  /** Every part with its stock and prices, as a spreadsheet to change and upload straight back.
+   *  Built in the browser from the rows already on screen, so it can only ever hold the active
+   *  company's parts. */
+  const downloadPriceList = () => {
+    const url = URL.createObjectURL(new Blob([priceListCsv(products)], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = priceListFileName(activeCompany?.name ?? '', shopDay(new Date()));
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const applyNewParts = async (chosen: ImportedProduct[]) => {
     if (!costSheet) return;
     setApplyingCosts(true);
@@ -791,7 +883,7 @@ export default function InventoryPage() {
       const res = await fetch('/api/local/products?bulk=1', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: chosen.map((product) => ({ ...product, company_id: activeCompany?.id })) }),
+        body: JSON.stringify({ rows: chosen.map((product) => ({ ...toNewPartRecord(product), company_id: activeCompany?.id })) }),
       });
       await parseJsonOrThrow(res, 'Failed to import parts.');
       await Promise.all([reload(), reloadStockLayers()]);
@@ -918,15 +1010,16 @@ export default function InventoryPage() {
           <h1 className="page-title">Stock</h1>
           <SummaryLine facts={summaryFacts} />
         </div>
-        <div className="flex gap-2">
+        {/* Kept against the right edge even when the row wraps under the title, so the More list,
+            which opens leftwards from its button, always has room. */}
+        <div className="flex gap-2" style={{ marginLeft: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <MoreActions>
             <Link href="/inventory/photos" prefetch={false}>
               <Camera size={16} /> <span>Part photos<small>Add or change the photos of your parts</small></span>
             </Link>
-            <label style={{ cursor: importing ? 'not-allowed' : 'pointer' }}>
-              <Upload size={16} /> <span>{importing ? 'Reading…' : 'Import from a file'}<small>A spreadsheet, photo or PDF of a parts list. You can also drop it anywhere on this page.</small></span>
-              <input type="file" accept={`${SPREADSHEET_ACCEPT},${SCANNABLE_IMPORT_ACCEPT}`} hidden disabled={importing} onChange={handleFileImport} />
-            </label>
+            <button type="button" onClick={() => { setImportError(''); setShowUpload(true); }}>
+              <Upload size={16} /> <span>Upload a stock or price list<small>Update stock and prices from an Excel file, a photo or a PDF. You can also drop the file anywhere on this page.</small></span>
+            </button>
             <button type="button" onClick={downloadWorksheet} disabled={products.length === 0}>
               <Download size={16} />
               <span>
@@ -937,6 +1030,9 @@ export default function InventoryPage() {
               </span>
             </button>
           </MoreActions>
+          <Link href="/inventory/prices" prefetch={false} className="btn btn-secondary">
+            <Tags size={16} /> Change prices &amp; stock
+          </Link>
           <button className="btn btn-primary" onClick={handleOpenAdd}>
             <Plus size={16} /> Add a part
           </button>
@@ -1194,7 +1290,28 @@ export default function InventoryPage() {
         />
       )}
 
-      {costSheet && (
+      {showUpload && (
+        <UploadListModal
+          partCount={products.length} reading={importing} error={importError}
+          accept={`${SPREADSHEET_ACCEPT},${SCANNABLE_IMPORT_ACCEPT}`}
+          onFile={(file) => { void beginImport(file); }}
+          onDownload={downloadPriceList}
+          onClose={() => setShowUpload(false)}
+        />
+      )}
+
+      {costSheet && importMode === 'update' && (
+        <StockSheetModal
+          fileName={costSheet.fileName} rows={costSheet.newParts} guessedFields={costSheet.guessedFields}
+          products={plannedProducts ?? products} companyName={activeCompany?.name ?? ''}
+          saving={applyingCosts} progress={costProgress} error={importError}
+          onCancel={() => setCostSheet(null)}
+          onSomethingElse={() => { setImportError(''); setImportMode(fallbackMode); }}
+          onSave={applySheetPlan}
+        />
+      )}
+
+      {costSheet && importMode !== 'update' && (
         <ImportFromFileModal
           costSheet={costSheet} setCostSheet={setCostSheet}
           products={plannedProducts ?? products} activeCompany={activeCompany}

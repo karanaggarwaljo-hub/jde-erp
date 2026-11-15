@@ -142,6 +142,15 @@ export default function ImportFromFileModal(props: ImportFromFileModalProps) {
                 <div className="form-group" style={{ marginBottom: '12px' }}>
                   <span className="form-label">What should this file do?</span>
                   <div className="flex gap-2 flex-wrap">
+                    {/* The everyday job, and the way back to it: update what is here, add what is not. */}
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-secondary"
+                      disabled={applyingCosts}
+                      onClick={() => setImportMode('update')}
+                    >
+                      ← Update stock &amp; prices
+                    </button>
                     <button
                       type="button"
                       className={'btn btn-sm ' + (importMode === 'costs' ? 'btn-primary' : 'btn-secondary')}

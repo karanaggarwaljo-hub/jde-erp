@@ -2,7 +2,6 @@
 import { currentIdentity, indexProductsById, savedLineLabel } from '@/lib/trade-history';
 import type { MoneyChoice } from '@/lib/money-book';
 import { checkBillCredit } from '@/lib/credit';
-import MoneyPicker from '@/components/money/MoneyPicker';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
@@ -28,12 +27,12 @@ import {
   HandCoins,
   History,
 } from 'lucide-react';
-import { saveSalesInvoice, cancelSalesInvoice, deleteSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance, receiveCustomerPayment, getInvoiceCost } from '@/lib/client-sales';
+import { saveSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance, receiveCustomerPayment, getInvoiceCost } from '@/lib/client-sales';
 import { realisedProfit, type InvoiceCost } from '@/lib/invoice-profit';
 import { invoiceBalanceDue, invoiceWrittenOff, wasSettledShort } from '@/lib/invoice-balance';
 import { addCustomLine, addPartToLines, buildLastSoldIndex, partLabeler } from '@/lib/sale-entry';
 import { keepEnterInsideForm } from '@/lib/form-keys';
-import { createSalesReturn, deleteSalesReturn, getReturnableInvoiceItems, type ReturnableInvoiceItem, type SalesReturnRow } from '@/lib/client-sales-returns';
+import { deleteSalesReturn, type SalesReturnRow } from '@/lib/client-sales-returns';
 import { duplicateCreditNotes } from '@/lib/sales-returns';
 import { convertQuotation, getQuotation, saveQuotation, type QuotationDetail } from '@/lib/client-quotations';
 import { heldByProduct, shortfallNotice, stockShortfalls } from '@/lib/stock-shortfall';
@@ -46,6 +45,8 @@ import ReceivePaymentModal from '@/components/ReceivePaymentModal';
 import { useEntryIntent } from '@/lib/use-entry-intent';
 import { money, paise, round2 } from '@/lib/money';
 import InvoiceFormModal from '@/components/sales/InvoiceFormModal';
+import FixBillModal from '@/components/sales/FixBillModal';
+import BillPickerModal from '@/components/sales/BillPickerModal';
 import SummaryLine, { type SummaryFact } from '@/components/SummaryLine';
 import RowMenu from '@/components/RowMenu';
 import { amountReceived, billTotals, lineDiscountAmount, lineDiscountPercent, lineGross, lineNet } from '@/lib/invoice-totals';
@@ -129,7 +130,7 @@ function formatDateTime(timestamp: string): string {
 }
 
 // Forms the Day Book's Record tiles can open on arrival (see lib/entry-intent.ts).
-const SALES_ENTRY_KINDS = ['sale', 'payment'] as const;
+const SALES_ENTRY_KINDS = ['sale', 'payment', 'return'] as const;
 
 export default function SalesPage() {
   const { rows: products, loading: productsLoading, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
@@ -177,7 +178,13 @@ export default function SalesPage() {
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [viewingInvoice, setViewingInvoice] = useState<Invoice | null>(null);
-  const [deleteCandidate, setDeleteCandidate] = useState<Invoice | null>(null);
+  // Putting a bill right: goods came back, the bill is cancelled, or it is deleted. One window
+  // for all three (components/sales/FixBillModal.tsx), opened from a bill's row, from the bill it
+  // is viewed in, or from the "Return or cancel a bill" button, which first asks which bill.
+  const [fixingInvoice, setFixingInvoice] = useState<Invoice | null>(null);
+  const [pickingBill, setPickingBill] = useState(false);
+  // Whether that began from Home's button, so that only then does saving go back to Home.
+  const [fixFromEntry, setFixFromEntry] = useState(false);
   // Closing an invoice a customer settled by paying less than it was for.
   //
   // This used to be two jobs on two screens: record the cash on the payments modal, then come
@@ -192,18 +199,6 @@ export default function SalesPage() {
   const [settleCost, setSettleCost] = useState<InvoiceCost | null>(null);
   const [settleError, setSettleError] = useState('');
   const [savingSettlement, setSavingSettlement] = useState(false);
-  const [returnCandidate, setReturnCandidate] = useState<Invoice | null>(null);
-  const [returnableItems, setReturnableItems] = useState<ReturnableInvoiceItem[]>([]);
-  const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
-  const [returnReason, setReturnReason] = useState('');
-  // Where a cash refund on the return comes out of, when the customer had already paid.
-  const [refundChoice, setRefundChoice] = useState<MoneyChoice | null>(null);
-  // What condition each returned line came back in. Absent means resellable, which is what the
-  // great majority of returns are and what the database assumes when a caller says nothing.
-  const [returnConditions, setReturnConditions] = useState<Record<string, 'resellable' | 'damaged'>>({});
-  const [returnError, setReturnError] = useState('');
-  const [loadingReturn, setLoadingReturn] = useState(false);
-  const [savingReturn, setSavingReturn] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [invoiceError, setInvoiceError] = useState('');
   const [savingInvoice, setSavingInvoice] = useState(false);
@@ -227,13 +222,6 @@ export default function SalesPage() {
   const [undoingCredit, setUndoingCredit] = useState(false);
   const [creditError, setCreditError] = useState('');
 
-  const [deleteError, setDeleteError] = useState('');
-  const [deletingInvoice, setDeletingInvoice] = useState(false);
-  // Cancelling an issued invoice: it keeps its number, marked cancelled (scripts/cancel-sales-invoice.sql).
-  const [cancelCandidate, setCancelCandidate] = useState<Invoice | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
-  const [cancelError, setCancelError] = useState('');
-  const [cancellingInvoice, setCancellingInvoice] = useState(false);
   const [customer, setCustomer] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(todayIso());
   const [lines, setLines] = useState<InvoiceLine[]>([]);
@@ -408,23 +396,6 @@ export default function SalesPage() {
   const pageReceived = pagedSales.reduce((sum, inv) => sum + Number(inv.paid || 0), 0);
   const pageDue = pagedSales.reduce((sum, inv) => sum + Math.max(0, balanceOf(inv)), 0);
 
-  // Only whole units that are still returnable count towards a credit note.
-  const selectedReturnItems = returnableItems
-    .map((item) => ({
-      invoice_item_id: item.invoice_item_id,
-      qty: Math.min(item.returnable_qty, Math.max(0, Number(returnQuantities[item.invoice_item_id] ?? 0))),
-      condition: returnConditions[item.invoice_item_id] ?? ('resellable' as const),
-    }))
-    .filter((item) => Number.isInteger(item.qty) && item.qty > 0);
-  /** What one unit of this line was actually charged at — its list price less whatever discount
-   *  the line carried. The credit note is built from this, so the preview must be too. */
-  const returnNetRate = (item: ReturnableInvoiceItem) =>
-    Number(item.sold_qty) > 0 ? Number(item.line_total) / Number(item.sold_qty) : Number(item.unit_price);
-  const returnItemValue = returnableItems.reduce(
-    (sum, item) => sum + (returnQuantities[item.invoice_item_id] ?? 0) * returnNetRate(item),
-    0
-  );
-
   const openInvoice = (presetCustomer?: string) => {
     setActiveJob(null);
     setEditingInvoice(null);
@@ -470,6 +441,7 @@ export default function SalesPage() {
   // owner back to the Day Book, where the new entry is already listed.
   const { finishEntry } = useEntryIntent(SALES_ENTRY_KINDS, (record) => {
     if (record === 'sale') openInvoice();
+    else if (record === 'return') { setFixFromEntry(true); setPickingBill(true); }
     else openReceivePayment();
   });
 
@@ -1071,53 +1043,28 @@ Save it anyway?`,
     }
   };
 
-  const confirmCancelInvoice = async () => {
-    if (!cancelCandidate || !activeCompany) return;
-    if (!cancelReason.trim()) { setCancelError('Say why the invoice is being cancelled.'); return; }
-    setCancelError('');
-    setCancellingInvoice(true);
-    try {
-      const custRow = customers.find((c) => c.name === cancelCandidate.customer);
-      // One transaction on the database side (jde_cancel_sales_invoice): stock back on the shelf,
-      // the customer's balance reversed, the invoice kept with its number, marked cancelled.
-      await cancelSalesInvoice(activeCompany.id, cancelCandidate.id, custRow?.id ?? null, cancelReason.trim());
-      await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
-      setFeedback(`${cancelCandidate.id} cancelled — its stock is back and nothing is owed on it. It stays on record, marked cancelled.`);
-      setCancelCandidate(null);
-      setCancelReason('');
-    } catch (error) {
-      setCancelError(error instanceof Error ? error.message : `Failed to cancel ${cancelCandidate.id}.`);
-    } finally {
-      setCancellingInvoice(false);
-    }
+  /** After a return, a cancellation or a deletion has been saved: every list it touched is read
+   *  again, and its own sentence is shown. */
+  const fixDone = async (message: string) => {
+    await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts(), reloadSalesReturns()]);
+    setFixingInvoice(null);
+    setFeedback(message);
+    if (fixFromEntry) { setFixFromEntry(false); finishEntry(); }
   };
 
-  const confirmDeleteInvoice = async () => {
-    if (!deleteCandidate || !activeCompany) return;
-    setDeleteError('');
-    setDeletingInvoice(true);
-    try {
-      const custRow = customers.find((c) => c.name === deleteCandidate.customer);
-      const discardingDraft = isDraft(deleteCandidate);
-      // Atomic on the database side (jde_delete_sales_invoice): restores FIFO stock for every
-      // line item and reverses the customer balance before removing the invoice itself. The
-      // amount reversed is computed by the database from the invoice's own total/paid — not
-      // sent from here — and the database also checks the invoice's own status itself before
-      // reversing anything at all: parking a draft never touched the customer's balance (it
-      // saves with newOutstanding: 0), so deleting one must not reverse a debt that was never
-      // recorded. That check lives server-side rather than as a client-passed flag, so nothing
-      // sent from here can talk the database into skipping or applying it wrongly.
-      await deleteSalesInvoice(activeCompany.id, deleteCandidate.id, custRow?.id ?? null);
-      await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
-      setFeedback(discardingDraft
-        ? `${deleteCandidate.id} discarded — the reserved stock is back in inventory.`
-        : `${deleteCandidate.id} deleted — stock and customer balance reversed.`);
-      setDeleteCandidate(null);
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : `Failed to delete ${deleteCandidate.id}.`);
-    } finally {
-      setDeletingInvoice(false);
-    }
+  const openFixBill = (invoice: Invoice) => {
+    setPickingBill(false);
+    setViewingInvoice(null);
+    setFixingInvoice(invoice);
+  };
+
+  /** Why this bill cannot be opened for editing, or undefined when it can. Editing rebuilds a bill's
+   *  lines, which would detach any return recorded against them. */
+  const editBlockedReason = (invoice: Invoice): string | undefined => {
+    if (salesReturns.some((r) => r.invoice_id === invoice.id)) return 'Goods were returned against it. Undo the return first.';
+    if (invoiceWrittenOff(invoice) > 0) return 'It was settled short, so its amounts are fixed';
+    if (!invoiceItems.some((item) => item.invoice_id === invoice.id)) return 'It is older than line-by-line bills';
+    return undefined;
   };
 
   const confirmDeletePayment = async () => {
@@ -1148,81 +1095,6 @@ Save it anyway?`,
     ...(draftInvoices.length > 0 ? [{ value: String(draftInvoices.length), label: draftInvoices.length === 1 ? 'draft' : 'drafts', hint: 'Bills parked before saving, such as a job card still in the shop' }] : []),
   ];
 
-  const openSalesReturn = async (invoice: Invoice) => {
-    if (!activeCompany) return;
-    setReturnError('');
-    setLoadingReturn(true);
-    setReturnReason('');
-    setReturnableItems([]);
-    setReturnQuantities({});
-    setReturnConditions({});
-    try {
-      const items = await getReturnableInvoiceItems(activeCompany.id, invoice.id);
-      if (items.length === 0 || items.every((item) => Number(item.returnable_qty) <= 0)) {
-        setFeedback(`${invoice.id} has no remaining items available to return.`);
-        return;
-      }
-      setReturnCandidate(invoice);
-      setReturnableItems(items);
-      setReturnQuantities(Object.fromEntries(items.map((item) => [item.invoice_item_id, 0])));
-    } catch (error) {
-      setReturnError(error instanceof Error ? error.message : `Could not load return details for ${invoice.id}.`);
-    } finally {
-      setLoadingReturn(false);
-    }
-  };
-
-  const updateReturnQuantity = (item: ReturnableInvoiceItem, value: string) => {
-    const parsed = Number(value);
-    const qty = Number.isFinite(parsed) ? Math.min(Number(item.returnable_qty), Math.max(0, Math.floor(parsed))) : 0;
-    setReturnQuantities((current) => ({ ...current, [item.invoice_item_id]: qty }));
-  };
-
-  const saveSalesReturn = async () => {
-    if (!activeCompany || !returnCandidate || selectedReturnItems.length === 0) return;
-    if (!returnReason.trim()) {
-      setReturnError('Add a brief reason for this return.');
-      return;
-    }
-    // Says what will actually happen to each half, because they now differ: damaged goods are
-    // credited in full but never go back on the shelf, and that is not something to discover after
-    // the fact from a stock figure that did not move.
-    const totalUnits = selectedReturnItems.reduce((sum, item) => sum + item.qty, 0);
-    const damagedUnits = selectedReturnItems.filter((item) => item.condition === 'damaged').reduce((sum, item) => sum + item.qty, 0);
-    const stockLine = damagedUnits === 0
-      ? 'All of it goes back into stock, and the customer balance is updated with it.'
-      : damagedUnits === totalUnits
-        ? 'None of it goes back into stock, because it is all marked damaged. The customer is still credited in full.'
-        : `${totalUnits - damagedUnits} of them go back into stock; the ${damagedUnits} marked damaged do not. The customer is credited for all ${totalUnits}.`;
-    if (!window.confirm(`Create a credit note for ${totalUnits} returned unit${totalUnits === 1 ? '' : 's'}?
-
-${stockLine}`)) return;
-
-    setSavingReturn(true);
-    setReturnError('');
-    try {
-      const customerId = customers.find((customer) => customer.name === returnCandidate.customer)?.id ?? null;
-      const result = await createSalesReturn({
-        companyId: activeCompany.id,
-        invoiceId: returnCandidate.id,
-        customerId,
-        reason: returnReason.trim(),
-        items: selectedReturnItems,
-        money: refundChoice,
-      });
-      await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
-      setFeedback(
-        `${result.id} created for ${returnCandidate.id} — ₹${Number(result.credit_total).toLocaleString()} credited`
-        + (damagedUnits > 0 ? `, with ${damagedUnits} damaged unit${damagedUnits === 1 ? '' : 's'} kept out of stock.` : '.')
-      );
-      setReturnCandidate(null);
-    } catch (error) {
-      setReturnError(error instanceof Error ? error.message : 'The return was not saved. No stock or customer balance was changed.');
-    } finally {
-      setSavingReturn(false);
-    }
-  };
-
   return (
     <div>
       <div className="page-header">
@@ -1232,15 +1104,15 @@ ${stockLine}`)) return;
             ? <SummaryLine facts={summaryFacts} />
             : <p className="page-subtitle">Your bills, quotations and returns</p>}
         </div>
-        <div className="flex gap-2">
+        {/* The three counter jobs. A quotation is started from the Quotations tab below. */}
+        <div className="flex gap-2" style={{ marginLeft: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button className="btn btn-secondary" onClick={() => { setFixFromEntry(false); setPickingBill(true); }}><Undo2 size={16} /> Return or cancel a bill</button>
           <button className="btn btn-secondary" onClick={() => openReceivePayment()}><Wallet size={16} /> Money received</button>
-          <button className="btn btn-secondary" onClick={openQuotation}><Plus size={16} /> New quotation</button>
           <button className="btn btn-primary" onClick={() => openInvoice()}><Plus size={16} /> Make a bill</button>
         </div>
       </div>
 
       {feedback && <div className="alert alert-success mb-4" role="status">{feedback}</div>}
-      {returnError && !returnCandidate && <div className="alert alert-danger mb-4" role="alert">{returnError}</div>}
       {quotationError && !showQuotationModal && <div className="alert alert-danger mb-4" role="alert">{quotationError}</div>}
 
       {/* The two document types this screen holds. Same `activeTab` state the ghost buttons used
@@ -1324,15 +1196,13 @@ ${stockLine}`)) return;
             </div>
 
             <div style={{ overflowX: 'auto' }}>
-              <table className="erp-table" style={{ minWidth: '1180px' }}>
+              <table className="erp-table" style={{ minWidth: '940px' }}>
                 <thead>
                   <tr>
-                    <th>Invoice No.</th>
+                    <th>Bill No.</th>
                     <th>Customer</th>
                     <th>Date</th>
-                    <th>Products</th>
-                    <th className="text-right">Units</th>
-                    <th className="text-right">Discount</th>
+                    <th>Parts</th>
                     <th className="text-right">Total</th>
                     <th className="text-right">Paid</th>
                     <th>Status</th>
@@ -1346,7 +1216,6 @@ ${stockLine}`)) return;
                   // return recorded against them and let the same goods be returned again — it
                   // already happened three times on one invoice. Closed here as well as in the
                   // database, so the reason is readable instead of an error after the fact.
-                  const returnCount = salesReturns.filter((r) => r.invoice_id === invoice.id).length;
                   const items = invoiceItems.filter((item) => item.invoice_id === invoice.id);
                   const productLabel = items[0]?.name ?? (invoice.items > 0 ? 'Legacy sale' : '—');
                   const customerRow = customers.find((c) => c.name === invoice.customer);
@@ -1374,12 +1243,6 @@ ${stockLine}`)) return;
                       <span style={{ fontWeight: 600 }}>{productLabel}</span>
                       {items.length > 0 && <span className="badge badge-muted" style={{ marginLeft: '6px' }}>{items.length} item{items.length > 1 ? 's' : ''}</span>}
                     </td>
-                    <td className="text-right">{invoice.items}</td>
-                    <td className="text-right">
-                      {Number(invoice.discount_amount) > 0
-                        ? <span className="text-danger">-₹{money(Number(invoice.discount_amount))} ({Number(invoice.discount_percent).toFixed(0)}%)</span>
-                        : <span className="text-muted">—</span>}
-                    </td>
                     <td className="text-right font-semibold">
                       {isCancelled(invoice)
                         ? <s className="text-muted" title="Cancelled — the amount it was issued for">₹{money(Number(invoice.cancelled_copy?.invoice?.total ?? 0))}</s>
@@ -1400,6 +1263,9 @@ ${stockLine}`)) return;
                     <td>
                       {isCancelled(invoice)
                         ? <span className="badge badge-muted" title={invoice.cancel_reason ?? undefined}><Ban size={12} />Cancelled</span>
+                        // A parked draft owes nothing because nothing is billed yet, which is not the same as paid.
+                        : isDraft(invoice)
+                        ? <span className="badge badge-muted" title="Parked: stock is held, nothing is billed yet">Draft</span>
                         : balance <= 0
                         ? writtenOff > 0
                           ? <span className="badge badge-success"><CheckCircle2 size={12} />Settled</span>
@@ -1419,36 +1285,25 @@ ${stockLine}`)) return;
                           ...(!isCancelled(invoice) ? [{
                             label: 'Edit',
                             icon: <Pencil size={15} />,
-                            disabledReason: returnCount > 0
-                              ? `Goods were returned against it. Delete the return first.`
-                              : writtenOff > 0
-                                ? 'It was settled short, so its amounts are fixed'
-                                : items.length === 0 ? 'It is older than line-by-line bills' : undefined,
+                            disabledReason: editBlockedReason(invoice),
                             onSelect: () => openEditInvoice(invoice),
                           }] : []),
-                          ...(!isCancelled(invoice) && !isDraft(invoice) ? [{
-                            label: 'Return goods',
+                          // Goods came back, the bill is cancelled, or it is deleted: one entry,
+                          // and the window it opens asks which. A draft can only be discarded.
+                          ...(!isCancelled(invoice) ? [isDraft(invoice) ? {
+                            label: 'Discard draft',
+                            icon: <Trash2 size={15} />,
+                            danger: true,
+                            onSelect: () => openFixBill(invoice),
+                          } : {
+                            label: 'Return or cancel',
                             icon: <Undo2 size={15} />,
-                            disabledReason: items.length === 0 ? 'It is older than line-by-line bills' : loadingReturn ? 'Opening another return…' : undefined,
-                            onSelect: () => openSalesReturn(invoice),
+                            onSelect: () => openFixBill(invoice),
                           }] : []),
                           ...(activeCompany ? [{
                             label: 'Open the saved PDF',
                             icon: <FileDown size={15} />,
                             onSelect: () => window.open(`/api/sales/invoice-pdf?companyId=${encodeURIComponent(activeCompany.id)}&invoiceId=${encodeURIComponent(invoice.id)}`, '_blank'),
-                          }] : []),
-                          ...(!isCancelled(invoice) && !isDraft(invoice) ? [{
-                            label: 'Cancel this bill',
-                            icon: <Ban size={15} />,
-                            danger: true,
-                            onSelect: () => { setCancelReason(''); setCancelError(''); setCancelCandidate(invoice); },
-                          }] : []),
-                          ...(!isCancelled(invoice) ? [{
-                            label: 'Delete',
-                            icon: <Trash2 size={15} />,
-                            danger: true,
-                            disabledReason: returnCount > 0 ? 'Goods were returned against it' : undefined,
-                            onSelect: () => setDeleteCandidate(invoice),
                           }] : []),
                         ]}
                       />
@@ -1456,7 +1311,7 @@ ${stockLine}`)) return;
                   </tr>;
                 })}
                 {pagedInvoices.length === 0 && (
-                  <tr><td colSpan={10}><div className="empty-state">
+                  <tr><td colSpan={8}><div className="empty-state">
                     <div className="empty-state-icon"><Receipt size={22} /></div>
                     <p className="empty-state-title">
                       {invoicesLoading ? 'Loading invoices…' : search ? 'No invoices match your search' : paymentFilter !== 'all' ? 'Nothing in this view' : 'No invoices yet'}
@@ -1564,14 +1419,14 @@ ${stockLine}`)) return;
         <div className="card">
           <div className="tbl-toolbar">
             <div className="tbl-toolbar-title">
-              <strong>Credit notes</strong>
-              <small>Goods that came back. Each one put stock on the shelf and took the amount off the invoice it came from.</small>
+              <strong>Returns</strong>
+              <small>Goods that came back. Each one put stock on the shelf and took the amount off the bill it came from.</small>
             </div>
           </div>
           {salesReturns.length === 0 ? (
             <div className="empty-state" style={{ padding: '32px 20px' }}>
               <p className="empty-state-title">No goods have come back yet</p>
-              <p className="empty-state-desc">A credit note is written from an invoice, using Return on its row.</p>
+              <p className="empty-state-desc">When a customer brings parts back, press Return or cancel a bill at the top of this screen.</p>
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
@@ -1859,6 +1714,11 @@ ${stockLine}`)) return;
               onClick={() => { const invoice = viewingInvoice; setViewingInvoice(null); openSettleShort(invoice); }}
             ><HandCoins size={14} /> Settle &amp; close</button>
           )}
+          {viewingInvoice.status !== CANCELLED_STATUS && (
+            <button type="button" className="btn btn-secondary" onClick={() => openFixBill(viewingInvoice)}>
+              <Undo2 size={14} /> {viewingInvoice.status === DRAFT_STATUS ? 'Discard draft' : 'Return or cancel'}
+            </button>
+          )}
           <button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/invoice/${viewingInvoice.id}`, '_blank')}><Printer size={14} /> Print</button>
           <button type="button" className="btn btn-primary" onClick={() => setViewingInvoice(null)}>Close</button>
         </div>
@@ -1952,80 +1812,29 @@ ${stockLine}`)) return;
         </div>
       </div></div>}
 
-      {cancelCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '460px' }} role="dialog" aria-modal="true" aria-labelledby="cancel-invoice-title">
-        <div className="modal-header"><h3 id="cancel-invoice-title" className="modal-title">Cancel invoice {cancelCandidate.id}?</h3></div>
-        <div className="modal-body flex flex-col gap-3">
-          {cancelError && <div className="alert alert-danger" role="alert">{cancelError}</div>}
-          <p>
-            <strong>{cancelCandidate.id}</strong> stays on record with its number, marked <strong>CANCELLED</strong>. Its items go back into stock
-            {customers.some((c) => c.name === cancelCandidate.customer) && invoiceBalanceDue(cancelCandidate) > 0 ? ` and ${cancelCandidate.customer} will no longer owe its ₹${invoiceBalanceDue(cancelCandidate).toLocaleString('en-IN')}` : ''}.
-            {Number(cancelCandidate.paid) > 0 ? ` The ₹${Number(cancelCandidate.paid).toLocaleString('en-IN')} received on it is taken off — give it back to the customer.` : ''}
-          </p>
-          <div className="form-group">
-            <label className="form-label" htmlFor="cancel-reason">Reason for cancelling</label>
-            <input id="cancel-reason" className="form-input" autoFocus placeholder="e.g. Wrong customer, order cancelled" value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} />
-          </div>
-        </div>
-        <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setCancelCandidate(null)} disabled={cancellingInvoice}>Keep invoice</button><button className="btn btn-danger" onClick={confirmCancelInvoice} disabled={cancellingInvoice || !cancelReason.trim()}>{cancellingInvoice ? 'Cancelling…' : 'Cancel Invoice'}</button></div>
-      </div></div>}
+      {pickingBill && (
+        <BillPickerModal
+          invoices={invoices} invoiceItems={invoiceItems}
+          onPick={openFixBill}
+          onClose={() => { setPickingBill(false); setFixFromEntry(false); }}
+        />
+      )}
 
-      {deleteCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '440px' }} role="dialog" aria-modal="true" aria-labelledby="delete-invoice-title">
-        <div className="modal-header"><h3 id="delete-invoice-title" className="modal-title">Delete invoice?</h3></div>
-        <div className="modal-body flex flex-col gap-3">
-          {deleteError && <div className="alert alert-danger" role="alert">{deleteError}</div>}
-          <p>This will delete <strong>{deleteCandidate.id}</strong> and add its items back to stock{customers.some((c) => c.name === deleteCandidate.customer) ? ` and reduce ${deleteCandidate.customer}'s balance by the outstanding ₹${invoiceBalanceDue(deleteCandidate).toLocaleString()}` : ''}.</p>
-        </div>
-        <div className="modal-footer"><button className="btn btn-secondary" onClick={() => setDeleteCandidate(null)} disabled={deletingInvoice}>Cancel</button><button className="btn btn-danger" onClick={confirmDeleteInvoice} disabled={deletingInvoice}>{deletingInvoice ? 'Deleting…' : 'Delete Invoice'}</button></div>
-      </div></div>}
-
-      {returnCandidate && <div className="modal-overlay"><div className="modal-box" style={{ maxWidth: '760px' }} role="dialog" aria-modal="true" aria-labelledby="sales-return-title">
-        <div className="modal-header"><div><h3 id="sales-return-title" className="modal-title">Return items from {returnCandidate.id}</h3><p className="text-muted text-sm" style={{ marginTop: '4px' }}>Create a partial return and credit note. You can only return quantities still available.</p></div><button type="button" className="btn btn-ghost btn-sm" aria-label="Close" disabled={savingReturn} onClick={() => setReturnCandidate(null)}>✕</button></div>
-        <div className="modal-body flex flex-col gap-4">
-          {returnError && <div className="alert alert-danger" role="alert">{returnError}</div>}
-          <div className="form-grid-2">
-            <div><small className="text-muted">Customer</small><div style={{ fontWeight: 600 }}>{returnCandidate.customer}</div></div>
-            <div><small className="text-muted">Original invoice total</small><div style={{ fontWeight: 600 }}>₹{Number(returnCandidate.total).toLocaleString()}</div></div>
-          </div>
-          <div className="table-wrap"><table className="erp-table">
-            <thead><tr><th>Item</th><th className="text-right">Sold</th><th className="text-right">Previously returned</th><th className="text-right">Available</th><th className="text-right">Return now</th><th>Condition</th></tr></thead>
-            <tbody>{returnableItems.map((item) => <tr key={item.invoice_item_id}>
-              <td><strong>{item.name}</strong><div className="text-muted text-sm">{item.part_number} · ₹{returnNetRate(item).toLocaleString(undefined, { maximumFractionDigits: 2 })} each{Math.abs(returnNetRate(item) - Number(item.unit_price)) > 0.005 ? ` (discounted from ₹${Number(item.unit_price).toLocaleString()})` : ''}</div></td>
-              <td className="text-right">{Number(item.sold_qty)}</td>
-              <td className="text-right">{Number(item.returned_qty)}</td>
-              <td className="text-right" style={{ fontWeight: 700 }}>{Number(item.returnable_qty)}</td>
-              <td className="text-right"><input aria-label={`Return quantity for ${item.name}`} type="number" min="0" max={item.returnable_qty} step="1" className="form-input" style={{ width: '88px', marginLeft: 'auto' }} value={returnQuantities[item.invoice_item_id] ?? 0} disabled={savingReturn} onChange={(event) => updateReturnQuantity(item, event.target.value)} /></td>
-              {/* Only offered once something is actually coming back on this line — an empty row
-                  has no condition to record. Damaged still credits the customer in full; it only
-                  stops the goods going back on the shelf to be sold to somebody else. */}
-              <td>
-                <select
-                  aria-label={`Condition of returned ${item.name}`}
-                  className="form-input form-select"
-                  style={{ width: '150px' }}
-                  value={returnConditions[item.invoice_item_id] ?? 'resellable'}
-                  disabled={savingReturn || !((returnQuantities[item.invoice_item_id] ?? 0) > 0)}
-                  onChange={(event) => setReturnConditions((current) => ({
-                    ...current,
-                    [item.invoice_item_id]: event.target.value === 'damaged' ? 'damaged' : 'resellable',
-                  }))}
-                >
-                  <option value="resellable">Can be sold again</option>
-                  <option value="damaged">Damaged — do not restock</option>
-                </select>
-              </td>
-            </tr>)}</tbody>
-          </table></div>
-          <div className="form-group"><label className="form-label" htmlFor="sales-return-reason">Reason for return</label><input id="sales-return-reason" className="form-input" maxLength={500} placeholder="For example: damaged, wrong part, customer changed mind" value={returnReason} disabled={savingReturn} onChange={(event) => setReturnReason(event.target.value)} /></div>
-          {Number(returnCandidate?.paid ?? 0) > 0 && activeCompany && (
-            <div>
-              <p className="text-muted" style={{ fontSize: 12, marginBottom: 4 }}>This bill has been paid, so money may be handed back. If it is, it comes out of:</p>
-              <MoneyPicker companyId={activeCompany.id} direction="out" value={refundChoice} onChange={setRefundChoice} disabled={savingReturn} />
-            </div>
-          )}
-          <div className="alert alert-warning" role="status">The selected items were charged ₹{returnItemValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}, after any discount on those lines. The credit note then applies this invoice&apos;s own discount and GST exactly as they were charged{returnCandidate.gst_mode === 'inclusive' ? ', with GST taken out of that amount rather than added to it' : ''}. Stock and customer balance will change only after confirmation.</div>
-        </div>
-        <div className="modal-footer"><button type="button" className="btn btn-secondary" disabled={savingReturn} onClick={() => setReturnCandidate(null)}>Cancel</button><button type="button" className="btn btn-danger" disabled={savingReturn || selectedReturnItems.length === 0 || !returnReason.trim()} onClick={saveSalesReturn}>{savingReturn ? 'Creating credit note…' : 'Confirm Return & Credit'}</button></div>
-      </div></div>}
+      {fixingInvoice && activeCompany && (
+        <FixBillModal
+          invoice={fixingInvoice}
+          companyId={activeCompany.id}
+          customer={customers.find((c) => c.name === fixingInvoice.customer)}
+          items={invoiceItems.filter((item) => item.invoice_id === fixingInvoice.id)}
+          returnCount={salesReturns.filter((r) => r.invoice_id === fixingInvoice.id).length}
+          laterPayments={Array.from(new Set(paymentAllocations.filter((allocation) => allocation.invoice_id === fixingInvoice.id).map((allocation) => allocation.payment_id)))}
+          onEdit={!isDraft(fixingInvoice) && !editBlockedReason(fixingInvoice)
+            ? () => { const invoice = fixingInvoice; setFixingInvoice(null); openEditInvoice(invoice); }
+            : undefined}
+          onClose={() => { setFixingInvoice(null); setFixFromEntry(false); }}
+          onDone={fixDone}
+        />
+      )}
 
       {showInvoiceModal && (
         <InvoiceFormModal
@@ -2049,7 +1858,7 @@ ${stockLine}`)) return;
           dispatch={dispatch} setDispatch={setDispatch}
           notice={activeJob
             ? activeJob.purpose === 'bill'
-              ? `${activeJob.job.job_no} · ${activeJob.job.machine || 'repair job'}: add any last parts and the labour, set Payment Received, then press ${activeJob.job.invoice_id ? 'Confirm Invoice' : 'Create Invoice'} to bill the whole job.`
+              ? `${activeJob.job.job_no} · ${activeJob.job.machine || 'repair job'}: add any last parts and the labour, say whether it is paid, then press ${activeJob.job.invoice_id ? 'Confirm Invoice' : 'Create Invoice'} to bill the whole job.`
               : `${activeJob.job.job_no} · ${activeJob.job.machine || 'repair job'}: add the parts taken, then press ${activeJob.job.invoice_id ? 'Save & Keep as Draft' : 'Save as Draft'}. Nothing is billed until the job is finished.`
             : undefined}
           setShowInvoiceModal={setShowInvoiceModal} setShowAddCustomer={setShowAddCustomer}

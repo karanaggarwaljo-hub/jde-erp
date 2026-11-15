@@ -2,6 +2,101 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-11-15 — Prices, stock and bills made simple
+
+You said two things were hard. Prices keep changing, and uploading stock and prices was difficult.
+And making a bill, cancelling one and taking goods back was too complicated. Both are changed.
+Nothing was removed: every figure is worked out the same way, and no record was touched.
+
+**Change prices & stock (new screen)**
+- Stock has a new button, **Change prices & stock**. Home has it too, as **Change prices**.
+- It is one list of all your parts. Each part has three boxes: **Stock, Cost, Sale price**. Type the
+  new number in any box. A changed box turns yellow and shows what it was.
+- Press **Enter** or the down arrow to go to the same box on the next part, like a column in Excel.
+  **Esc** puts a box back.
+- Nothing is saved until you press **Save changes**. The bar under the list always says what will
+  change ("3 parts changed: 2 sale prices, 1 stock count"). **Undo all** puts everything back.
+- The margin on each part updates as you type. A part that would sell at or below its cost is shown
+  in red, and the bar says how many there are before you save.
+- **Change many prices at once:** raise or lower sale prices by a percentage, or set each sale price
+  from its cost to keep a margin you choose. Round to the nearest ₹1, ₹5 or ₹10. It works on the
+  parts shown, so pick a brand or category first to change only those. It only fills in the boxes;
+  you still look them over and press Save changes.
+- Tabs at the top show only the parts with **no sale price**, or the ones selling **at or below
+  cost**, so they are easy to fix.
+- Each part is saved exactly as its own Edit form saves it, so the Log Book shows each change.
+
+**Upload a stock or price list (one step now)**
+- Stock → More → **Upload a stock or price list**, or **Upload a stock list** on Home.
+- Step 1: **Download my stock & price list**. It is a spreadsheet of all your parts with their
+  stock, cost, sale price and MRP. Change the numbers in Excel and save it.
+- Step 2: upload it. A supplier's price list, a photo or a PDF works too.
+- The ERP then shows one screen: how many parts will be **updated**, how many **new** parts will be
+  added, and which rows are left alone and why. Each change is shown as old → new.
+- Before, an uploaded file could only change cost prices, or add new parts. It could not update
+  stock or sale prices of parts you already had. Now one file does all of it, with one button.
+- **An empty box in the file changes nothing.** It is never read as zero. If the file would set a
+  part's stock to 0, the screen warns you first.
+- Tick boxes let you leave out Stock, Cost, Sale price or MRP for the whole file. Use this when a
+  supplier's quantity column is not your stock.
+- Numbers typed with commas or ₹ ("1,250", "₹ 1250") are now read correctly. They used to be read
+  as nothing.
+- When one part number is kept in two brands, the Brand column says which one. If it is missing,
+  that row is left alone instead of guessing.
+- The three older jobs (cost prices only, add everything as new, fill in part numbers) are still
+  there under **Do something else with this file**.
+
+**Return or cancel a bill (one window instead of three)**
+- A bill's **⋯** menu had Return goods, Cancel this bill and Delete. It now has one entry,
+  **Return or cancel**. Sales has a **Return or cancel a bill** button at the top, and so does Home.
+  From those you first pick the bill: type its number, the customer, or a part on it.
+- The window asks **What happened?** with two answers:
+  - **Goods came back.** Press − / + for how many came back, or **Return everything**. Tick
+    "Damaged" for anything that can't be sold again. The window shows exactly how much comes off the
+    bill, how many pieces go back into stock, and any money to give back.
+  - **Cancel the whole bill.** It shows what goes back into stock, what the customer no longer owes,
+    and any money to give back. The bill keeps its number, marked cancelled.
+- **The reason is one tap** ("Wrong part", "Damaged or faulty", "Wrong customer"…). "Other" lets you
+  type your own.
+- If a bill can't be cancelled, the window says why **before** you type anything. For example:
+  "Money was received on this bill afterwards (RCPT-1004). Reverse that payment first."
+- There is no second "are you sure?" box any more.
+- Delete is still possible, as a small link ("deleted completely") for a bill made only as a test.
+  A draft's menu says **Discard draft**.
+- If only a price, quantity or customer is wrong, the window offers **Edit the bill** instead.
+
+**Making a bill**
+- The form is titled **Make a bill**.
+- "Payment Received" was a drop-down. It is now three buttons under the question **Has the customer
+  paid?**: Paid in full, Part paid, Not paid yet.
+- Discount on the whole bill, GST rate, place of supply and dispatch details are folded under
+  **More options**. Most counter sales never touch them. A bill that already uses one opens with
+  them showing.
+- The totals box is shorter. It leaves out lines that only said ₹0.
+- The total and the Create Invoice button stay at the bottom of the window while you scroll.
+
+**The bills list**
+- Two columns are gone (Units and Discount), so the list fits the screen. Both are still shown when
+  you open the bill.
+- A parked draft used to show "Paid". It now shows **Draft**.
+- **New quotation** moved from the top of Sales to the Quotations tab (**Create Quotation**).
+
+**Home**
+- Nine buttons in three rows: selling (Make a bill, Money received, Return or cancel a bill), buying
+  (Buy stock, Pay a supplier, Add an expense), and stock (Find a part, Change prices, Upload a stock
+  list).
+
+**Fixed on the way**
+- Uploading the parts worksheet as new parts could fail with a database error, because the file's
+  "Old label" column was sent along as if it were part of the part. It is no longer sent.
+
+**How this was checked.** There is no test login for the live ERP, so every new screen was clicked
+through in a real browser against a stand-in copy with made-up parts and bills: typing prices,
+saving, a save that fails halfway, downloading and uploading the list, returning goods, cancelling,
+discarding a draft, and a phone-sized screen. 66 new automated tests cover the sums and the rules,
+including the return amount, which is worked out the same way the database does it. Your real data
+was not touched, and no change to the database was needed.
+
 ## 2026-10-27 — Cheques made simple: give several cheques for one big payment
 
 You said adding a cheque was hard. You also pay big supplier bills with several cheques, and the ERP

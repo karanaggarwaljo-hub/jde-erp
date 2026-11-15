@@ -14,9 +14,9 @@ An ERP web app for an auto spare parts trading business: inventory, sales, purch
 
 | Module | Route | What it does |
 |---|---|---|
-| Home | `/dashboard` | One big button for each everyday job (make a bill, money received, buy stock, pay a supplier, add an expense, find a part), four live figures (sold today, to collect, to pay, to reorder), what needs attention, and the activity calendar. |
-| Stock | `/inventory` | Catalog with part number, OEM number, brand, category, pricing, stock levels. Supports bulk import from a CSV/Excel file with flexible column-header matching. Called Stock in the menu; the address is unchanged. A part can carry several part numbers (found by any of them everywhere), and the same part can be kept in several brands under one number, each with its own stock and price. |
-| Sales | `/sales` | Quotations and invoices against your real customer and inventory data. |
+| Home | `/dashboard` | One big button for each everyday job, nine in three rows: selling (make a bill, money received, return or cancel a bill), buying (buy stock, pay a supplier, add an expense) and stock (find a part, change prices, upload a stock list). Then four live figures (sold today, to collect, to pay, to reorder), what needs attention, and the activity calendar. |
+| Stock | `/inventory` | Catalog with part number, OEM number, brand, category, pricing, stock levels. Supports bulk import from a CSV/Excel file with flexible column-header matching. Called Stock in the menu; the address is unchanged. A part can carry several part numbers (found by any of them everywhere), and the same part can be kept in several brands under one number, each with its own stock and price. **Change prices & stock** (`/inventory/prices`) edits the stock, cost and sale price of many parts in one list; **Upload a stock or price list** updates them from a file. See "Changing prices and stock in bulk" below. |
+| Sales | `/sales` | Quotations and invoices against your real customer and inventory data. Goods coming back, cancelling a bill and deleting one all start from one window, **Return or cancel** — see "Returning or cancelling a bill" below. |
 | Purchases | `/purchases` | Purchase orders and goods-received notes, with CSV/Excel/PDF/photo import (Gemini extracts line items from scanned documents). |
 | Customers / Suppliers | `/customers`, `/suppliers` | Directories with credit limits, GSTIN, and outstanding balances. |
 | Expenses | `/expenses` | Operational expense log by category. |
@@ -249,6 +249,57 @@ payment always goes through `/api/sales/payments`.
 ```bash
 npx tsx scripts/customer-ledger-check.ts
 ```
+
+### Changing prices and stock in bulk
+
+Prices in this trade move every week, and the only ways to change one used to be a part's own
+14-field form or a file import that could write nothing but cost prices. There are now two.
+
+**Change prices & stock** (`app/(dashboard)/inventory/prices/page.tsx`) is one list of every part
+with three boxes each. Everything it decides lives in `lib/quick-prices.ts`, pure and tested:
+which typed boxes are real changes (`planQuickUpdate`), what a bulk rule works out to
+(`fillSalePrices` — a percentage up or down, or a margin on cost, where margin means the same thing
+as `lib/margin.ts`), and the steps one changed part is saved by (`saveStepsFor`). Those steps are
+deliberately the same ones, in the same order, as the part's Edit form: a `PATCH` of the price
+fields, then either `/api/fifo/set-stock` or `/api/fifo/correct-cost`, never both. So there is no
+second write path to keep in step, and each part gets its ordinary audit entry.
+
+**Upload a stock or price list** (`lib/stock-sheet.ts`, `components/inventory/StockSheetModal.tsx`)
+plans what a file would do row by row — update, same, new, unclear — before anything is written.
+Two rules matter most:
+
+- A figure is only taken from a cell that actually held one. `parseInventoryFile` marks this per
+  row in `ImportedProduct.given`; a blank cell is stored as 0 for the benefit of brand-new parts,
+  and `given` is what stops that 0 ever being written over a real price or stock count.
+- A row is never matched by guessing. Matching is shared with the cost importer
+  (`partFinder` in `lib/cost-import.ts`); two candidates is "unclear", settled only by a Brand
+  column when the same number is kept in two brands.
+
+The list offered for download (`priceListCsv`) uses headings the importer recognises without
+guessing, and `test/stock-sheet.test.ts` round-trips it: written, parsed, and planned to zero
+changes. The importer's working fields (`given`, `current_code`) are stripped by `toNewPartRecord`
+before new parts are posted — the bulk route inserts whatever keys it is given.
+
+The three narrower jobs the importer started with (cost prices only, add as new parts, fill in part
+numbers) are unchanged and reachable from "Do something else with this file".
+
+### Returning or cancelling a bill
+
+`components/sales/FixBillModal.tsx` replaces three separate dialogs (return goods, cancel, delete)
+with one that asks what happened. `lib/bill-fix.ts` holds what it decides with:
+
+- `billFixOptions` says which of the three can be done to a bill and, if not, why — the same rules
+  `jde_cancel_sales_invoice` and `jde_delete_sales_invoice` enforce (a later payment allocation, a
+  short settlement, or a return blocks both), stated before a reason is typed instead of as a
+  refusal afterwards. The database remains the authority.
+- `previewSalesReturn` mirrors the arithmetic of `jde_create_sales_return` step for step (each line
+  at `line_total / qty`, the bill's own discount, GST read inclusive or exclusive, then new total,
+  refund and balance), so the amount on the button is the amount the credit note is written for.
+  If that function's maths ever changes, this must change with it; `test/bill-fix.test.ts` pins the
+  figures measured on the live database when the maths was last corrected.
+
+What is saved is unchanged: the same three routes, each one database transaction. A reason is still
+required by the server for a return and a cancellation; the window offers the usual ones as one tap.
 
 ### Sitemap and robots.txt
 

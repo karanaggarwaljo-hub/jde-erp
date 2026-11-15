@@ -98,6 +98,14 @@ export type InvoiceFormModalProps = {
   saveDraftInvoice: () => void;
 };
 
+/** The one question every bill needs answered, as three buttons instead of a drop-down. The values
+ *  are the same three the form has always saved. */
+const PAID_CHOICES: ReadonlyArray<{ value: PaymentStatus; label: string }> = [
+  { value: 'paid', label: 'Paid in full' },
+  { value: 'partial', label: 'Part paid' },
+  { value: 'unpaid', label: 'Not paid yet' },
+];
+
 export default function InvoiceFormModal(props: InvoiceFormModalProps) {
   const {
     lines, setLines, updateLine, invoiceDate, setInvoiceDate, customer, setCustomer,
@@ -122,6 +130,11 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
 
   const canSubmit = Boolean(total) && !savingInvoice && !savingDraft && !creditSaleNeedsCustomer;
 
+  // Whether "More options" starts open: only on a bill that already uses one of them. Decided once,
+  // when the form opens — afterwards it opens and closes only when its heading is pressed, so it
+  // never folds shut under someone who has just typed a rate back to the usual one.
+  const [moreOpenAtStart] = useState(() => discountPercent > 0 || gstPercent !== 18 || gstInclusive || hasDispatch(dispatch));
+
   const handlePick = (part: PartOption) => {
     // Functional form for the same reason: two fast scans must both land.
     setLines((current) => addPartToLines(current, part).lines);
@@ -138,7 +151,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
       <form onSubmit={saveInvoice} onKeyDown={(event) => keepEnterInsideForm(event, canSubmit)}>
         <div className="modal-header">
           <div>
-            <h3 id="invoice-modal-title" className="modal-title">{editingInvoice ? `Edit ${editingInvoice.id}` : 'Create Sales Invoice'}</h3>
+            <h3 id="invoice-modal-title" className="modal-title">{editingInvoice ? `Edit ${editingInvoice.id}` : 'Make a bill'}</h3>
             {/* No invoice number is shown for a new sale: it is generated inside
                 jde_save_sales_invoice on the server and simply is not known until the save
                 comes back. An edit shows the real one, which is already in the title. */}
@@ -372,95 +385,110 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
             </div>
           </div>
 
+          {/* Under the lines: on the left the one question every bill needs answered, and the
+              settings most bills never touch folded away beneath it; on the right, what it comes to. */}
           <div className="form-grid-2">
             <div className="flex flex-col gap-4">
-              <div className="form-grid-2">
-                <div className="form-group">
-                  <label className="form-label">Whole-invoice discount (%)</label>
-                  <input type="number" min="0" max="100" step="0.1" className="form-input" value={discountPercent} onChange={(event) => setDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} />
-                  <small className="text-muted">Applied on top of any per-item discounts. Leave at 0 to discount items only.</small>
-                  <span className="text-muted text-sm">Applied on the subtotal</span>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">GST Rate (%)</label>
-                  <input type="number" min="0" max="28" step="0.1" className="form-input" value={gstPercent} onChange={(event) => setGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} />
-                  <div className="flex gap-2 mt-2" role="group" aria-label="How the rates on the lines are priced">
-                    <button
-                      type="button"
-                      className={'btn btn-sm ' + (gstInclusive ? 'btn-secondary' : 'btn-primary')}
-                      onClick={() => setGstInclusive(false)}
-                    >GST extra</button>
-                    <button
-                      type="button"
-                      className={'btn btn-sm ' + (gstInclusive ? 'btn-primary' : 'btn-secondary')}
-                      onClick={() => setGstInclusive(true)}
-                    >GST included</button>
-                  </div>
-                  {/* States what the typed rates mean, which is the part that is easy to get
-                      wrong — the arithmetic below follows from it. */}
-                  <span className="text-muted text-sm">
-                    {gstInclusive
-                      ? 'Line rates already include GST — the tax is taken out of them, and the total is what you typed.'
-                      : 'Line rates are before GST — the tax is added on top of them.'}
-                  </span>
-                  {/* Where the goods go decides the split: another state is IGST. Filled in from the
-                      customer's GSTIN, else the shop's state; can be changed for a buyer from
-                      elsewhere who has no GSTIN. */}
-                  <label className="form-label" htmlFor="place-of-supply" style={{ marginTop: 8 }}>Place of supply</label>
-                  <select id="place-of-supply" className="form-input form-select" value={placeOfSupplyCode}
-                    onChange={(event) => setPlaceOfSupplyChoice(event.target.value)}>
-                    {!placeOfSupplyCode && <option value="">Choose a state</option>}
-                    {PLACE_OF_SUPPLY_OPTIONS.map((option) => <option key={option.code} value={option.code}>{option.name} ({option.code})</option>)}
-                  </select>
-                  <span className="text-muted text-sm">
-                    {supplyKind === 'intra'
-                      ? `Same state · CGST + ${localTax}`
-                      : supplyKind === 'inter'
-                        ? 'Another state · IGST'
-                        : 'Add your GSTIN or state in Settings (Companies → Edit) to know IGST from CGST'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="form-grid-2">
-                <div className="form-group">
-                  <label className="form-label">Payment Received</label>
-                  <select className="form-input form-select" value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value as PaymentStatus)}>
-                    <option value="paid">Paid in Full</option>
-                    <option value="partial">Partially Paid</option>
-                    <option value="unpaid">Unpaid (Credit)</option>
-                  </select>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <span className="form-label" id="bill-paid-label">Has the customer paid?</span>
+                <div className="pay-how bill-paid-choices" role="group" aria-labelledby="bill-paid-label">
+                  {PAID_CHOICES.map((choice) => (
+                    <button key={choice.value} type="button" aria-pressed={paymentStatus === choice.value}
+                      className={`pay-how-choice${paymentStatus === choice.value ? ' active' : ''}`}
+                      onClick={() => setPaymentStatus(choice.value)}>
+                      {choice.label}
+                    </button>
+                  ))}
                 </div>
                 {paymentStatus === 'partial' && (
-                  <div className="form-group"><label className="form-label">Amount Received (₹)</label><input type="number" min="0" max={total} className="form-input" value={amountPaid} onChange={(event) => setAmountPaid(Number(event.target.value))} /></div>
+                  <div className="form-group" style={{ marginTop: '10px', marginBottom: 0 }}>
+                    <label className="form-label" htmlFor="bill-amount-paid">How much did they pay now? (₹)</label>
+                    <input id="bill-amount-paid" type="number" min="0" max={total} className="form-input" value={amountPaid} onChange={(event) => setAmountPaid(Number(event.target.value))} />
+                  </div>
                 )}
               </div>
               {paymentStatus !== 'unpaid' && companyId && (
                 <MoneyPicker companyId={companyId} direction="in" value={moneyChoice} onChange={setMoneyChoice} />
               )}
-            </div>
 
-            {/* Printed beside the invoice number, as on a Tally invoice. Folded away until wanted:
-                most counter sales have none. Open by itself on a bill that already has some. */}
-            <details className="card" open={hasDispatch(dispatch) || undefined}>
-              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
-                Dispatch details <span className="text-muted text-sm" style={{ fontWeight: 400 }}>· optional · printed on the invoice</span>
-              </summary>
-              <div className="form-grid-2" style={{ marginTop: 10 }}>
-                {DISPATCH_FIELDS.map((field) => (
-                  <div className="form-group" key={field.key}>
-                    <label className="form-label" htmlFor={`dispatch-${field.key}`}>{field.label}</label>
-                    <input id={`dispatch-${field.key}`} className="form-input" maxLength={field.max} placeholder={field.placeholder}
-                      value={dispatch[field.key]} onChange={(event) => { const value = event.target.value; setDispatch((current) => ({ ...current, [field.key]: value })); }} />
+              {/* Discount on the whole bill, the GST rate and how it is read, where the goods go,
+                  and the dispatch details printed beside the bill number. Most counter sales
+                  change none of them, so they wait here; a bill that already uses one opens with
+                  them showing. */}
+              <details className="card bill-more" open={moreOpenAtStart || undefined}>
+                <summary>
+                  More options
+                  <span className="text-muted text-sm" style={{ fontWeight: 400 }}> · discount, GST, place of supply, dispatch</span>
+                </summary>
+                <div className="flex flex-col gap-4" style={{ marginTop: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" htmlFor="bill-discount">Discount on the whole bill (%)</label>
+                    <input id="bill-discount" type="number" min="0" max="100" step="0.1" className="form-input" value={discountPercent} onChange={(event) => setDiscountPercent(Math.min(100, Math.max(0, Number(event.target.value))))} />
+                    <span className="text-muted text-sm">Taken off after any discount typed on a line. Leave at 0 for none.</span>
                   </div>
-                ))}
-              </div>
-            </details>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" htmlFor="bill-gst">GST Rate (%)</label>
+                    <input id="bill-gst" type="number" min="0" max="28" step="0.1" className="form-input" value={gstPercent} onChange={(event) => setGstPercent(Math.min(28, Math.max(0, Number(event.target.value))))} />
+                    <div className="flex gap-2 mt-2" role="group" aria-label="How the rates on the lines are priced">
+                      <button
+                        type="button"
+                        className={'btn btn-sm ' + (gstInclusive ? 'btn-secondary' : 'btn-primary')}
+                        onClick={() => setGstInclusive(false)}
+                      >GST extra</button>
+                      <button
+                        type="button"
+                        className={'btn btn-sm ' + (gstInclusive ? 'btn-primary' : 'btn-secondary')}
+                        onClick={() => setGstInclusive(true)}
+                      >GST included</button>
+                    </div>
+                    {/* States what the typed rates mean, which is the part that is easy to get
+                        wrong — the arithmetic beside it follows from it. */}
+                    <span className="text-muted text-sm">
+                      {gstInclusive
+                        ? 'Line rates already include GST — the tax is taken out of them, and the total is what you typed.'
+                        : 'Line rates are before GST — the tax is added on top of them.'}
+                    </span>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    {/* Where the goods go decides the split: another state is IGST. Filled in from the
+                        customer's GSTIN, else the shop's state; can be changed for a buyer from
+                        elsewhere who has no GSTIN. */}
+                    <label className="form-label" htmlFor="place-of-supply">Place of supply</label>
+                    <select id="place-of-supply" className="form-input form-select" value={placeOfSupplyCode}
+                      onChange={(event) => setPlaceOfSupplyChoice(event.target.value)}>
+                      {!placeOfSupplyCode && <option value="">Choose a state</option>}
+                      {PLACE_OF_SUPPLY_OPTIONS.map((option) => <option key={option.code} value={option.code}>{option.name} ({option.code})</option>)}
+                    </select>
+                    <span className="text-muted text-sm">
+                      {supplyKind === 'intra'
+                        ? `Same state · CGST + ${localTax}`
+                        : supplyKind === 'inter'
+                          ? 'Another state · IGST'
+                          : 'Add your GSTIN or state in Settings (Companies → Edit) to know IGST from CGST'}
+                    </span>
+                  </div>
+                  {/* Printed beside the invoice number, as on a Tally invoice. */}
+                  <div>
+                    <span className="form-label">Dispatch details <span className="text-muted text-sm" style={{ fontWeight: 400 }}>· optional · printed on the invoice</span></span>
+                    <div className="form-grid-2" style={{ marginTop: 6 }}>
+                      {DISPATCH_FIELDS.map((field) => (
+                        <div className="form-group" key={field.key}>
+                          <label className="form-label" htmlFor={`dispatch-${field.key}`}>{field.label}</label>
+                          <input id={`dispatch-${field.key}`} className="form-input" maxLength={field.max} placeholder={field.placeholder}
+                            value={dispatch[field.key]} onChange={(event) => { const value = event.target.value; setDispatch((current) => ({ ...current, [field.key]: value })); }} />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </div>
 
             {/* Every figure below is read straight from the totals computed above — nothing
                 here is recalculated, and the CGST/SGST or IGST breakdown is a presentation
-                of the same gstAmount, never a second sum. */}
-            <div className="card" style={{ background: 'var(--surface-2)' }}>
+                of the same gstAmount, never a second sum. A line that would only say zero, or
+                repeat the one above it, is left out. */}
+            <div className="card" style={{ background: 'var(--surface-2)', alignSelf: 'start' }}>
               <div className="report-summary" style={{ maxWidth: 'none', margin: 0, padding: 0, gap: '0' }}>
                 {/* Shown only when line discounts are actually in use, so an invoice without
                     them reads exactly as it always did. */}
@@ -474,16 +502,18 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                   </>
                 )}
                 <div className="report-line"><span className="text-muted">Subtotal{itemDiscountTotal > 0 ? ' after item discounts' : ''}</span><strong>₹{paise(subtotal)}</strong></div>
-                <div className="report-line">
-                  <span className="text-muted">Whole-invoice discount ({discountPercent}%)</span>
-                  {discountAmount > 0
-                    ? <strong className="text-danger">-₹{paise(discountAmount)}</strong>
-                    : <strong>₹{paise(0)}</strong>}
-                </div>
+                {discountAmount > 0 && (
+                  <div className="report-line">
+                    <span className="text-muted">Discount on the whole bill ({discountPercent}%)</span>
+                    <strong className="text-danger">-₹{paise(discountAmount)}</strong>
+                  </div>
+                )}
                 {gstInclusive && (
                   <div className="report-line"><span className="text-muted">Amount after discounts (GST included)</span><strong>₹{paise(taxableAmount)}</strong></div>
                 )}
-                <div className="report-line report-strong"><span>Taxable value</span><strong>₹{paise(netTaxableValue)}</strong></div>
+                {(discountAmount > 0 || gstInclusive) && (
+                  <div className="report-line report-strong"><span>Taxable value</span><strong>₹{paise(netTaxableValue)}</strong></div>
+                )}
                 <div className="report-line">
                   <span className="text-muted">GST ({gstPercent}%){gstInclusive ? ' — included above' : ''}</span>
                   <strong>₹{paise(gstAmount)}</strong>
@@ -499,17 +529,17 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                     </>}
               </div>
 
-              <div className="report-line mt-2" style={{ borderBottom: 'none', paddingBottom: 0 }}>
-                <span className="text-muted">Received</span>
-                <strong className="text-success">₹{paise(paidAmount)}</strong>
-              </div>
-
               <div className="report-total mt-2" style={{ background: 'var(--amber-tint)', borderLeftColor: 'var(--amber)' }}>
                 <div>
                   <strong style={{ fontSize: '12.5px', color: 'var(--amber-3)' }}>Total Payable</strong>
                   <small>Inclusive of GST ₹{paise(gstAmount)}</small>
                 </div>
                 <strong style={{ color: 'var(--amber-3)' }}>₹{paise(total)}</strong>
+              </div>
+
+              <div className="report-line mt-2" style={{ borderBottom: 'none', paddingBottom: 0 }}>
+                <span className="text-muted">Received now</span>
+                <strong className="text-success">₹{paise(paidAmount)}</strong>
               </div>
             </div>
           </div>
@@ -521,7 +551,8 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
               : <>After this bill <strong>{customer}</strong> will owe ₹{paise(creditCheck.after)} — {creditCheck.usedPercent?.toFixed(0)}% of their ₹{paise(creditCheck.limit)} credit limit.</>}
           </div>
         )}
-        <div className="modal-footer">
+        {/* Stays in view while the lines above scroll, so the total and the button are never hunted for. */}
+        <div className="modal-footer modal-footer--sticky">
           <div className="text-muted text-sm" style={{ marginRight: 'auto', maxWidth: '340px' }}>
             {total <= 0
               ? (() => {
