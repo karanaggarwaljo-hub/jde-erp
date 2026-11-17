@@ -40,11 +40,11 @@ export type CostMatch = {
 
 /** Part numbers are written inconsistently by hand and by suppliers — "JCB-H49", "jcb h49" and
  *  "JCBH49" are one part. Punctuation and case carry no meaning in a code, so drop both. */
-const codeKey = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+export const codeKey = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /** Names are prose, so only case and spacing are safe to normalise. Stripping punctuation here
  *  would merge genuinely different parts. */
-const nameKey = (value: string): string => value.toLowerCase().replace(/\s+/g, ' ').trim();
+export const nameKey = (value: string): string => value.toLowerCase().replace(/\s+/g, ' ').trim();
 
 function indexBy(products: CostMatchProduct[], pick: (p: CostMatchProduct) => string | readonly string[], key: (v: string) => string) {
   const map = new Map<string, CostMatchProduct[]>();
@@ -62,42 +62,74 @@ function indexBy(products: CostMatchProduct[], pick: (p: CostMatchProduct) => st
   return map;
 }
 
-export function planCostUpdates(rows: CostUpdateRow[], products: CostMatchProduct[]): CostMatch[] {
+export type PartIdentity = { partNumber: string; oemNumber: string; name: string };
+
+export type PartLookup<P> =
+  /** Nothing in this company answers to any of the row's identifiers. */
+  | { found: 'none' }
+  /** Exactly one part does. */
+  | { found: 'one'; product: P; matchedBy: NonNullable<CostMatch['matchedBy']> }
+  /** More than one does, by the first identifier that matched anything. Never guessed between. */
+  | { found: 'many'; products: P[]; matchedBy: NonNullable<CostMatch['matchedBy']> };
+
+/**
+ * Builds the lookup that says which part a row of a file is about. One definition, shared by the
+ * cost importer below and by the stock-and-price upload (lib/stock-sheet.ts), so the two can never
+ * disagree about whether a row matched.
+ *
+ * Part number first, then OEM, then the part's other numbers, then name: a code identifies a part
+ * far more reliably than a description does, and two suppliers routinely describe the same part
+ * differently. The first identifier that finds anything decides; a later, weaker one is never used
+ * to break a tie.
+ */
+export function partFinder<P extends CostMatchProduct>(products: P[]): (row: PartIdentity) => PartLookup<P> {
   const byPart = indexBy(products, (p) => p.part_number, codeKey);
   const byOem = indexBy(products, (p) => p.oem_number, codeKey);
   const byOther = indexBy(products, (p) => p.other_numbers ?? [], codeKey);
   const byName = indexBy(products, (p) => p.name, nameKey);
 
-  // Part number first, then OEM, then name: a code identifies a part far more reliably than a
-  // description does, and two suppliers routinely describe the same part differently.
-  const attempts: Array<{ label: CostMatch['matchedBy']; value: (r: CostUpdateRow) => string; index: Map<string, CostMatchProduct[]> }> = [
+  const attempts: Array<{ label: NonNullable<CostMatch['matchedBy']>; value: (r: PartIdentity) => string; index: Map<string, CostMatchProduct[]> }> = [
     { label: 'part number', value: (r) => codeKey(r.partNumber), index: byPart },
     { label: 'OEM number', value: (r) => codeKey(r.oemNumber), index: byOem },
     { label: 'other number', value: (r) => codeKey(r.partNumber), index: byOther },
     { label: 'name', value: (r) => nameKey(r.name), index: byName },
   ];
 
-  const matches: CostMatch[] = rows.map((row) => {
+  return (row) => {
     for (const attempt of attempts) {
       const key = attempt.value(row);
       if (!key) continue;
-      const found = attempt.index.get(key);
+      const found = attempt.index.get(key) as P[] | undefined;
       if (!found || found.length === 0) continue;
-      if (found.length > 1) {
-        return {
-          row,
-          outcome: 'conflict',
-          matchedBy: attempt.label,
-          reason: `matches ${found.length} different parts by ${attempt.label} — left alone`,
-        };
-      }
-      const product = found[0];
+      return found.length === 1
+        ? { found: 'one', product: found[0], matchedBy: attempt.label }
+        : { found: 'many', products: found, matchedBy: attempt.label };
+    }
+    return { found: 'none' };
+  };
+}
+
+export function planCostUpdates(rows: CostUpdateRow[], products: CostMatchProduct[]): CostMatch[] {
+  const find = partFinder(products);
+
+  const matches: CostMatch[] = rows.map((row) => {
+    const lookup = find(row);
+    if (lookup.found === 'many') {
+      return {
+        row,
+        outcome: 'conflict',
+        matchedBy: lookup.matchedBy,
+        reason: `matches ${lookup.products.length} different parts by ${lookup.matchedBy} — left alone`,
+      };
+    }
+    if (lookup.found === 'one') {
+      const product = lookup.product;
       const same = Number(product.cost_price) === row.cost;
       return {
         row,
         outcome: same ? 'unchanged' : 'update',
         product,
-        matchedBy: attempt.label,
+        matchedBy: lookup.matchedBy,
         ...(same ? { reason: 'already this cost' } : {}),
       };
     }

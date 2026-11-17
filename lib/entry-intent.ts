@@ -8,11 +8,13 @@
  * so a refresh does not open the form a second time.
  */
 
-export type EntryKind = 'sale' | 'payment-in' | 'purchase' | 'supplier-payment' | 'expense';
+export type EntryKind = 'sale' | 'payment-in' | 'bill-fix' | 'purchase' | 'supplier-payment' | 'expense';
 
 const ROUTES: Record<EntryKind, { path: string; record: string }> = {
   sale: { path: '/sales', record: 'sale' },
   'payment-in': { path: '/sales', record: 'payment' },
+  // Goods came back, or a bill is being cancelled: Sales asks which bill, then what happened.
+  'bill-fix': { path: '/sales', record: 'return' },
   purchase: { path: '/purchases', record: 'purchase' },
   'supplier-payment': { path: '/suppliers', record: 'payment' },
   expense: { path: '/expenses', record: 'expense' },

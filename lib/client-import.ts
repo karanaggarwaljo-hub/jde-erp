@@ -252,6 +252,11 @@ export type ImportedProduct = {
   current_stock: number;
   min_stock: number;
   location: string;
+  /** Which of the four figures this row's own cells actually carried. A blank or unreadable cell
+   *  is stored as 0 above, which is right for a brand-new part but must never be read as "set this
+   *  to zero" on a part already stocked: only a figure marked here may overwrite one
+   *  (lib/stock-sheet.ts). Absent on rows built before this existed, which then update nothing. */
+  given?: { stock?: boolean; cost?: boolean; sale?: boolean; mrp?: boolean };
   /** The code a part carries in the ERP right now, read from the parts worksheet's Old label
    *  column. Used only to find which part a row is about, never written back as anything. Optional
    *  because only the worksheet has it; a supplier document or a hand-made sheet does not.
@@ -259,6 +264,15 @@ export type ImportedProduct = {
    *  already had a real number. The planner reads that difference, so keep the two distinct. */
   current_code?: string;
 };
+
+/** The part exactly as the products table stores it: the importer's own working notes (`given`,
+ *  `current_code`) are not columns, and the database refuses a row that carries either. */
+export function toNewPartRecord(product: ImportedProduct): Omit<ImportedProduct, 'given' | 'current_code'> {
+  const record = { ...product };
+  delete record.given;
+  delete record.current_code;
+  return record;
+}
 
 const PRODUCT_KEYS = {
   part_number: ['part number', 'part no', 'partno', 'p no', 'sku', 'code', 'item code', 'material code', 'material no', 'product code'],
@@ -281,6 +295,19 @@ const PRODUCT_KEYS = {
 } as const;
 
 export type InventoryImportResult = { products: ImportedProduct[]; guessedFields: string[] };
+
+/** Reads a figure out of a spreadsheet cell: 1250, "1250", "1,250.50", "₹ 1,250". Null for a blank
+ *  cell and for anything that is not a plain number of zero or more ("N/A", "call", "-3").
+ *
+ *  The difference between null and 0 is the point. A stock list legitimately says 0 for a part
+ *  that has run out, and a blank cell says nothing at all; reading both as 0 is what would let an
+ *  uploaded sheet with a few empty cells wipe out real stock counts. */
+export function readNumberCell(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw >= 0 ? raw : null;
+  const cleaned = String(raw ?? '').replace(/[₹,\s]/g, '').replace(/^rs\.?/i, '');
+  if (!cleaned || !/^\d+(\.\d+)?$/.test(cleaned)) return null;
+  return Number(cleaned);
+}
 
 export async function parseInventoryFile(file: File): Promise<InventoryImportResult> {
   const buffer = await file.arrayBuffer();
@@ -330,10 +357,10 @@ export async function parseInventoryFile(file: File): Promise<InventoryImportRes
   if (!headerKeys.cost_price && guessed.cost) guessedFields.push('cost price');
   if (!headerKeys.sale_price && guessed.sale) guessedFields.push('selling price');
 
-  const numberAt = (row: Record<string, unknown>, key: string | undefined) => {
-    if (!key) return 0;
-    return Number(row[key]) || 0;
-  };
+  // Tolerant of how money is written by hand ("1,250", "₹ 1250"), which a bare Number() read as
+  // nothing at all.
+  const cellAt = (row: Record<string, unknown>, key: string | undefined) => (key ? readNumberCell(row[key]) : null);
+  const numberAt = (row: Record<string, unknown>, key: string | undefined) => cellAt(row, key) ?? 0;
 
   const products: ImportedProduct[] = [];
   for (const row of rows) {
@@ -350,8 +377,10 @@ export async function parseInventoryFile(file: File): Promise<InventoryImportRes
     if (!costPrice && discountPercent && mrpValue) {
       costPrice = Math.round(mrpValue * (1 - discountPercent / 100) * 100) / 100;
     }
-    const salePrice = headerKeys.sale_price ? numberAt(row, headerKeys.sale_price) : numberAt(row, guessed.sale);
-    const currentStock = headerKeys.current_stock ? numberAt(row, headerKeys.current_stock) : numberAt(row, guessed.stock);
+    const saleKey = headerKeys.sale_price ?? guessed.sale;
+    const stockKey = headerKeys.current_stock ?? guessed.stock;
+    const salePrice = numberAt(row, saleKey);
+    const currentStock = numberAt(row, stockKey);
 
     products.push({
       part_number: partNumber,
@@ -367,6 +396,14 @@ export async function parseInventoryFile(file: File): Promise<InventoryImportRes
       current_stock: currentStock,
       min_stock: Number(get(row, PRODUCT_KEYS.min_stock)) || 0,
       location: get(row, PRODUCT_KEYS.location),
+      // A price of 0 is a price nobody wrote down; a stock of 0 is a real count, but only when the
+      // cell says so rather than being empty.
+      given: {
+        stock: cellAt(row, stockKey) !== null,
+        cost: costPrice > 0,
+        sale: salePrice > 0,
+        mrp: mrpValue > 0,
+      },
       current_code: headerKeys.current_code ? get(row, PRODUCT_KEYS.current_code) : undefined,
     });
   }
@@ -702,6 +739,12 @@ export function sheetFromScannedParts(items: ScannedPart[]): {
     current_stock: num(item.qty),
     min_stock: 0,
     location: '',
+    given: {
+      stock: typeof item.qty === 'number' && Number.isFinite(item.qty) && item.qty >= 0,
+      cost: num(item.cost_price) > 0,
+      sale: num(item.sale_price) > 0,
+      mrp: num(item.mrp) > 0,
+    },
   }));
 
   return { sheet, products };

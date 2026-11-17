@@ -917,6 +917,7 @@ input, textarea, select { font-family: inherit; }
 }
 
 .inventory-table-scroll thead th,
+.prices-table-scroll thead th,
 .catalog-table-scroll thead th {
   position: sticky;
   top: 0;
@@ -925,6 +926,124 @@ input, textarea, select { font-family: inherit; }
   /* A collapsed table border scrolls away under a sticky heading; an inset shadow stays with it. */
   border-bottom: 0;
   box-shadow: inset 0 -1px 0 var(--line-2);
+}
+
+/* ===================================================
+   Change prices & stock
+   One list of every part with three boxes each. The list scrolls inside the page rather than
+   the page itself scrolling, so the Save bar under it is always in view however many parts there are.
+   =================================================== */
+/* The page is exactly as tall as the window, and the list takes whatever height is left after the
+   title and the bulk tool, however tall those are. That is what keeps the Save bar on screen. */
+.prices-page { display: flex; flex-direction: column; height: calc(100vh - var(--chrome-height) - 48px); min-height: 540px; }
+.prices-page .page-header { margin-bottom: 16px; }
+.prices-list { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.prices-table-scroll { flex: 1; min-height: 200px; overflow: auto; }
+/* The four tabs stay on one line and scroll sideways if they must, rather than each wrapping. */
+.prices-list .tabs { max-width: 100%; overflow-x: auto; }
+.prices-list .tab { white-space: nowrap; }
+@media (max-width: 768px) {
+  .prices-page { height: auto; }
+  .prices-table-scroll { flex: none; max-height: 62vh; }
+  /* On a phone the three boxes do not fit beside the part's name. The name column stays put while
+     the boxes slide under the finger, so it is always clear whose price is being typed. */
+  .prices-table-scroll table { min-width: 520px !important; }
+  .prices-table-scroll th:first-child,
+  .prices-table-scroll td:first-child {
+    background: var(--surface);
+    box-shadow: inset -1px 0 0 var(--line);
+    left: 0;
+    max-width: 132px;
+    position: sticky;
+    z-index: 1;
+  }
+  .prices-table-scroll th:first-child { background: var(--panel); z-index: 3; }
+}
+.price-box { padding: 7px 10px; text-align: right; width: 108px; }
+/* A box holding a new value that has not been saved yet. */
+.price-box.is-changed { background: var(--amber-tint); border-color: var(--amber); font-weight: 600; }
+.price-box.is-bad { background: var(--rose-tint); border-color: var(--rose); }
+.price-was { color: var(--ink-3); display: block; font-size: 11.5px; margin-top: 2px; }
+.price-was.is-bad { color: var(--rose); }
+
+.save-bar {
+  align-items: center;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 12px 16px;
+}
+.save-bar.has-changes { background: var(--amber-tint); border-top-color: var(--amber-line); }
+.save-bar-text { font-size: 13.5px; }
+
+.bulk-prices > summary { align-items: center; cursor: pointer; display: flex; font-size: 14px; font-weight: 600; gap: 8px; }
+.bulk-prices-body { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.pay-how.bulk-prices-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 620px; }
+@media (max-width: 640px) {
+  .pay-how.bulk-prices-modes { grid-template-columns: 1fr; }
+  .price-box { width: 88px; }
+}
+
+/* Uploading a stock or price list: the two numbered steps, and the summary of what a file does. */
+.upload-step { align-items: flex-start; display: flex; gap: 12px; }
+.upload-step-number {
+  align-items: center;
+  background: var(--amber-tint);
+  border-radius: 50%;
+  color: var(--amber-3);
+  display: flex;
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 700;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+.upload-drop {
+  align-items: center;
+  background: var(--surface-2);
+  border: 1.5px dashed var(--line-3);
+  border-radius: var(--radius-lg);
+  color: var(--ink-2);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 20px 16px;
+  text-align: center;
+}
+.upload-drop:hover { background: var(--amber-tint); border-color: var(--amber); }
+.upload-drop.is-busy { cursor: progress; opacity: 0.7; }
+.upload-drop span { font-size: 15px; font-weight: 600; }
+.upload-drop small { color: var(--ink-3); font-size: 12.5px; }
+
+.sheet-summary { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+.sheet-summary-figure {
+  background: var(--em-tint);
+  border-radius: var(--radius-md);
+  color: var(--em);
+  display: flex;
+  flex-direction: column;
+  padding: 10px 14px;
+}
+.sheet-summary-figure strong { font-size: 24px; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.sheet-summary-figure span { font-size: 12.5px; font-weight: 600; }
+.sheet-summary-figure.is-quiet { background: var(--panel); color: var(--ink-3); }
+.sheet-summary-figure.is-warn { background: var(--amber-tint); color: var(--amber-3); }
+.sheet-change {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  font-size: 12.5px;
+  gap: 5px;
+  padding: 2px 8px;
+  white-space: nowrap;
 }
 
 /* ===================================================
@@ -2356,6 +2475,98 @@ button.part-photo.is-empty:hover svg { opacity: 0.85; }
 .row-menu-item.danger, .row-menu-item.danger > svg { color: var(--rose); }
 .row-menu-item:disabled { cursor: not-allowed; opacity: .55; }
 .row-menu-item small { color: var(--ink-3); display: block; font-size: 12px; font-weight: 400; margin-top: 2px; }
+
+/* ===================================================
+   Return or cancel a bill (components/sales/FixBillModal.tsx, BillPickerModal.tsx)
+   =================================================== */
+/* "What happened?": one big button per answer, each saying what it does. */
+.fix-choice {
+  align-items: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 14px;
+  padding: 16px;
+  text-align: left;
+  width: 100%;
+}
+.fix-choice:hover:not(:disabled) { background: var(--amber-tint); border-color: var(--amber); }
+.fix-choice:focus-visible { box-shadow: var(--ring); outline: none; }
+.fix-choice:disabled { background: var(--panel); cursor: not-allowed; }
+.fix-choice:disabled .fix-choice-icon, .fix-choice:disabled strong { opacity: .55; }
+.fix-choice-icon { align-items: center; background: var(--amber-tint); border-radius: 12px; color: var(--amber-2); display: flex; flex-shrink: 0; height: 44px; justify-content: center; width: 44px; }
+.fix-choice.danger .fix-choice-icon { background: var(--rose-tint); color: var(--rose); }
+.fix-choice-text { display: flex; flex-direction: column; gap: 3px; }
+.fix-choice-text strong { font-size: 16px; font-weight: 700; }
+.fix-choice-text small { color: var(--ink-3); font-size: 13px; line-height: 1.4; }
+.fix-choice:disabled .fix-choice-text small { color: var(--amber-3); }
+
+/* The bill form: "Has the customer paid?" as three buttons, and the settings most bills never
+   touch folded under one heading. */
+.pay-how.bill-paid-choices { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.bill-more > summary { cursor: pointer; font-weight: 600; }
+@media (max-width: 640px) { .pay-how.bill-paid-choices { grid-template-columns: 1fr; } }
+
+/* A window whose button must stay in view however long its contents run. */
+.modal-footer--sticky { bottom: 0; position: sticky; z-index: 2; }
+
+/* A reason in one tap. */
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 100px;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 7px 14px;
+}
+.chip:hover:not(:disabled) { background: var(--surface-2); border-color: var(--line-3); }
+.chip.active { background: var(--amber-tint); border-color: var(--amber); color: var(--amber-3); font-weight: 600; }
+.chip:focus-visible { box-shadow: var(--ring); outline: none; }
+.chip:disabled { cursor: not-allowed; opacity: .6; }
+
+/* What is about to happen, as a few plain lines. */
+.fix-summary { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-md); padding: 4px 14px; }
+.fix-summary-line { align-items: baseline; border-bottom: 1px dashed var(--line-2); display: flex; font-size: 13.5px; font-variant-numeric: tabular-nums; gap: 16px; justify-content: space-between; padding: 9px 0; }
+.fix-summary-line:last-child { border-bottom: 0; }
+.fix-summary-line > span:first-child { color: var(--ink-2); }
+.fix-summary-line.is-main { font-size: 15px; }
+.fix-summary-line.is-main strong { font-size: 18px; }
+.fix-summary-line.is-warn, .fix-summary-line.is-warn > span:first-child { color: var(--amber-3); font-weight: 600; }
+
+/* A link written as part of a sentence. */
+.link-button { background: none; border: 0; color: var(--amber-2); cursor: pointer; font: inherit; font-weight: 600; padding: 0; text-decoration: underline; }
+.link-button:hover { color: var(--amber-3); }
+
+/* "Which bill?": one wide button per bill. */
+.bill-pick-list { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
+.bill-pick {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 14px;
+  text-align: left;
+  width: 100%;
+}
+.bill-pick:hover { background: var(--amber-tint); border-color: var(--amber); }
+.bill-pick:focus-visible { box-shadow: var(--ring); outline: none; }
+.bill-pick-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.bill-pick small { color: var(--ink-3); font-size: 12.5px; }
+.bill-pick-money { align-items: flex-end; display: flex; flex-direction: column; flex-shrink: 0; font-variant-numeric: tabular-nums; gap: 2px; }
 
 /* ===================================================
    Paying a supplier (components/money/PaySupplierDialog.tsx)

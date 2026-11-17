@@ -75,9 +75,11 @@ export type PartDraftSummary = {
   warnings: Array<{ text: string; tone: string }>;
 };
 
-/** The three jobs one imported file can be put to. Which is proposed comes from the file's own
- *  content, but it always stays the owner's choice. */
-export type ImportMode = 'costs' | 'new' | 'details';
+/** What one imported file can be put to. `update` is the everyday one and the one proposed
+ *  whenever the file carries any stock or price: it updates the parts already here and adds the
+ *  rest (lib/stock-sheet.ts). The other three are the narrower jobs the importer started with,
+ *  still there behind "Do something else with this file". */
+export type ImportMode = 'update' | 'costs' | 'new' | 'details';
 
 /** A file the owner has chosen to import, read once and held while they decide what it should do.
  *  Both readings are taken up front so the dialog can offer either job — and switch between them —

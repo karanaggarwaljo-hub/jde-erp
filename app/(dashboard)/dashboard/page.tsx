@@ -4,7 +4,8 @@
  * Home: the first screen after signing in.
  *
  * The owner found the ERP cluttered and asked for it to be easy enough for a school child to use.
- * Home now starts with one big button for each everyday job. Each button opens its form straight
+ * Home starts with one big button for each everyday job, nine in all since returning goods and
+ * changing prices joined them (November 2026: both had been hard to find). Each button opens its form straight
  * away on the screen that owns it, and that screen comes back here once the entry is saved. Below
  * the buttons are the four figures that matter at the counter, then what needs attention, then the
  * activity calendar the owner asked to keep big.
@@ -27,6 +28,9 @@ import {
   AlertTriangle,
   Clock,
   ArrowRight,
+  Tags,
+  Undo2,
+  Upload,
   type LucideIcon,
 } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -45,15 +49,20 @@ type Supplier = { id: string; name: string; balance: number };
 type Invoice = { id: string; customer: string; date: string; total: number; paid: number; settlement_write_off: number; status: string };
 type Dated = { id: string; date: string };
 
-/** In the order a counter day usually runs: selling and taking money first, then buying and paying.
- *  "in" and "out" colour the button the same way the Day Book colours money in and money out. */
+/** Three rows of three, in the order a counter day usually runs: selling and taking money first,
+ *  then buying and paying, then looking after stock and prices. "in" and "out" colour the button
+ *  the same way the Day Book colours money in and money out. */
 const HOME_ACTIONS: Array<{ label: string; hint: string; href: string; icon: LucideIcon; tone: 'in' | 'out' | 'find' }> = [
   { label: 'Make a bill', hint: 'Sell parts to a customer', href: entryLink('sale', 'home'), icon: ShoppingCart, tone: 'in' },
   { label: 'Money received', hint: 'A customer paid you', href: entryLink('payment-in', 'home'), icon: HandCoins, tone: 'in' },
+  { label: 'Return or cancel a bill', hint: 'Goods came back, or a bill was wrong', href: entryLink('bill-fix', 'home'), icon: Undo2, tone: 'in' },
   { label: 'Buy stock', hint: 'Parts came in from a supplier', href: entryLink('purchase', 'home'), icon: Truck, tone: 'out' },
   { label: 'Pay a supplier', hint: 'You paid for stock', href: entryLink('supplier-payment', 'home'), icon: Banknote, tone: 'out' },
   { label: 'Add an expense', hint: 'Rent, salary, freight', href: entryLink('expense', 'home'), icon: Wallet, tone: 'out' },
   { label: 'Find a part', hint: 'Check its stock and price', href: '/inventory?find=1', icon: Search, tone: 'find' },
+  // Prices move every week: both ways of changing many of them at once are one press from Home.
+  { label: 'Change prices', hint: 'Prices and stock of many parts', href: '/inventory/prices', icon: Tags, tone: 'find' },
+  { label: 'Upload a stock list', hint: 'Update stock and prices from a file', href: '/inventory?upload=1', icon: Upload, tone: 'find' },
 ];
 
 /** The shop's day (India time), not the UTC one, which is a day behind until 5:30 am. */
