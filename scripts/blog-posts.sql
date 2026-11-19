@@ -4,7 +4,8 @@
 -- only the public columns below; drafts and the "check before publishing" notes never leave the ERP.
 --
 -- Additive: one new table, one trigger function. Nothing existing is altered. Service role only,
--- like every jde_ table.
+-- like every jde_ table. Rehearsed in rolled-back transactions (publish stamps the date once, a
+-- repeated or malformed web address is refused); applied 2026-11-19 as migration blog_posts.
 
 create table if not exists public.jde_blog_posts (
   id text primary key default gen_random_uuid()::text,
@@ -49,8 +50,9 @@ begin
   return new;
 end $function$;
 
-drop trigger if exists jde_blog_posts_stamp on public.jde_blog_posts;
-create trigger jde_blog_posts_stamp before insert or update on public.jde_blog_posts
+-- "create or replace" rather than drop-then-create: the script stays safe to run twice, with no
+-- DROP statement in it at all.
+create or replace trigger jde_blog_posts_stamp before insert or update on public.jde_blog_posts
   for each row execute function public.jde_blog_posts_stamp();
 
 alter table public.jde_blog_posts enable row level security;

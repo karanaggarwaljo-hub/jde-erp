@@ -36,9 +36,9 @@ rock breakers and excavators. It is under **More → Blog**.
   already offers your catalog. Showing them on jd-enterprise.com needs a small page added to that
   website's own code.
 
-**Before it can be used:** the blog needs one new table in the database (`scripts/blog-posts.sql`).
-It adds a table and changes nothing that exists. Until it is added, the Blog screen says the posts
-could not be loaded and does not let you write.
+The blog keeps its posts in one new table in the database (`scripts/blog-posts.sql`), added on
+19 November with your go-ahead. It changed nothing that already existed. If posts ever cannot be
+loaded, the Blog screen says so and does not let you write, rather than looking empty.
 
 ## 2026-11-15 — Prices, stock and bills made simple
 
