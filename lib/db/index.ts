@@ -900,6 +900,41 @@ async function withPartNumbers(companyId: string, rows: Array<Record<string, unk
   return rows.map(({ erp_product_id: productId, ...row }) => ({ ...row, other_numbers: numbers.get(String(productId ?? '')) ?? [] }));
 }
 
+/** What anyone on the internet may see of a blog post. Drafts, the owner's "check before
+ *  publishing" notes, the topic and which AI wrote it never leave the ERP. */
+const PUBLIC_BLOG_LIST_COLUMNS = 'slug, title, summary, machine, tags, published_at, updated_at';
+const PUBLIC_BLOG_POST_COLUMNS = `${PUBLIC_BLOG_LIST_COLUMNS}, body, faq`;
+
+/** Server-only: every published blog post of the storefront company, newest first, without the
+ *  article text. Scoped like listPublishedCatalogProducts: the storefront company only. */
+export async function listPublishedBlogPosts(): Promise<Array<Record<string, unknown>>> {
+  const companyId = await getStorefrontCompanyId();
+  if (!companyId) return [];
+  const { data, error } = await getClient()
+    .from(supaTable('blog_posts'))
+    .select(PUBLIC_BLOG_LIST_COLUMNS)
+    .eq('company_id', companyId)
+    .eq('status', 'published')
+    .order('published_at', { ascending: false });
+  if (error) throw error;
+  return (data as Array<Record<string, unknown>>) ?? [];
+}
+
+/** Server-only: one published post of the storefront company by its web address, with its text. */
+export async function getPublishedBlogPost(slug: string): Promise<Record<string, unknown> | undefined> {
+  const companyId = await getStorefrontCompanyId();
+  if (!companyId || !slug) return undefined;
+  const { data, error } = await getClient()
+    .from(supaTable('blog_posts'))
+    .select(PUBLIC_BLOG_POST_COLUMNS)
+    .eq('company_id', companyId)
+    .eq('status', 'published')
+    .eq('slug', slug)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Record<string, unknown> | null) ?? undefined;
+}
+
 /** Server-only: a single published catalog row, safe columns only, plus company_id — the detail
  *  page (a Server Component) uses company_id to look up that company's quote-request contact
  *  info via getCompanyPublicContact, but never renders the id itself into the page. Scoped to the

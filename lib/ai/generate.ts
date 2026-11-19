@@ -40,6 +40,7 @@ const DEFAULT_FAST_ORDER = 'groq,cerebras,gemini';
  * after a few seconds and usually answers first. The long budget only decides whether a lone
  * surviving provider is allowed to finish, which is exactly when we want it to. */
 const timeoutMs = (request: AiJsonRequest): number => {
+  if (typeof request.timeoutMs === 'number' && Number.isFinite(request.timeoutMs) && request.timeoutMs > 0) return request.timeoutMs;
   const configured = Number(process.env.AI_TIMEOUT_MS);
   if (Number.isFinite(configured) && configured > 0) return configured;
   return request.attachments?.length ? 45_000 : 25_000;

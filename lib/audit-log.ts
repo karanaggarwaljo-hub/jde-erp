@@ -95,7 +95,7 @@ export type AuditRow = {
  *  never to an empty string, which would read as though something anonymous had happened. */
 export function describeRow(table: string, row: Record<string, unknown>): string {
   const text = (key: string) => (typeof row[key] === 'string' && row[key] ? String(row[key]) : '');
-  const name = text('name') || text('email') || text('id') || 'a record';
+  const name = text('name') || text('title') || text('email') || text('id') || 'a record';
   const noun: Record<string, string> = {
     products: 'the part',
     customers: 'the customer',
@@ -104,6 +104,7 @@ export function describeRow(table: string, row: Record<string, unknown>): string
     companies: 'the company',
     catalog_products: 'the catalogue listing',
     catalog_leads: 'the website enquiry from',
+    blog_posts: 'the blog post',
   };
   const partNumber = text('part_number');
   const label = table === 'products' && partNumber ? `${partNumber} ${name}` : name;
