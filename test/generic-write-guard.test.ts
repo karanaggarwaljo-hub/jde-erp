@@ -21,6 +21,8 @@ const MASTER_DATA: TableName[] = [
   'companies', 'products', 'customers', 'suppliers', 'users', 'catalog_products', 'catalog_leads',
   // A repair job's own details. Its parts are on its draft bill, written through Sales.
   'job_cards',
+  // Website articles: copy, like a catalogue listing.
+  'blog_posts',
 ];
 
 for (const table of TRANSACTION_TABLES) {

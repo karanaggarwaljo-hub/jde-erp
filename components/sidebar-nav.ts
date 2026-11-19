@@ -16,6 +16,7 @@ import {
   Users,
   Wallet,
   FolderOpen,
+  Newspaper,
   Wrench,
 } from 'lucide-react';
 
@@ -45,7 +46,7 @@ export function isCurrentScreen(pathname: string | null, href: string): boolean 
  * menu used to have four headings and a Transactions row that had to be opened to reach Sales,
  * Purchases or Expenses. Now it is one short list of plain names with nothing to open, and only
  * the screens used now and then (Job Cards, Bills & Invoices, Cheques, What to Order, Log Book,
- * Website Catalog) wait together under More. More opens by itself whenever one of them is the
+ * Website Catalog, Blog) wait together under More. More opens by itself whenever one of them is the
  * screen you are on.
  *
  * Inventory is called Stock and Stock Planning is called What to Order, the words used at the
@@ -76,6 +77,8 @@ export const navItems: NavEntry[] = [
       { name: 'What to Order', href: '/stock-planning', icon: ClipboardList },
       { name: 'Log Book', href: '/logbook', icon: ScrollText },
       { name: 'Website Catalog', href: '/catalog-admin', icon: Globe },
+      // Articles for the website, drafted by the AI and published by the owner (lib/blog.ts).
+      { name: 'Blog', href: '/blog-admin', icon: Newspaper },
     ],
   },
 ];

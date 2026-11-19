@@ -21,6 +21,7 @@ An ERP web app for an auto spare parts trading business: inventory, sales, purch
 | Customers / Suppliers | `/customers`, `/suppliers` | Directories with credit limits, GSTIN, and outstanding balances. |
 | Expenses | `/expenses` | Operational expense log by category. |
 | Reports | `/reports` | Profit & Loss, profit by part, sales, stock value, GST, unpaid bills, and AI Advice (AI business insights, the parts holding the most money, stock value by category). `/analytics` redirects to AI Advice. |
+| Blog | `/blog-admin` (public: `/blog`) | Articles for the website about backhoe loaders, rock breakers and excavators. The AI writes a draft from a topic bank; the owner checks and publishes it. See "Blog" below. |
 | Settings | `/settings` | **Owner only.** Company management (create/switch/delete companies — each company's data is fully isolated), inviting/managing user roles, and local backup snapshots. |
 
 ## Multi-Company Data Isolation
@@ -300,6 +301,37 @@ with one that asks what happened. `lib/bill-fix.ts` holds what it decides with:
 
 What is saved is unchanged: the same three routes, each one database transaction. A reason is still
 required by the server for a return and a cancellation; the window offers the usual ones as one tap.
+
+### Blog
+
+More → Blog (`app/(dashboard)/blog-admin`) writes articles for the website with the AI. Everything
+it decides is in `lib/blog.ts`, pure and tested: the topic bank (`TOPICS`, by machine, with
+coverage), web addresses (`slugify`, `uniqueSlug`), what is kept of the AI's answer (`cleanDraft`),
+and the article format.
+
+- **Writing.** `/api/ai-blog-draft` calls `generateJson` with a system prompt that forbids
+  model-specific figures, invented claims, dealer affiliation and any contact details, and asks for
+  `fact_checks`: what the owner should verify. Nothing is saved there; the screen saves the answer as
+  a draft through the generic table route, so every edit and publish is in the Log Book. A long
+  article gets a longer per-provider budget (`timeoutMs` on the request).
+- **Photo prompts.** The draft also carries `image_prompts` (a cover photo and two or three inline
+  photos: where each goes, a prompt for an AI image tool, alt text), asked for with the schema in
+  `lib/blog-photo-prompts.ts`. `cleanImagePrompts` appends the no-logos-no-writing rule to every
+  prompt whatever the model wrote. `/api/ai-blog-photo-prompts` makes a fresh set from the article
+  as it stands in the editor. Stored in the `image_prompts` column (`scripts/blog-photo-prompts.sql`)
+  and never selected by the public reads.
+- **Format.** Articles are stored as a small Markdown subset (`##`, `###`, lists, `>` notes, bold,
+  italic), read by `parseBody` into blocks. `components/blog/BlogBody.tsx` draws them as plain React
+  elements and `bodyToHtml` builds the same HTML, escaped, for the website feed. Nothing typed is
+  ever inserted as HTML; `test/blog.test.ts` checks both with hostile input.
+- **Publishing.** `scripts/blog-posts.sql` holds the table. A trigger keeps `updated_at` and stamps
+  `published_at` on the first publish. Public reads (`listPublishedBlogPosts`,
+  `getPublishedBlogPost`) select only public columns of the storefront company's published posts;
+  drafts and `fact_checks` never leave the ERP.
+- **Public surface.** `/blog` and `/blog/<slug>` (server-rendered, with BlogPosting and FAQPage
+  structured data), `/api/public/blog` (same CORS allowlist as the catalogue feed), the sitemap and
+  robots.txt. `proxy.ts` opens `/blog` and `/api/public/blog` only; `/blog-admin` and the AI route
+  stay behind the login, which `test/proxy-service-auth.test.ts` pins.
 
 ### Sitemap and robots.txt
 

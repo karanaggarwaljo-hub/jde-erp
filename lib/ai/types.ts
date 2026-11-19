@@ -14,6 +14,9 @@ export type AiJsonRequest = {
   attachments?: AiAttachment[];
   /** Defaults to 'quality'. See AiPriority below. */
   priority?: AiPriority;
+  /** How long one provider may take before it is abandoned. Leave unset for the usual budget; a
+   *  long piece of writing (a blog article) genuinely needs more than a one-line answer. */
+  timeoutMs?: number;
 };
 
 export type AiProviderResult = { text: string; model: string };

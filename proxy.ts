@@ -17,8 +17,11 @@ export const config = {
 // hitting either gets redirected to /login like any other page — which is what actually produced
 // Search Console's "Sitemap is HTML" error, not merely the routes being absent before app/sitemap.ts
 // and app/robots.ts existed.
-const PUBLIC_EXACT = new Set(['/login', '/forgot-password', '/auth/callback', '/api/auth/login', '/api/auth/logout', '/api/auth/forgot-password', '/api/catalog-rfq', '/api/catalog-event', '/api/public/catalog', '/sitemap.xml', '/robots.txt']);
-const PUBLIC_PREFIXES = ['/catalog'];
+// The blog (app/blog, app/api/public/blog) is public for the same reason as the catalogue: it is
+// the company's website. Its admin screen is /blog-admin, which the '/blog' prefix does NOT match
+// (a prefix only matches itself or a path beneath it), so it stays behind the login.
+const PUBLIC_EXACT = new Set(['/login', '/forgot-password', '/auth/callback', '/api/auth/login', '/api/auth/logout', '/api/auth/forgot-password', '/api/catalog-rfq', '/api/catalog-event', '/api/public/catalog', '/api/public/blog', '/sitemap.xml', '/robots.txt']);
+const PUBLIC_PREFIXES = ['/catalog', '/blog'];
 
 
 // Reachable with a valid Supabase session even when there's no active jde_users row yet — the
@@ -40,6 +43,11 @@ const SERVICE_AUTH_PREFIXES = ['/api/integration/v1', '/api/internal/adaptive-pl
 function matchesAny(pathname: string, exact: Set<string>, prefixes: string[] = []): boolean {
   if (exact.has(pathname)) return true;
   return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+/** Whether anyone may open this path without signing in. */
+export function isPublicPath(pathname: string): boolean {
+  return matchesAny(pathname, PUBLIC_EXACT, PUBLIC_PREFIXES);
 }
 
 export function isServiceAuthenticatedPath(pathname: string): boolean {
@@ -69,7 +77,7 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
 
-  if (matchesAny(pathname, PUBLIC_EXACT, PUBLIC_PREFIXES)) {
+  if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 

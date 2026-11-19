@@ -49,6 +49,9 @@ export const TABLES: Record<string, TableSchema> = {
   // Machines in for repair (lib/job-cards.ts). Plain details only: the parts a job takes live on its
   // draft bill, which Sales writes through its own route, so a job card edit moves no stock or money.
   job_cards: { primaryKey: 'id', companyScoped: true, writable: true },
+  // Articles for the company website (scripts/blog-posts.sql, lib/blog.ts). Website copy, like a
+  // catalogue listing: an edit or a publish moves no stock and no money.
+  blog_posts: { primaryKey: 'id', companyScoped: true, writable: true },
 };
 
 /**
