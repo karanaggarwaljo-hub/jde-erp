@@ -69,6 +69,7 @@ export default function BlogAdminPage() {
       faq: draft.faq,
       tags: draft.tags,
       fact_checks: draft.fact_checks,
+      image_prompts: draft.image_prompts,
       status: 'draft',
       ai_model: draft.model,
     });

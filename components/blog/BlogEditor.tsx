@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, ArrowLeft, Eye, Globe, Plus, Trash2, X } from 'lucide-react';
 import BlogBody from '@/components/blog/BlogBody';
+import BlogPhotoPrompts from '@/components/blog/BlogPhotoPrompts';
 import {
   MACHINES,
   SUMMARY_SHOWN,
@@ -26,6 +27,7 @@ import {
   splitTags,
   wordCount,
   type FaqItem,
+  type ImagePrompt,
   type Machine,
 } from '@/lib/blog';
 
@@ -42,6 +44,8 @@ export type BlogPost = {
   faq: FaqItem[] | null;
   tags: string[] | null;
   fact_checks: string[] | null;
+  /** The photos the post needs, as prompts for an AI image tool. Never published. */
+  image_prompts: ImagePrompt[] | null;
   status: 'draft' | 'published';
   ai_model: string;
   created_at: string;
@@ -49,7 +53,7 @@ export type BlogPost = {
   published_at: string | null;
 };
 
-export type BlogPatch = Partial<Pick<BlogPost, 'title' | 'slug' | 'summary' | 'machine' | 'body' | 'faq' | 'tags' | 'status'>>;
+export type BlogPatch = Partial<Pick<BlogPost, 'title' | 'slug' | 'summary' | 'machine' | 'body' | 'faq' | 'tags' | 'status' | 'image_prompts'>>;
 
 type Form = { title: string; slug: string; summary: string; machine: Machine; tags: string; body: string; faq: FaqItem[] };
 
@@ -281,6 +285,13 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
         </div>
 
         <aside className="flex flex-col gap-4">
+          <BlogPhotoPrompts
+            companyId={post.company_id}
+            prompts={post.image_prompts ?? []}
+            article={{ title: form.title, body: form.body, machine: form.machine }}
+            disabled={Boolean(busy)}
+            onReplace={async (prompts) => { await onSave({ image_prompts: prompts }); }}
+          />
           <div className="card blog-checks">
             <strong className="flex items-center gap-2"><AlertTriangle size={16} aria-hidden="true" /> Check before publishing</strong>
             <p className="text-sm">The AI writes well but can get details wrong for a particular machine. Read the article once.{checks.length > 0 ? ' It was not sure about these:' : ''}</p>

@@ -314,6 +314,12 @@ and the article format.
   `fact_checks`: what the owner should verify. Nothing is saved there; the screen saves the answer as
   a draft through the generic table route, so every edit and publish is in the Log Book. A long
   article gets a longer per-provider budget (`timeoutMs` on the request).
+- **Photo prompts.** The draft also carries `image_prompts` (a cover photo and two or three inline
+  photos: where each goes, a prompt for an AI image tool, alt text), asked for with the schema in
+  `lib/blog-photo-prompts.ts`. `cleanImagePrompts` appends the no-logos-no-writing rule to every
+  prompt whatever the model wrote. `/api/ai-blog-photo-prompts` makes a fresh set from the article
+  as it stands in the editor. Stored in the `image_prompts` column (`scripts/blog-photo-prompts.sql`)
+  and never selected by the public reads.
 - **Format.** Articles are stored as a small Markdown subset (`##`, `###`, lists, `>` notes, bold,
   italic), read by `parseBody` into blocks. `components/blog/BlogBody.tsx` draws them as plain React
   elements and `bodyToHtml` builds the same HTML, escaped, for the website feed. Nothing typed is

@@ -2,7 +2,7 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
-## 2026-11-19 — Blog: the AI writes articles about backhoe loaders, rock breakers and excavators
+## 2026-11-19 — Blog: the AI writes articles (and photo prompts) about backhoe loaders, rock breakers and excavators
 
 You asked for something that writes new blog posts on all the topics around JCB backhoe loaders,
 rock breakers and excavators. It is under **More → Blog**.
@@ -29,6 +29,18 @@ rock breakers and excavators. It is under **More → Blog**.
   claim you are an authorised dealer. Your phone number and a link to your parts catalog are added
   under every post by the ERP itself, from your company details.
 
+**Photos for each post**
+- With every draft the AI also describes the photos the post needs: one **cover photo** and two or
+  three photos for inside the article, each saying which section it goes after.
+- Each one is a ready prompt for an AI image tool such as Gemini or ChatGPT. Press **Copy prompt**,
+  paste it into the tool, and it makes that photo. **Copy all** copies every prompt at once.
+- Every prompt asks for a realistic photo of a plain yellow machine with **no logos, brand names or
+  writing**, so the photos never show a maker's badge you don't own.
+- Each photo also comes with **alt text**: one line saying what it shows, for Google. Keep it with
+  the photo when you put it on the website.
+- Changed the article? Press **Make new photo prompts** to get a fresh set that matches it.
+- The photo prompts are only for you. They never appear on the website.
+
 **On the website**
 - Published posts appear at **/blog**, with a list of all guides and a page for each, and are added
   to the sitemap so Google finds them. Each page has a "Need parts for your machine?" box.
@@ -37,7 +49,8 @@ rock breakers and excavators. It is under **More → Blog**.
   website's own code.
 
 The blog keeps its posts in one new table in the database (`scripts/blog-posts.sql`), added on
-19 November with your go-ahead. It changed nothing that already existed. If posts ever cannot be
+19 November with your go-ahead, plus one column for the photo prompts
+(`scripts/blog-photo-prompts.sql`). Neither changed anything that already existed. If posts ever cannot be
 loaded, the Blog screen says so and does not let you write, rather than looking empty.
 
 ## 2026-11-15 — Prices, stock and bills made simple

@@ -1,6 +1,7 @@
 import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { cleanDraft, isMachine, lengthWords, machineLabel, topicById } from '@/lib/blog';
+import { IMAGE_PROMPTS_SCHEMA, PHOTO_GUIDANCE } from '@/lib/blog-photo-prompts';
 
 export const dynamic = 'force-dynamic';
 // A full article takes a provider longer than a one-line answer. The function is allowed to run
@@ -52,8 +53,9 @@ const BLOG_JSON_SCHEMA = {
       description:
         'For the shop owner, NOT published: each statement in the article that should be checked before publishing, because it is specific to particular machine models or you are not fully sure of it. Quote or name the statement and say what to check. Empty only if the article makes no such statement.',
     },
+    image_prompts: IMAGE_PROMPTS_SCHEMA,
   },
-  required: ['title', 'summary', 'body', 'faq', 'tags', 'fact_checks'],
+  required: ['title', 'summary', 'body', 'faq', 'tags', 'fact_checks', 'image_prompts'],
 };
 
 const SYSTEM_PROMPT = [
@@ -74,6 +76,8 @@ const SYSTEM_PROMPT = [
   '  Jobs that need special equipment or training (such as charging nitrogen or setting relief valves) should be described as jobs for a trained mechanic, without step-by-step instructions.',
   '',
   'If the shop owner gives notes, use them: they are true facts about the business or the topic and take priority over your own general knowledge.',
+  '',
+  PHOTO_GUIDANCE,
 ].join('\n');
 
 const text = (value: unknown, max: number) => (typeof value === 'string' ? value.trim().slice(0, max) : '');

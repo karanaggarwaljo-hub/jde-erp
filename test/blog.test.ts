@@ -8,9 +8,13 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import BlogBody from '../components/blog/BlogBody';
+import BlogPhotoPrompts from '../components/blog/BlogPhotoPrompts';
 import {
   MACHINES,
+  PHOTO_PROMPT_RULES,
   bodyToHtml,
+  cleanImagePrompts,
+  imagePromptsText,
   TOPICS,
   cleanDraft,
   isValidSlug,
@@ -87,7 +91,7 @@ test('what the AI sends back is trimmed, capped and never missing a field', () =
   assert.deepEqual(draft.tags, ['rock breaker', 'jcb']);
   assert.deepEqual(draft.fact_checks, ['Check the nitrogen figure']);
 
-  assert.deepEqual(cleanDraft(null), { title: '', summary: '', body: '', faq: [], tags: [], fact_checks: [] });
+  assert.deepEqual(cleanDraft(null), { title: '', summary: '', body: '', faq: [], tags: [], fact_checks: [], image_prompts: [] });
   assert.equal(cleanDraft({ title: 'x'.repeat(500) }).title.length, 110);
 });
 
@@ -173,4 +177,57 @@ test('the website feed gets the same HTML the ERP pages draw, every word escaped
   const hostile = bodyToHtml('<script>alert(1)</script>\n- <img src=x onerror=alert(1)>');
   assert.doesNotMatch(hostile, /<script|<img/);
   assert.match(hostile, /&lt;script&gt;/);
+});
+
+test('photo prompts are kept tidy, and every one forbids logos and writing whatever the AI said', () => {
+  const prompts = cleanImagePrompts([
+    { place: 'Cover photo', prompt: '  A realistic photograph of a yellow backhoe loader with a rock breaker at a quarry.  ', alt: 'Backhoe loader breaking rock at a quarry' },
+    { place: '', prompt: 'Close-up of a worn breaker chisel next to a new one on a workshop bench, 4:3 format.', alt: '' },
+    { place: 'After the section: Greasing', prompt: 'Grease gun on the breaker. No logos, no brand names and no writing.', alt: 'Greasing a breaker' },
+    { place: 'Empty', prompt: '   ', alt: 'x' },
+    'junk',
+  ]);
+  assert.equal(prompts.length, 3);
+  assert.equal(prompts[0].prompt, `A realistic photograph of a yellow backhoe loader with a rock breaker at a quarry. ${PHOTO_PROMPT_RULES}`);
+  // A missing place gets a plain one; the trailing full stop is not doubled.
+  assert.equal(prompts[1].place, 'Photo 2');
+  assert.ok(prompts[1].prompt.endsWith(`4:3 format. ${PHOTO_PROMPT_RULES}`));
+  // One that already says it is not told twice.
+  assert.equal(prompts[2].prompt.match(/no logos/gi)?.length, 1);
+  for (const item of prompts) assert.match(item.prompt, /no logos/i);
+
+  assert.equal(cleanImagePrompts(Array.from({ length: 9 }, () => ({ prompt: 'p' }))).length, 5);
+  assert.deepEqual(cleanImagePrompts(undefined), []);
+  assert.equal(cleanDraft({ image_prompts: [{ prompt: 'A photo' }] }).image_prompts[0].place, 'Cover photo');
+});
+
+test('all photo prompts copy as one numbered block', () => {
+  const block = imagePromptsText([
+    { place: 'Cover photo', prompt: 'First.', alt: 'Alt one' },
+    { place: 'After the section: Bushes', prompt: 'Second.', alt: '' },
+  ]);
+  assert.equal(block, '1. Cover photo\nFirst.\nAlt text: Alt one\n\n2. After the section: Bushes\nSecond.');
+});
+
+test('the photos box shows each prompt with where it goes and a copy button, and offers to make them when there are none', () => {
+  const props = { companyId: 'c1', article: { title: 'T', body: 'B', machine: 'breaker' }, disabled: false, onReplace: async () => {} };
+  const markup = renderToStaticMarkup(createElement(BlogPhotoPrompts, {
+    ...props,
+    prompts: [
+      { place: 'Cover photo', prompt: 'A yellow backhoe loader at a quarry. No logos.', alt: 'Backhoe at a quarry' },
+      { place: 'After the section: Bushes', prompt: 'A worn bush on a bench. No logos.', alt: '' },
+    ],
+  }));
+  assert.match(markup, /Photos for this post/);
+  assert.match(markup, /Cover photo/);
+  assert.match(markup, /A yellow backhoe loader at a quarry/);
+  assert.equal((markup.match(/Copy prompt/g) ?? []).length, 2);
+  assert.match(markup, /Copy all/);
+  assert.match(markup, /Alt text: Backhoe at a quarry/);
+  assert.match(markup, /Make new photo prompts/);
+
+  const empty = renderToStaticMarkup(createElement(BlogPhotoPrompts, { ...props, prompts: [] }));
+  assert.match(empty, /No photo prompts yet/);
+  assert.match(empty, /Make photo prompts<\/button>/);
+  assert.doesNotMatch(empty, /Copy all/);
 });

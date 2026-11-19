@@ -158,6 +158,22 @@ export const isValidSlug = (slug: string): boolean => /^[a-z0-9]+(-[a-z0-9]+)*$/
 
 export type FaqItem = { question: string; answer: string };
 
+const text = (value: unknown, max: number): string =>
+  (typeof value === 'string' ? value : '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+/** A photo the post needs, described so it can be made with an AI image tool. Never published:
+ *  the owner copies the prompt, makes the photo, and keeps the alt text to describe it. */
+export type ImagePrompt = {
+  /** Where the photo goes: "Cover photo", or after which section. */
+  place: string;
+  /** What to paste into the image tool. */
+  prompt: string;
+  /** A short description of the finished photo, for Google and for screen readers. */
+  alt: string;
+};
+
 export type BlogDraft = {
   title: string;
   summary: string;
@@ -165,7 +181,37 @@ export type BlogDraft = {
   faq: FaqItem[];
   tags: string[];
   fact_checks: string[];
+  image_prompts: ImagePrompt[];
 };
+
+/** Added to every photo prompt by the ERP, whatever the AI wrote, so a photo can never show a
+ *  maker's logo or badge (the shop does not own them, and a made-up logo misleads), or garbled text,
+ *  which image tools are prone to. */
+export const PHOTO_PROMPT_RULES = 'No logos, no brand names, no badges and no writing anywhere in the image.';
+
+/** The AI's photo prompts, trimmed, capped, and each one ending with PHOTO_PROMPT_RULES. A prompt
+ *  with no words is dropped; a missing place or alt text is filled in plainly rather than left blank. */
+export function cleanImagePrompts(raw: unknown): ImagePrompt[] {
+  return list(raw)
+    .map((item, index) => {
+      const entry = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+      const prompt = text(entry.prompt, 900);
+      if (!prompt) return null;
+      const withRules = prompt.toLowerCase().includes('no logos') ? prompt : `${prompt.replace(/[.\s]+$/, '')}. ${PHOTO_PROMPT_RULES}`;
+      return {
+        place: text(entry.place, 120) || (index === 0 ? 'Cover photo' : `Photo ${index + 1}`),
+        prompt: withRules,
+        alt: text(entry.alt, 160),
+      };
+    })
+    .filter((item): item is ImagePrompt => item !== null)
+    .slice(0, 5);
+}
+
+/** All of a post's photo prompts as one block of text, for copying in one go. */
+export function imagePromptsText(prompts: readonly ImagePrompt[]): string {
+  return prompts.map((item, index) => `${index + 1}. ${item.place}\n${item.prompt}${item.alt ? `\nAlt text: ${item.alt}` : ''}`).join('\n\n');
+}
 
 export const TITLE_MAX = 110;
 export const SUMMARY_MAX = 300;
@@ -173,10 +219,6 @@ export const SUMMARY_MAX = 300;
 export const TITLE_SHOWN = 60;
 export const SUMMARY_SHOWN = 160;
 
-const text = (value: unknown, max: number): string =>
-  (typeof value === 'string' ? value : '').replace(/\s+/g, ' ').trim().slice(0, max);
-
-const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 /**
  * The AI's answer made safe to save: every field present and the right type, each capped to what
@@ -202,7 +244,7 @@ export function cleanDraft(raw: unknown): BlogDraft {
     .slice(0, 8);
   const tags = Array.from(new Set(list(value.tags).map((tag) => text(tag, 40).toLowerCase()).filter(Boolean))).slice(0, 8);
   const factChecks = list(value.fact_checks).map((item) => text(item, 300)).filter(Boolean).slice(0, 12);
-  return { title, summary: text(value.summary, SUMMARY_MAX), body, faq, tags, fact_checks: factChecks };
+  return { title, summary: text(value.summary, SUMMARY_MAX), body, faq, tags, fact_checks: factChecks, image_prompts: cleanImagePrompts(value.image_prompts) };
 }
 
 /** Lengths the writer offers, with the word count asked of the AI. */
