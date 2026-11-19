@@ -5,7 +5,7 @@ import type { Metadata } from 'next';
 import { ArrowLeft, Newspaper, Phone, PackageSearch } from 'lucide-react';
 import BlogBody from '@/components/blog/BlogBody';
 import { getCompanyPublicContact, getPublishedBlogPost, getStorefrontCompanyId } from '@/lib/db';
-import { machineLabel, readMinutes, type FaqItem } from '@/lib/blog';
+import { isSafePhotoUrl, machineLabel, readMinutes, type FaqItem, type PublicPhoto } from '@/lib/blog';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +19,12 @@ const faqOf = (value: unknown): FaqItem[] =>
     .map((item) => (item && typeof item === 'object' ? item as Record<string, unknown> : {}))
     .map((item) => ({ question: String(item.question ?? ''), answer: String(item.answer ?? '') }))
     .filter((item) => item.question && item.answer);
+
+/** The cover photo, when there is one with a safe address. */
+const coverOf = (value: unknown): PublicPhoto | null => {
+  const cover = value && typeof value === 'object' ? value as PublicPhoto : null;
+  return cover && isSafePhotoUrl(cover.url) ? cover : null;
+};
 
 const dateOf = (value: unknown): string => {
   const date = new Date(String(value ?? ''));
@@ -37,12 +43,19 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   if (!post) return { title: 'Guide not found — Jai Durga Enterprises' };
   const title = `${String(post.title)} — Jai Durga Enterprises`;
   const description = String(post.summary ?? '').slice(0, 200);
+  const cover = coverOf(post.cover);
   return {
     title,
     description,
     alternates: { canonical: `${SITE_URL}/blog/${slug}` },
-    // A link shared on WhatsApp shows a card rather than a bare address.
-    openGraph: { title: String(post.title), description, type: 'article', publishedTime: String(post.published_at ?? '') || undefined },
+    // A link shared on WhatsApp shows a card, with the cover photo when there is one.
+    openGraph: {
+      title: String(post.title),
+      description,
+      type: 'article',
+      publishedTime: String(post.published_at ?? '') || undefined,
+      images: cover ? [{ url: cover.url, alt: cover.alt || String(post.title) }] : undefined,
+    },
   };
 }
 
@@ -68,6 +81,8 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
 
   const body = String(post.body ?? '');
   const faq = faqOf(post.faq);
+  const cover = coverOf(post.cover);
+  const photos = Array.isArray(post.photos) ? (post.photos as PublicPhoto[]) : [];
   const title = String(post.title ?? '');
   const phone = contact?.contact_phone?.trim() || '';
 
@@ -80,6 +95,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       '@type': 'BlogPosting',
       headline: title,
       description: String(post.summary ?? ''),
+      image: cover ? [cover.url] : undefined,
       datePublished: post.published_at ?? undefined,
       dateModified: post.updated_at ?? undefined,
       mainEntityOfPage: `${SITE_URL}/blog/${slug}`,
@@ -102,9 +118,13 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       <p className="blog-card-machine">{machineLabel(String(post.machine ?? ''))}</p>
       <h1>{title}</h1>
       <p className="blog-meta">{[dateOf(post.published_at), `${readMinutes(body)} min read`].filter(Boolean).join(' · ')}</p>
+      {cover && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <figure className="blog-cover"><img src={cover.url} alt={cover.alt || title} /></figure>
+      )}
       {post.summary ? <p className="blog-lead">{String(post.summary)}</p> : null}
 
-      <BlogBody body={body} />
+      <BlogBody body={body} photos={photos} />
 
       {faq.length > 0 && (
         <section className="blog-faq" aria-labelledby="blog-faq-heading">

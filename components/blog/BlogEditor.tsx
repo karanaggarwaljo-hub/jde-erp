@@ -20,6 +20,7 @@ import {
   SUMMARY_SHOWN,
   TITLE_SHOWN,
   isMachine,
+  publicPhotos,
   publishProblems,
   readMinutes,
   saveProblems,
@@ -178,6 +179,8 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
   };
 
   const checks = post.fact_checks ?? [];
+  // The uploaded photos, placed the way the website will place them.
+  const preview = publicPhotos(post.image_prompts ?? []);
   const counter = (length: number, shown: number) => (
     <span className={`text-sm ${length > shown ? 'text-warning' : 'text-muted'}`}>{length} / {shown}{length > shown ? ' · Google may cut the end off' : ''}</span>
   );
@@ -260,8 +263,12 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
             ) : (
               <div className="blog-preview">
                 <h1>{form.title || 'Untitled'}</h1>
+                {preview.cover && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <figure className="blog-cover"><img src={preview.cover.url} alt={preview.cover.alt || form.title} /></figure>
+                )}
                 {form.summary && <p className="blog-lead">{form.summary}</p>}
-                <BlogBody body={form.body} />
+                <BlogBody body={form.body} photos={preview.photos} />
               </div>
             )}
           </div>
@@ -286,6 +293,7 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
 
         <aside className="flex flex-col gap-4">
           <BlogPhotoPrompts
+            postId={post.id}
             companyId={post.company_id}
             prompts={post.image_prompts ?? []}
             article={{ title: form.title, body: form.body, machine: form.machine }}

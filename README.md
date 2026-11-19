@@ -320,6 +320,16 @@ and the article format.
   prompt whatever the model wrote. `/api/ai-blog-photo-prompts` makes a fresh set from the article
   as it stands in the editor. Stored in the `image_prompts` column (`scripts/blog-photo-prompts.sql`)
   and never selected by the public reads.
+- **Photos.** A photo slot gains `url` once the owner uploads its photo
+  (`/api/blog-photo-upload`, stored by `uploadBlogPhoto` in the public `jde-catalog-images`
+  bucket under `blog-photos/<company>/`; the browser shrinks it to 1600px JPEG first). The cover
+  is drawn under the title, on the list card, and as `og:image` and the BlogPosting image; every
+  other photo is placed after the section its `place` names (`placePhotos`, matched on the
+  heading's words, falling back to the end). The editor saves slots through `cleanPhotoSlots`,
+  which keeps owner photos without a prompt and drops any address that is not plain https
+  (`isSafePhotoUrl`, also checked again when drawing). `mergePromptsKeepingPhotos` keeps uploaded
+  photos when prompts are remade. Public reads turn `image_prompts` into `cover` and `photos`
+  (`publicPhotos`: place, url, alt) and never return the prompts.
 - **Format.** Articles are stored as a small Markdown subset (`##`, `###`, lists, `>` notes, bold,
   italic), read by `parseBody` into blocks. `components/blog/BlogBody.tsx` draws them as plain React
   elements and `bodyToHtml` builds the same HTML, escaped, for the website feed. Nothing typed is

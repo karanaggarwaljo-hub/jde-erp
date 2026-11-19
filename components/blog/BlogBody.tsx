@@ -1,13 +1,15 @@
 /**
- * An article, drawn from its text. Used by the public post page, by the Blog screen's preview, and
- * (rendered to a string) by /api/public/blog for the website.
+ * An article, drawn from its text, with its uploaded photos placed after the sections they belong
+ * to. Used by the public post page and by the Blog screen's preview. lib/blog.ts bodyToHtml builds
+ * the same markup as a string for the website feed.
  *
  * Every piece is an ordinary React element built from lib/blog.ts parseBody, so whatever the AI or
- * anyone else typed is shown as text: there is no path by which it becomes HTML of its own.
+ * anyone else typed is shown as text: there is no path by which it becomes HTML of its own. A photo
+ * is drawn only from an https address (placePhotos checks it).
  */
 
 import type { ReactNode } from 'react';
-import { parseBody, type Inline } from '@/lib/blog';
+import { parseBody, placePhotos, type Inline, type PublicPhoto } from '@/lib/blog';
 
 function InlineText({ parts }: { parts: Inline[] }): ReactNode {
   return parts.map((part, index) => {
@@ -18,8 +20,8 @@ function InlineText({ parts }: { parts: Inline[] }): ReactNode {
   });
 }
 
-export default function BlogBody({ body }: { body: string }) {
-  const blocks = parseBody(body);
+export default function BlogBody({ body, photos = [] }: { body: string; photos?: readonly PublicPhoto[] }) {
+  const blocks = placePhotos(parseBody(body), photos);
   return (
     <div className="blog-body">
       {blocks.map((block, index) => {
@@ -29,6 +31,10 @@ export default function BlogBody({ body }: { body: string }) {
           case 'note': return <aside key={index} className="blog-note"><InlineText parts={block.text} /></aside>;
           case 'ul': return <ul key={index}>{block.items.map((item, n) => <li key={n}><InlineText parts={item} /></li>)}</ul>;
           case 'ol': return <ol key={index}>{block.items.map((item, n) => <li key={n}><InlineText parts={item} /></li>)}</ol>;
+          // A plain <img>, not next/image: the same markup as the website feed, and the photo was
+          // already shrunk to at most 1600px when it was uploaded.
+          // eslint-disable-next-line @next/next/no-img-element
+          case 'photo': return <figure key={index} className="blog-photo"><img src={block.url} alt={block.alt} loading="lazy" /></figure>;
           default: return <p key={index}><InlineText parts={block.text} /></p>;
         }
       })}

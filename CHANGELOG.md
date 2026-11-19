@@ -2,6 +2,36 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-11-20 — Blog: upload the photos, and they go into the post
+
+You asked for an upload button so the photos you make go into the blog post in the right place.
+
+**Uploading**
+- In **Photos for this post** (beside the post), each photo now has an **Upload photo** button.
+  Make the photo from its prompt, press Upload photo and choose it. It shows straight away as a
+  small picture, with **Replace photo** and **Remove** under it.
+- The **cover photo** appears at the top of the post, under the title, on the post's card in the
+  list of guides, and in the preview when someone shares the link on WhatsApp.
+- Every other photo appears **after the section it belongs to**, for example after "What to check
+  every day". Each photo has a **Where it goes** box listing the sections of your article, so you can
+  move a photo, or put it at the end.
+- If you change a section's heading so a photo no longer has its section, that photo goes to the
+  end of the article instead of disappearing. Its box says so.
+- **Add your own photo** adds a real photo you already have, such as a part on your shelf. It goes
+  at the end, or becomes the cover if the post has none yet.
+- Each photo has an **Alt text** box, one line saying what it shows, for Google. The AI fills it in;
+  change it if your photo shows something else.
+- Big phone photos are made smaller before they are uploaded, so they load quickly on the website.
+- **Make new photo prompts** never removes a photo you have uploaded. Only the prompts that don't
+  have a photo yet are replaced.
+- **Preview** shows the photos exactly where the website will put them.
+
+**What the public sees:** only the photos you uploaded and their alt text. The photo prompts never
+appear on the website or in the feed for jd-enterprise.com.
+
+No change to the database was needed. The photos are stored in the same place as your Website
+Catalog photos, in their own folder.
+
 ## 2026-11-19 — Blog: the AI writes articles (and photo prompts) about backhoe loaders, rock breakers and excavators
 
 You asked for something that writes new blog posts on all the topics around JCB backhoe loaders,
