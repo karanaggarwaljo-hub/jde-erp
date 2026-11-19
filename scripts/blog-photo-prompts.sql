@@ -4,7 +4,8 @@
 -- (the public reads in lib/db/index.ts do not select it).
 --
 -- Additive: one new column on jde_blog_posts (scripts/blog-posts.sql) with an empty-list default,
--- so every existing post simply has no prompts yet. Nothing else is altered.
+-- so every existing post simply has no prompts yet. Nothing else is altered. Applied 2026-11-19 as
+-- migration blog_photo_prompts, with the owner's go-ahead.
 
 alter table public.jde_blog_posts
   add column if not exists image_prompts jsonb not null default '[]'::jsonb
