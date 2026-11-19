@@ -5,6 +5,7 @@ import { partPhotoPath } from '../part-photos';
 import { shopDay } from '../logbook';
 import type { StartFreshCounts } from '../start-fresh';
 import { listingFitment, type PartFitmentResult } from '../part-fitment';
+import { publicPhotos } from '../blog';
 
 export type { TableName };
 
@@ -901,9 +902,18 @@ async function withPartNumbers(companyId: string, rows: Array<Record<string, unk
 }
 
 /** What anyone on the internet may see of a blog post. Drafts, the owner's "check before
- *  publishing" notes, the topic and which AI wrote it never leave the ERP. */
+ *  publishing" notes, the topic and which AI wrote it never leave the ERP. image_prompts is read
+ *  only to be turned into its uploaded photos (lib/blog.ts publicPhotos) and is never returned:
+ *  the photo prompts themselves stay in the ERP. */
 const PUBLIC_BLOG_LIST_COLUMNS = 'slug, title, summary, machine, tags, published_at, updated_at';
 const PUBLIC_BLOG_POST_COLUMNS = `${PUBLIC_BLOG_LIST_COLUMNS}, body, faq`;
+
+/** A post row with its photo slots replaced by the photos the public may see. */
+function withPublicPhotos(row: Record<string, unknown>, { inline }: { inline: boolean }): Record<string, unknown> {
+  const { image_prompts: slots, ...rest } = row;
+  const { cover, photos } = publicPhotos(slots);
+  return inline ? { ...rest, cover, photos } : { ...rest, cover };
+}
 
 /** Server-only: every published blog post of the storefront company, newest first, without the
  *  article text. Scoped like listPublishedCatalogProducts: the storefront company only. */
@@ -912,12 +922,12 @@ export async function listPublishedBlogPosts(): Promise<Array<Record<string, unk
   if (!companyId) return [];
   const { data, error } = await getClient()
     .from(supaTable('blog_posts'))
-    .select(PUBLIC_BLOG_LIST_COLUMNS)
+    .select(`${PUBLIC_BLOG_LIST_COLUMNS}, image_prompts`)
     .eq('company_id', companyId)
     .eq('status', 'published')
     .order('published_at', { ascending: false });
   if (error) throw error;
-  return (data as Array<Record<string, unknown>>) ?? [];
+  return ((data as Array<Record<string, unknown>>) ?? []).map((row) => withPublicPhotos(row, { inline: false }));
 }
 
 /** Server-only: one published post of the storefront company by its web address, with its text. */
@@ -926,13 +936,13 @@ export async function getPublishedBlogPost(slug: string): Promise<Record<string,
   if (!companyId || !slug) return undefined;
   const { data, error } = await getClient()
     .from(supaTable('blog_posts'))
-    .select(PUBLIC_BLOG_POST_COLUMNS)
+    .select(`${PUBLIC_BLOG_POST_COLUMNS}, image_prompts`)
     .eq('company_id', companyId)
     .eq('status', 'published')
     .eq('slug', slug)
     .maybeSingle();
   if (error) throw error;
-  return (data as Record<string, unknown> | null) ?? undefined;
+  return data ? withPublicPhotos(data as Record<string, unknown>, { inline: true }) : undefined;
 }
 
 /** Server-only: a single published catalog row, safe columns only, plus company_id — the detail
@@ -1378,6 +1388,22 @@ export async function getPartOverviewRows(companyId: string, productId: string):
     returns: rowsOf(returns),
     catalogRows: rowsOf(catalogRows),
   };
+}
+
+/** Stores a photo for a blog post in the catalog's public bucket, under blog-photos/<company>/, and
+ *  returns its public address. A new file every time, so a browser that cached an earlier photo
+ *  never keeps showing it. The post is not changed here: the Blog screen saves the address into
+ *  the post's photo slot, as an ordinary audited edit. */
+export async function uploadBlogPhoto(companyId: string, postId: string, base64: string, mimeType: string): Promise<string> {
+  const ext = CATALOG_IMAGE_EXTENSIONS[mimeType];
+  if (!ext) throw new Error('Please use a JPEG, PNG or WebP photo.');
+  const safe = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, '');
+  const path = `blog-photos/${safe(companyId)}/${safe(postId)}-${Date.now()}.${ext}`;
+  const { error } = await getClient()
+    .storage.from(CATALOG_IMAGE_BUCKET)
+    .upload(path, Buffer.from(base64, 'base64'), { contentType: mimeType, upsert: false });
+  if (error) throw error;
+  return getClient().storage.from(CATALOG_IMAGE_BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
 /** Stores the owner's own photo of a part in the catalog's public bucket, under part-photos/, and

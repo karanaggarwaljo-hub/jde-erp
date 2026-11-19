@@ -2623,12 +2623,25 @@ button.part-photo.is-empty:hover svg { opacity: 0.85; }
   .blog-slug { align-items: stretch; flex-direction: column; gap: 2px; }
 }
 
+/* Uploaded photos: the cover under a post's title and on its card, the others inside the article. */
+.blog-cover { border-radius: var(--radius-lg); margin: 0 0 18px; overflow: hidden; }
+.blog-cover img { aspect-ratio: 16 / 9; background: var(--panel); display: block; height: auto; object-fit: cover; width: 100%; }
+.blog-photo { margin: 6px 0 20px; }
+.blog-photo img { background: var(--panel); border-radius: var(--radius-md); display: block; height: auto; max-width: 100%; }
+.blog-card.has-cover { padding-top: 0; overflow: hidden; }
+.blog-card-cover { aspect-ratio: 16 / 9; display: block; margin: 0 -18px 6px; max-width: none; object-fit: cover; width: calc(100% + 36px); }
+
 /* Photos for a post: each prompt in a box that is easy to read and copy. */
 .blog-photos { display: flex; flex-direction: column; gap: 10px; }
 .blog-photo-list { display: flex; flex-direction: column; gap: 14px; list-style: none; margin: 0; padding: 0; }
 .blog-photo-list li { border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; padding-top: 12px; }
 .blog-photo-list li:first-child { border-top: 0; padding-top: 0; }
 .blog-photo-place { color: var(--amber-2); font-size: 12px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; }
+.blog-photo-thumb { aspect-ratio: 16 / 10; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-md); display: block; object-fit: cover; width: 100%; }
+.blog-photo-place-pick .form-input { font-size: 12.5px; font-weight: 600; padding: 6px 30px 6px 10px; }
+.blog-photo-alt { display: flex; flex-direction: column; font-size: 12px; font-weight: 600; gap: 3px; }
+.blog-photo-alt .form-input { font-size: 12.5px; padding: 6px 10px; }
+.sr-only { border: 0; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; }
 .blog-photo-prompt { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--ink-2); font-size: 13px; line-height: 1.5; margin: 0; padding: 8px 10px; user-select: all; }
 
 /* Public blog: a list of cards, and an article set for reading. */

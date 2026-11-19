@@ -10,8 +10,17 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import BlogBody from '../components/blog/BlogBody';
 import BlogPhotoPrompts from '../components/blog/BlogPhotoPrompts';
 import {
+  COVER_PLACE,
+  END_PLACE,
   MACHINES,
   PHOTO_PROMPT_RULES,
+  cleanPhotoSlots,
+  isSafePhotoUrl,
+  mergePromptsKeepingPhotos,
+  photoPlaces,
+  placePhotos,
+  publicPhotos,
+  sectionPlace,
   bodyToHtml,
   cleanImagePrompts,
   imagePromptsText,
@@ -209,25 +218,111 @@ test('all photo prompts copy as one numbered block', () => {
   assert.equal(block, '1. Cover photo\nFirst.\nAlt text: Alt one\n\n2. After the section: Bushes\nSecond.');
 });
 
-test('the photos box shows each prompt with where it goes and a copy button, and offers to make them when there are none', () => {
-  const props = { companyId: 'c1', article: { title: 'T', body: 'B', machine: 'breaker' }, disabled: false, onReplace: async () => {} };
+test('the photos box shows each slot with where it goes, its prompt or photo, and an upload button', () => {
+  const props = { postId: 'p1', companyId: 'c1', article: { title: 'T', body: '## Bushes\nText.', machine: 'breaker' }, disabled: false, onReplace: async () => {} };
   const markup = renderToStaticMarkup(createElement(BlogPhotoPrompts, {
     ...props,
     prompts: [
-      { place: 'Cover photo', prompt: 'A yellow backhoe loader at a quarry. No logos.', alt: 'Backhoe at a quarry' },
+      { place: 'Cover photo', prompt: 'A yellow backhoe loader at a quarry. No logos.', alt: 'Backhoe at a quarry', url: PHOTO },
       { place: 'After the section: Bushes', prompt: 'A worn bush on a bench. No logos.', alt: '' },
+      { place: 'After the section: Gone', prompt: '', alt: 'Own photo', url: PHOTO },
     ],
   }));
   assert.match(markup, /Photos for this post/);
-  assert.match(markup, /Cover photo/);
-  assert.match(markup, /A yellow backhoe loader at a quarry/);
+  // An uploaded photo is shown, with Replace and Remove; a slot without one offers Upload.
+  assert.match(markup, /class="blog-photo-thumb" src="https:\/\/abc\.supabase\.co/);
+  assert.equal((markup.match(/Replace photo/g) ?? []).length, 2);
+  assert.equal((markup.match(/>Upload photo</g) ?? []).length + (markup.match(/Upload photo<\/button>/g) ?? []).length > 0, true);
+  // The prompt of a slot without a photo is shown; copy buttons only where there is a prompt.
+  assert.match(markup, /A worn bush on a bench/);
   assert.equal((markup.match(/Copy prompt/g) ?? []).length, 2);
-  assert.match(markup, /Copy all/);
-  assert.match(markup, /Alt text: Backhoe at a quarry/);
+  // Where it goes: the article's own sections, and a place whose section was deleted says so.
+  assert.match(markup, /<option value="After the section: Bushes" selected="">/);
+  assert.match(markup, /section not found: goes at the end/);
+  assert.match(markup, /Add your own photo/);
   assert.match(markup, /Make new photo prompts/);
 
   const empty = renderToStaticMarkup(createElement(BlogPhotoPrompts, { ...props, prompts: [] }));
-  assert.match(empty, /No photo prompts yet/);
+  assert.match(empty, /No photos yet/);
   assert.match(empty, /Make photo prompts<\/button>/);
   assert.doesNotMatch(empty, /Copy all/);
+});
+
+const PHOTO = 'https://abc.supabase.co/storage/v1/object/public/jde-catalog-images/blog-photos/c1/p1-1.jpg';
+
+test('only an ordinary https address can be a photo', () => {
+  assert.equal(isSafePhotoUrl(PHOTO), true);
+  for (const bad of ['javascript:alert(1)', 'http://plain.example.com/a.jpg', 'data:image/png;base64,AAAA', 'https://x.com/a.jpg" onerror="alert(1)', 'https://x.com/a b.jpg', '', 42, null]) {
+    assert.equal(isSafePhotoUrl(bad), false, String(bad));
+  }
+});
+
+test('photo slots keep a prompt or an uploaded photo, drop unsafe addresses, and are capped', () => {
+  const slots = cleanPhotoSlots([
+    { place: 'Cover photo', prompt: 'A prompt', alt: 'Cover', url: PHOTO },
+    { place: '', prompt: '', alt: 'Own photo', url: PHOTO },
+    { place: 'After the section: Bushes', prompt: 'Another', alt: '', url: 'javascript:alert(1)' },
+    { place: 'Nothing', prompt: '', alt: 'x' },
+  ]);
+  assert.equal(slots.length, 3);
+  assert.equal(slots[1].place, END_PLACE);
+  assert.equal(slots[2].url, undefined);
+  assert.equal(cleanPhotoSlots(Array.from({ length: 20 }, () => ({ prompt: 'p' }))).length, 8);
+});
+
+test('new prompts never wipe out a photo already uploaded', () => {
+  const current = [
+    { place: COVER_PLACE, prompt: 'old cover', alt: 'c', url: PHOTO },
+    { place: 'After the section: Bushes', prompt: 'old bush', alt: 'b' },
+    { place: END_PLACE, prompt: '', alt: 'own', url: PHOTO },
+  ];
+  const fresh = [
+    { place: 'Cover photo', prompt: 'new cover', alt: '' },
+    { place: 'After the section: Bushes', prompt: 'new bush', alt: '' },
+    { place: 'After the section: Chisels', prompt: 'new chisel', alt: '' },
+  ];
+  const merged = mergePromptsKeepingPhotos(current, fresh);
+  assert.deepEqual(merged.map((slot) => slot.prompt), ['old cover', '', 'new bush', 'new chisel']);
+  assert.ok(merged.filter((slot) => slot.url).length === 2);
+});
+
+test('the public sees uploaded photos only, and never a prompt', () => {
+  const { cover, photos } = publicPhotos([
+    { place: 'Cover photo', prompt: 'SECRET PROMPT', alt: 'Cover alt', url: PHOTO },
+    { place: 'After the section: Bushes', prompt: 'SECRET TOO', alt: 'Bush', url: PHOTO },
+    { place: 'After the section: Chisels', prompt: 'no photo yet', alt: 'Chisel' },
+  ]);
+  assert.deepEqual(cover, { place: 'Cover photo', url: PHOTO, alt: 'Cover alt' });
+  assert.deepEqual(photos, [{ place: 'After the section: Bushes', url: PHOTO, alt: 'Bush' }]);
+  assert.doesNotMatch(JSON.stringify({ cover, photos }), /SECRET|prompt/i);
+  assert.deepEqual(publicPhotos(null), { cover: null, photos: [] });
+});
+
+const ARTICLE = ['Intro.', '', '## Daily checks', 'Look at it.', '### Grease', 'Grease it.', '', '## When to call a mechanic', 'Call one.'].join('\n');
+
+test('the places offered are the cover, every section, and the end', () => {
+  assert.deepEqual(photoPlaces(ARTICLE), [COVER_PLACE, sectionPlace('Daily checks'), sectionPlace('Grease'), sectionPlace('When to call a mechanic'), END_PLACE]);
+});
+
+test('each photo lands after its own section, a lost section sends it to the end, and the cover stays out', () => {
+  const placed = placePhotos(parseBody(ARTICLE), [
+    { place: 'Cover photo', url: PHOTO, alt: 'cover' },
+    { place: 'After the section: daily CHECKS!', url: PHOTO, alt: 'daily' },
+    { place: 'After the section: Grease', url: PHOTO, alt: 'grease' },
+    { place: 'After the section: A heading that was deleted', url: PHOTO, alt: 'lost' },
+    { place: END_PLACE, url: PHOTO, alt: 'end' },
+    { place: 'After the section: When to call a mechanic', url: 'javascript:alert(1)', alt: 'unsafe' },
+  ]);
+  const order = placed.map((block) => (block.kind === 'photo' ? `photo:${block.alt}` : block.kind));
+  // "Daily checks" is an h2: its section runs past its own h3 to the next h2, so both photos meet
+  // there, in the order of the photo list.
+  assert.deepEqual(order, ['p', 'h2', 'p', 'h3', 'p', 'photo:daily', 'photo:grease', 'h2', 'p', 'photo:lost', 'photo:end']);
+});
+
+test('the website feed draws placed photos the same way the ERP pages do, with the address escaped', () => {
+  const photos = [{ place: 'After the section: Daily checks', url: PHOTO, alt: 'A "worn" chisel & bush' }];
+  const fromReact = renderToStaticMarkup(createElement(BlogBody, { body: ARTICLE, photos }));
+  const tidy = (html: string) => html.replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"');
+  assert.equal(tidy(bodyToHtml(ARTICLE, photos)), tidy(fromReact));
+  assert.match(bodyToHtml(ARTICLE, photos), /<figure class="blog-photo"><img src="https:\/\/abc\.supabase\.co[^"]+" alt="A &quot;worn&quot; chisel &amp; bush" loading="lazy"\/><\/figure>/);
 });

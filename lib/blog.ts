@@ -163,15 +163,18 @@ const text = (value: unknown, max: number): string =>
 
 const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
-/** A photo the post needs, described so it can be made with an AI image tool. Never published:
- *  the owner copies the prompt, makes the photo, and keeps the alt text to describe it. */
+/** A photo the post needs: where it goes, a prompt to make it with an AI image tool, its alt text,
+ *  and, once the owner has uploaded it, where the photo is stored. Only the place, the alt text and
+ *  the uploaded photo are ever published (publicPhotos below); the prompt never is. */
 export type ImagePrompt = {
-  /** Where the photo goes: "Cover photo", or after which section. */
+  /** Where the photo goes: "Cover photo", "After the section: <heading>" or "End of the article". */
   place: string;
-  /** What to paste into the image tool. */
+  /** What to paste into the image tool. Empty for a photo the owner added of his own. */
   prompt: string;
-  /** A short description of the finished photo, for Google and for screen readers. */
+  /** A short description of the photo, for Google and for screen readers. */
   alt: string;
+  /** The uploaded photo, once there is one. */
+  url?: string;
 };
 
 export type BlogDraft = {
@@ -208,9 +211,82 @@ export function cleanImagePrompts(raw: unknown): ImagePrompt[] {
     .slice(0, 5);
 }
 
-/** All of a post's photo prompts as one block of text, for copying in one go. */
+/** All of a post's photo prompts as one block of text, for copying in one go. Photos added
+ *  without a prompt are left out. */
 export function imagePromptsText(prompts: readonly ImagePrompt[]): string {
-  return prompts.map((item, index) => `${index + 1}. ${item.place}\n${item.prompt}${item.alt ? `\nAlt text: ${item.alt}` : ''}`).join('\n\n');
+  return prompts
+    .filter((item) => item.prompt)
+    .map((item, index) => `${index + 1}. ${item.place}\n${item.prompt}${item.alt ? `\nAlt text: ${item.alt}` : ''}`)
+    .join('\n\n');
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Uploaded photos
+ *
+ * Each photo slot can carry an uploaded photo. The cover photo is shown under the post's title (and
+ * in link previews); every other photo goes after the section its place names, or at the end of the
+ * article when that section is not there any more.
+ * ------------------------------------------------------------------------------------------- */
+
+export const COVER_PLACE = 'Cover photo';
+export const END_PLACE = 'End of the article';
+const SECTION_PREFIX = 'After the section: ';
+export const sectionPlace = (heading: string): string => `${SECTION_PREFIX}${heading}`;
+export const isCoverPlace = (place: string): boolean => /^\s*cover/i.test(place);
+/** How many photos one post may hold, cover included. */
+export const MAX_PHOTOS = 8;
+
+/** Only an ordinary https address may ever be drawn as a photo: never a javascript: or data:
+ *  address, and nothing that could break out of an HTML attribute. */
+export function isSafePhotoUrl(url: unknown): url is string {
+  return typeof url === 'string' && url.length <= 600 && /^https:\/\/[^\s"'<>`\\]+$/.test(url);
+}
+
+/**
+ * The photo slots as the Blog screen saves them: a slot is kept when it has a prompt or an uploaded
+ * photo, an address that is not safe is dropped, and there are never more than MAX_PHOTOS. Unlike
+ * cleanImagePrompts (for the AI's answer), nothing is added to the prompts here: the owner's own
+ * photos have none.
+ */
+export function cleanPhotoSlots(raw: unknown): ImagePrompt[] {
+  return list(raw)
+    .map((item) => {
+      const entry = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+      const slot: ImagePrompt = { place: text(entry.place, 160) || END_PLACE, prompt: text(entry.prompt, 1000), alt: text(entry.alt, 160) };
+      if (isSafePhotoUrl(entry.url)) slot.url = entry.url;
+      return slot.prompt || slot.url ? slot : null;
+    })
+    .filter((item): item is ImagePrompt => item !== null)
+    .slice(0, MAX_PHOTOS);
+}
+
+/**
+ * A fresh set of prompts, without losing a photo already uploaded: slots that have a photo stay as
+ * they are, and a new prompt is only added where no photo already fills its place. The cover comes
+ * first.
+ */
+export function mergePromptsKeepingPhotos(current: readonly ImagePrompt[], fresh: readonly ImagePrompt[]): ImagePrompt[] {
+  const kept = current.filter((slot) => slot.url);
+  const filled = new Set(kept.map((slot) => (isCoverPlace(slot.place) ? COVER_PLACE : slot.place.trim().toLowerCase())));
+  const added = fresh.filter((slot) => !filled.has(isCoverPlace(slot.place) ? COVER_PLACE : slot.place.trim().toLowerCase()));
+  const all = [...kept, ...added];
+  return [...all.filter((slot) => isCoverPlace(slot.place)), ...all.filter((slot) => !isCoverPlace(slot.place))].slice(0, MAX_PHOTOS);
+}
+
+export type PublicPhoto = { place: string; url: string; alt: string };
+
+/**
+ * What the public may see of a post's photos: the uploaded ones only, as place, address and alt
+ * text. The prompts, and any slot without a photo, never leave the ERP.
+ */
+export function publicPhotos(raw: unknown): { cover: PublicPhoto | null; photos: PublicPhoto[] } {
+  const uploaded = cleanPhotoSlots(raw)
+    .filter((slot): slot is ImagePrompt & { url: string } => Boolean(slot.url))
+    .map((slot) => ({ place: slot.place, url: slot.url, alt: slot.alt }));
+  return {
+    cover: uploaded.find((photo) => isCoverPlace(photo.place)) ?? null,
+    photos: uploaded.filter((photo) => !isCoverPlace(photo.place)),
+  };
 }
 
 export const TITLE_MAX = 110;
@@ -272,6 +348,7 @@ export type Inline = { text: string; bold?: boolean; italic?: boolean };
 
 export type Block =
   | { kind: 'h2' | 'h3'; text: Inline[] }
+  | { kind: 'photo'; url: string; alt: string }
   | { kind: 'p'; text: Inline[] }
   | { kind: 'note'; text: Inline[] }
   | { kind: 'ul' | 'ol'; items: Inline[][] };
@@ -367,14 +444,61 @@ function inlineHtml(parts: Inline[]): string {
   }).join('');
 }
 
+const headingKey = (parts: Inline[] | string): string =>
+  (typeof parts === 'string' ? parts : parts.map((part) => part.text).join('')).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+/** The places a photo can go in this article, in reading order: the cover, after each section, and
+ *  at the end. For the "Where it goes" choice on the Blog screen. */
+export function photoPlaces(body: string): string[] {
+  const headings = parseBody(body)
+    .filter((block): block is Extract<Block, { kind: 'h2' | 'h3' }> => block.kind === 'h2' || block.kind === 'h3')
+    .map((block) => sectionPlace(block.text.map((part) => part.text).join('')));
+  return [COVER_PLACE, ...Array.from(new Set(headings)), END_PLACE];
+}
+
+/**
+ * The article's blocks with its photos placed in them: each after the section its place names
+ * (after that section's last paragraph, before the next heading of the same or a higher level),
+ * matched on the heading's words whatever their case or punctuation. Photos meeting at one spot keep
+ * the order of the photo list. A photo whose section is not in the article, or whose place is the
+ * end, goes at the end. Cover photos are left out: the page shows the cover under the title.
+ */
+export function placePhotos(blocks: readonly Block[], photos: readonly PublicPhoto[]): Block[] {
+  const after = new Map<number, PublicPhoto[]>();
+  const atEnd: PublicPhoto[] = [];
+  for (const photo of photos) {
+    if (isCoverPlace(photo.place) || !isSafePhotoUrl(photo.url)) continue;
+    const wanted = photo.place.startsWith(SECTION_PREFIX) ? headingKey(photo.place.slice(SECTION_PREFIX.length)) : '';
+    const start = wanted
+      ? blocks.findIndex((block) => (block.kind === 'h2' || block.kind === 'h3') && headingKey(block.text) === wanted)
+      : -1;
+    if (start < 0) { atEnd.push(photo); continue; }
+    const level = blocks[start].kind;
+    let end = blocks.length;
+    for (let index = start + 1; index < blocks.length; index += 1) {
+      const kind = blocks[index].kind;
+      if (kind === 'h2' || (level === 'h3' && kind === 'h3')) { end = index; break; }
+    }
+    after.set(end, [...(after.get(end) ?? []), photo]);
+  }
+  const placed: Block[] = [];
+  blocks.forEach((block, index) => {
+    for (const photo of after.get(index) ?? []) placed.push({ kind: 'photo', url: photo.url, alt: photo.alt });
+    placed.push(block);
+  });
+  for (const photo of [...(after.get(blocks.length) ?? []), ...atEnd]) placed.push({ kind: 'photo', url: photo.url, alt: photo.alt });
+  return placed;
+}
+
 /**
  * The article as HTML, for the website feed (/api/public/blog). The same elements, in the same
  * shape, as components/blog/BlogBody.tsx draws on the ERP's own pages, built from the same blocks.
  * Every word is escaped, so the only tags in the result are the ones written here.
  */
-export function bodyToHtml(body: string): string {
-  const html = parseBody(body).map((block) => {
+export function bodyToHtml(body: string, photos: readonly PublicPhoto[] = []): string {
+  const html = placePhotos(parseBody(body), photos).map((block) => {
     switch (block.kind) {
+      case 'photo': return `<figure class="blog-photo"><img src="${escapeHtml(block.url)}" alt="${escapeHtml(block.alt)}" loading="lazy"/></figure>`;
       case 'h2': return `<h2>${inlineHtml(block.text)}</h2>`;
       case 'h3': return `<h3>${inlineHtml(block.text)}</h3>`;
       case 'note': return `<aside class="blog-note">${inlineHtml(block.text)}</aside>`;
@@ -389,7 +513,7 @@ export function bodyToHtml(body: string): string {
 /** The article as plain words: for counting, and for a summary when none was written. */
 export function plainText(body: string): string {
   return parseBody(body)
-    .map((block) => ('items' in block ? block.items.map((item) => item.map((part) => part.text).join('')).join(' ') : block.text.map((part) => part.text).join('')))
+    .map((block) => (block.kind === 'photo' ? '' : 'items' in block ? block.items.map((item) => item.map((part) => part.text).join('')).join(' ') : block.text.map((part) => part.text).join('')))
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();

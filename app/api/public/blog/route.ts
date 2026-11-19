@@ -1,5 +1,5 @@
 import { getPublishedBlogPost, listPublishedBlogPosts } from '@/lib/db';
-import { bodyToHtml, readMinutes } from '@/lib/blog';
+import { bodyToHtml, readMinutes, type PublicPhoto } from '@/lib/blog';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,9 +23,11 @@ function corsHeaders(request: Request): HeadersInit {
 /**
  * Public, read-only feed of the published blog posts, for the company website.
  *
- *   GET /api/public/blog              every published post, newest first, without its text
+ *   GET /api/public/blog              every published post, newest first, without its text, with
+ *                                     its cover photo (`cover`: { url, alt } or null)
  *   GET /api/public/blog?slug=<slug>  one post with its text, as Markdown (`body`) and as ready
- *                                     HTML (`html`), plus its questions and answers (`faq`)
+ *                                     HTML (`html`, its photos already placed), plus its cover,
+ *                                     its other photos (`photos`) and its questions (`faq`)
  *
  * `html` is built from the same blocks as the ERP's own /blog pages draw (lib/blog.ts bodyToHtml),
  * so it contains only that handful of plain elements, with every word escaped. Drafts never appear.
@@ -38,8 +40,9 @@ export async function GET(request: Request) {
       const post = await getPublishedBlogPost(slug);
       if (!post) return Response.json({ error: 'No published post has that address.' }, { status: 404, headers });
       const body = String(post.body ?? '');
+      const photos = Array.isArray(post.photos) ? (post.photos as PublicPhoto[]) : [];
       return Response.json(
-        { post: { ...post, read_minutes: readMinutes(body), html: bodyToHtml(body) } },
+        { post: { ...post, read_minutes: readMinutes(body), html: bodyToHtml(body, photos) } },
         { headers }
       );
     }

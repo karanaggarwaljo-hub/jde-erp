@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Newspaper } from 'lucide-react';
 import { listPublishedBlogPosts } from '@/lib/db';
-import { MACHINES, machineLabel } from '@/lib/blog';
+import { MACHINES, isSafePhotoUrl, machineLabel, type PublicPhoto } from '@/lib/blog';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,14 +54,21 @@ export default async function BlogListPage({ searchParams }: { searchParams: Pro
         </div>
       ) : (
         <div className="blog-cards">
-          {shown.map((post) => (
-            <Link key={String(post.slug)} href={`/blog/${String(post.slug)}`} className="blog-card">
+          {shown.map((post) => {
+            const cover = post.cover && typeof post.cover === 'object' ? post.cover as PublicPhoto : null;
+            return (
+            <Link key={String(post.slug)} href={`/blog/${String(post.slug)}`} className={`blog-card${cover && isSafePhotoUrl(cover.url) ? ' has-cover' : ''}`}>
+              {cover && isSafePhotoUrl(cover.url) && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="blog-card-cover" src={cover.url} alt={cover.alt || String(post.title ?? '')} loading="lazy" />
+              )}
               <span className="blog-card-machine">{machineLabel(String(post.machine ?? ''))}</span>
               <strong>{String(post.title ?? '')}</strong>
               {post.summary ? <span className="blog-card-summary">{String(post.summary)}</span> : null}
               <small>{dateOf(post.published_at)}</small>
             </Link>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
