@@ -2,6 +2,18 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-11-20 — Website Catalog: remove a listing's photo
+
+You asked for a way to remove the photo on a Website Catalog listing.
+
+- Under the listing's photo there is now **Remove photo**. It asks once, then takes the photo off.
+  The listing shows "Needs Image" again, and you can choose or generate a new photo.
+- On a listing that is **on the website**, Remove photo is not offered. A published listing must
+  always have a photo, the same rule as before publishing. To change it, upload or generate a new
+  photo (it replaces the old one), or unpublish the listing first and then remove it.
+- After **1. Choose Product Photo**, a **Clear** button next to "… is ready." lets you drop the chosen
+  photo before you press Generate, if you picked the wrong one. It saves nothing.
+
 ## 2026-11-20 — Blog: upload the photos, and they go into the post
 
 You asked for an upload button so the photos you make go into the blog post in the right place.

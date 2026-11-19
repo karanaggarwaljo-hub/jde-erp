@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { ChangeEvent, useState } from 'react';
-import { ArrowLeft, Sparkles, Upload, Search, CheckCircle2, XCircle, HelpCircle, ExternalLink, Trash2, RefreshCw, AlertTriangle, Copy } from 'lucide-react';
+import { ArrowLeft, Sparkles, Upload, Search, CheckCircle2, XCircle, HelpCircle, ExternalLink, Trash2, RefreshCw, AlertTriangle, Copy, X } from 'lucide-react';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { resizeImageForUpload } from '@/lib/imageResize';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
@@ -241,6 +241,25 @@ export default function CatalogAdminDetailPage() {
     }
   };
 
+  /** Takes the photo off this listing, so it needs a new one before it can be published. Not
+   *  offered while the listing is published: a live listing always has a photo (canPublish), so
+   *  there the photo is replaced by uploading or generating a new one, or the listing is
+   *  unpublished first. The stored file is left where it is: nothing points at it any more, and the
+   *  next photo for this listing is written over the same name. */
+  const removeImage = async () => {
+    if (row.publication_status === 'published') return;
+    if (!window.confirm('Remove this photo from the listing? You can choose or generate a new one afterwards.')) return;
+    setImageBusy(true);
+    setImageError('');
+    try {
+      await update(row.id, { image_url: null, image_status: 'needs_image', generation_error: null });
+    } catch (err) {
+      setImageError(err instanceof Error ? err.message : 'The photo was not removed.');
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
   const generateDescription = async () => {
     setDescBusy(true);
     setDescError('');
@@ -455,8 +474,19 @@ export default function CatalogAdminDetailPage() {
 
           <div className="flex gap-4 items-center flex-wrap">
             {row.image_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={row.image_url} alt={row.title} style={{ width: '160px', height: '160px', objectFit: 'contain', borderRadius: 'var(--radius-md)', background: 'var(--bg-input)', border: '1px solid var(--border-default)' }} />
+              <div className="flex flex-col gap-2" style={{ width: '160px' }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={row.image_url} alt={row.title} style={{ width: '160px', height: '160px', objectFit: 'contain', borderRadius: 'var(--radius-md)', background: 'var(--bg-input)', border: '1px solid var(--border-default)' }} />
+                {row.publication_status === 'published' ? (
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    This listing is on the website, so it must keep a photo. Upload or generate a new one to replace it, or unpublish it first to remove it.
+                  </span>
+                ) : (
+                  <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--color-danger)', alignSelf: 'flex-start' }} disabled={imageBusy} onClick={removeImage}>
+                    <Trash2 size={14} /> Remove photo
+                  </button>
+                )}
+              </div>
             ) : (
               <div className="empty-state" style={{ width: '160px', height: '160px' }}><p className="empty-state-desc">No image yet</p></div>
             )}
@@ -465,12 +495,20 @@ export default function CatalogAdminDetailPage() {
                 <Upload size={16} /> 1. Choose Product Photo
                 <input type="file" accept="image/jpeg,image/png,image/webp" hidden disabled={imageBusy} onChange={selectProductReference} />
               </label>
-              <span style={{ fontSize: '12px', color: uploadedReference ? 'var(--color-success)' : 'var(--text-muted)' }}>
+              <span className="flex items-center gap-2" style={{ fontSize: '12px', color: uploadedReference ? 'var(--color-success)' : 'var(--text-muted)', flexWrap: 'wrap' }}>
                 {uploadedReference
                   ? `${uploadedReference.name} is ready.`
                   : row.selected_reference_url
                     ? 'Web reference selected. A direct product photo gives the most reliable result.'
                     : 'Required: choose a clear product photo. A new matching workshop background is created each time.'}
+                {/* The chosen photo lives only in this browser until Generate is pressed, so
+                    clearing it saves nothing and touches no listing. */}
+                {uploadedReference && (
+                  <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '2px 6px' }} disabled={imageBusy}
+                    aria-label={`Clear the chosen photo ${uploadedReference.name}`} onClick={() => setUploadedReference(null)}>
+                    <X size={12} /> Clear
+                  </button>
+                )}
               </span>
               <button className="btn btn-primary" disabled={imageBusy || !promptText.trim()} onClick={generateImageWithAi}>
                 <Sparkles size={16} /> {imageBusy ? 'Working…' : '2. Generate with AI'}
