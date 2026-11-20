@@ -579,6 +579,21 @@ export const wordCount = (body: string): number => (plainText(body).match(/\S+/g
 /** Minutes to read, at a steady 200 words a minute, never less than one. */
 export const readMinutes = (body: string): number => Math.max(1, Math.round(wordCount(body) / 200));
 
+/** The post's address on the company website. */
+export const postUrl = (siteHost: string, slug: string): string => `https://${siteHost}/blog/${slug}`;
+
+/** Opens WhatsApp with the post ready to send: its title, its summary and its address. The owner
+ *  picks a customer, a group or a broadcast list there. */
+export function whatsappShareUrl(post: { title: string; summary?: string | null; slug: string }, siteHost: string): string {
+  const message = [post.title.trim(), (post.summary ?? '').trim(), postUrl(siteHost, post.slug)].filter(Boolean).join('\n\n');
+  return `https://wa.me/?text=${encodeURIComponent(message)}`;
+}
+
+/** A draft shorter than this share of the length asked for is sent back once to be filled out. The
+ *  backup AI tends to stop at about half the length asked, and thin articles do poorly on Google. */
+export const SHORT_DRAFT_SHARE = 0.7;
+export const isShortDraft = (body: string, wordsAsked: number): boolean => wordCount(body) < wordsAsked * SHORT_DRAFT_SHARE;
+
 /** Tags typed in one box, separated by commas, as they will be saved. */
 export function splitTags(typed: string): string[] {
   return Array.from(new Set(typed.split(',').map((tag) => tag.replace(/\s+/g, ' ').trim().toLowerCase()).filter(Boolean))).slice(0, 8);

@@ -12,7 +12,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Eye, Globe, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Eye, Globe, MessageCircle, Plus, Trash2, X } from 'lucide-react';
 import BlogBody from '@/components/blog/BlogBody';
 import BlogPhotoPrompts from '@/components/blog/BlogPhotoPrompts';
 import {
@@ -20,12 +20,14 @@ import {
   SUMMARY_SHOWN,
   TITLE_SHOWN,
   isMachine,
+  postUrl,
   publicPhotos,
   publishProblems,
   readMinutes,
   saveProblems,
   slugify,
   splitTags,
+  whatsappShareUrl,
   wordCount,
   type FaqItem,
   type ImagePrompt,
@@ -149,14 +151,14 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
     // Only what would stop it saving at all: a draft may be short or unfinished.
     const blocking = saveProblems({ title: patch.title ?? '', slug: patch.slug ?? '' }, otherSlugs);
     if (blocking.length > 0) { setProblems(blocking); return; }
-    void run('save', patch, published ? 'Saved. The website shows the new version.' : 'Draft saved.');
+    void run('save', patch, published ? 'Saved. The website shows the new version within a minute.' : 'Draft saved.');
   };
 
   const publish = () => {
     const patch = patchOf();
     const found = publishProblems({ title: patch.title ?? '', slug: patch.slug ?? '', body: patch.body ?? '', summary: patch.summary ?? '' }, otherSlugs);
     if (found.length > 0) { setProblems(found); return; }
-    void run('publish', { ...patch, status: 'published' }, 'Published. It is now on the website.');
+    void run('publish', { ...patch, status: 'published' }, 'Published. It shows on the website within a minute. Press Share on WhatsApp to send it to your customers.');
   };
 
   const unpublish = () => {
@@ -201,9 +203,15 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
           </h1>
         </div>
         {published && (
-          <a href={`/blog/${post.slug}`} target="_blank" rel="noreferrer" className="btn btn-secondary" style={{ marginLeft: 'auto' }}>
-            <Globe size={16} /> View on the website
-          </a>
+          <div className="flex gap-2" style={{ marginLeft: 'auto', flexWrap: 'wrap' }}>
+            {/* Sends the post to customers: WhatsApp opens with the title, summary and link ready. */}
+            <a href={whatsappShareUrl(post, siteHost)} target="_blank" rel="noreferrer" className="btn btn-secondary">
+              <MessageCircle size={16} /> Share on WhatsApp
+            </a>
+            <a href={postUrl(siteHost, post.slug)} target="_blank" rel="noreferrer" className="btn btn-secondary">
+              <Globe size={16} /> View on the website
+            </a>
+          </div>
         )}
       </div>
 

@@ -17,5 +17,6 @@ test('the blog is public, but the screen that writes it is not', () => {
   assert.equal(isPublicPath('/blog-admin'), false);
   assert.equal(isPublicPath('/blogs'), false);
   assert.equal(isPublicPath('/api/ai-blog-draft'), false);
+  assert.equal(isPublicPath('/api/ai-blog-photo-generate'), false);
   assert.equal(isPublicPath('/api/local/blog_posts'), false);
 });

@@ -24,11 +24,15 @@ import {
   bodyToHtml,
   cleanImagePrompts,
   imagePromptsText,
+  SHORT_DRAFT_SHARE,
   TABLE_MAX_COLUMNS,
   TABLE_MAX_ROWS,
   TOPICS,
   cleanDraft,
   plainText,
+  isShortDraft,
+  postUrl,
+  whatsappShareUrl,
   isValidSlug,
   lengthWords,
   parseBody,
@@ -190,6 +194,21 @@ test('nothing in the article can become markup on the page', () => {
   for (const tag of tags) assert.ok(['h2', 'h3', 'p', 'ul', 'ol', 'li', 'aside', 'strong', 'em', 'div', 'table', 'thead', 'tbody', 'tr', 'th', 'td'].includes(tag), tag);
 });
 
+test('a draft well short of the length asked is sent back once to be filled out', () => {
+  assert.equal(SHORT_DRAFT_SHARE, 0.7);
+  assert.equal(isShortDraft('word '.repeat(550), 1000), true, 'the published post: about 550 words of the 1,000 asked');
+  assert.equal(isShortDraft('word '.repeat(700), 1000), false);
+  assert.equal(isShortDraft('word '.repeat(450), 600), false, 'a short post asked to be short is fine');
+});
+
+test('a published post is shared on WhatsApp with its title, summary and website address', () => {
+  assert.equal(postUrl('jd-enterprise.com', 'greasing-a-breaker'), 'https://jd-enterprise.com/blog/greasing-a-breaker');
+  const url = whatsappShareUrl({ title: ' Greasing a breaker ', summary: 'How & why.', slug: 'greasing-a-breaker' }, 'jd-enterprise.com');
+  assert.match(url, /^https:\/\/wa\.me\/\?text=/);
+  assert.equal(decodeURIComponent(url.slice('https://wa.me/?text='.length)), 'Greasing a breaker\n\nHow & why.\n\nhttps://jd-enterprise.com/blog/greasing-a-breaker');
+  assert.equal(decodeURIComponent(whatsappShareUrl({ title: 'T', summary: null, slug: 's' }, 'x.test').split('text=')[1]), 'T\n\nhttps://x.test/blog/s');
+});
+
 test('words, reading time and tags', () => {
   const body = `## Heading\n${'word '.repeat(400)}\n- one two`;
   assert.equal(wordCount(body), 403);
@@ -283,6 +302,20 @@ test('the photos box shows each slot with where it goes, its prompt or photo, an
   assert.match(markup, /section not found: goes at the end/);
   assert.match(markup, /Add your own photo/);
   assert.match(markup, /Make new photo prompts/);
+  // A prompt without a photo can be made here; one with a photo can be made again. Only one photo is
+  // missing, so there is no "Make all" button.
+  assert.equal((markup.match(/Generate photo<\/button>/g) ?? []).length, 1);
+  assert.equal((markup.match(/Generate again<\/button>/g) ?? []).length, 1, 'not for the owner\'s own photo, which has no prompt');
+  assert.doesNotMatch(markup, /Make all/);
+
+  const twoMissing = renderToStaticMarkup(createElement(BlogPhotoPrompts, {
+    ...props,
+    prompts: [
+      { place: 'Cover photo', prompt: 'A yellow backhoe loader at a quarry. No logos.', alt: '' },
+      { place: 'After the section: Bushes', prompt: 'A worn bush on a bench. No logos.', alt: '' },
+    ],
+  }));
+  assert.match(twoMissing, /Make all 2 photos<\/button>/);
 
   const empty = renderToStaticMarkup(createElement(BlogPhotoPrompts, { ...props, prompts: [] }));
   assert.match(empty, /No photos yet/);

@@ -17,6 +17,14 @@ export type AiJsonRequest = {
   /** How long one provider may take before it is abandoned. Leave unset for the usual budget; a
    *  long piece of writing (a blog article) genuinely needs more than a one-line answer. */
   timeoutMs?: number;
+  /** How long the first provider works alone before the next is started alongside it. Leave unset
+   *  for the usual few seconds. A long piece of writing gives the better writer (Gemini) longer:
+   *  with the usual head start, the faster backup always finished a full article first. */
+  hedgeMs?: number;
+  /** Always start with the first provider in the configured order (Gemini for 'quality'), instead
+   *  of a random one (generate.ts rotateForFairShare). For the occasional long piece of writing,
+   *  where the better writer matters more than spreading the free allowances. */
+  keepOrder?: boolean;
 };
 
 export type AiProviderResult = { text: string; model: string };

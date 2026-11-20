@@ -56,6 +56,7 @@ const timeoutMs = (request: AiJsonRequest): number => {
  *
  *  Set AI_HEDGE_MS / AI_FAST_HEDGE_MS to 0 to disable and fall back to plain sequential retry. */
 const hedgeMs = (request: AiJsonRequest): number => {
+  if (typeof request.hedgeMs === 'number' && Number.isFinite(request.hedgeMs) && request.hedgeMs >= 0) return request.hedgeMs;
   const fast = request.priority === 'speed';
   const configured = Number(process.env[fast ? 'AI_FAST_HEDGE_MS' : 'AI_HEDGE_MS']);
   const base = Number.isFinite(configured) && configured >= 0 ? configured : fast ? 2_000 : 4_000;
@@ -249,7 +250,7 @@ export async function generateJson<T>(request: AiJsonRequest): Promise<{ data: T
   // to the healthy list, so rotation can never hand the job to a provider already cooling down.
   const candidates = rotateForFairShare(available, {
     priority: request.priority,
-    rotate: process.env.AI_ROTATE !== 'off',
+    rotate: process.env.AI_ROTATE !== 'off' && request.keepOrder !== true,
     pick: (count) => Math.floor(Math.random() * count),
   });
 

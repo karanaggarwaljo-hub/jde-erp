@@ -3,10 +3,12 @@
 /**
  * "Photos for this post": the photos the article needs, and the photos themselves once uploaded.
  *
- * Each slot is one photo: where it goes, a prompt to make it with an AI image tool (copied with one
- * press), its alt text, and an Upload button. The cover photo is shown under the post's title and in
- * link previews; every other photo goes after the section chosen in "Where it goes". A real photo
- * the owner already has can be added with "Add your own photo", with no prompt at all.
+ * Each slot is one photo: where it goes, a prompt to make it with an AI image tool, its alt text, a
+ * Generate photo button that makes it here from the prompt (app/api/ai-blog-photo-generate), and an
+ * Upload button for a photo made elsewhere. "Make all photos" makes every missing one in turn. The
+ * cover photo is shown under the post's title and in link previews; every other photo goes after
+ * the section chosen in "Where it goes". A real photo the owner already has can be added with
+ * "Add your own photo", with no prompt at all.
  *
  * The prompts come with the AI's first draft. "Make new photo prompts" asks again from the article
  * as it stands, and keeps every photo already uploaded (lib/blog.ts mergePromptsKeepingPhotos).
@@ -15,7 +17,7 @@
  */
 
 import { useRef, useState } from 'react';
-import { Check, Copy, ImageIcon, ImagePlus, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Check, Copy, ImageIcon, ImagePlus, RefreshCw, Sparkles, Trash2, Upload } from 'lucide-react';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { resizeImageForUpload } from '@/lib/imageResize';
 import {
@@ -62,6 +64,17 @@ async function uploadPhoto(postId: string, file: File): Promise<string> {
   return result.url;
 }
 
+/** Makes the photo from its prompt on the server, stores it, and answers with its public address. */
+async function generatePhoto(postId: string, slot: ImagePrompt): Promise<string> {
+  const res = await fetch('/api/ai-blog-photo-generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ postId, prompt: slot.prompt, place: slot.place }),
+  });
+  const result = (await parseJsonOrThrow(res, 'The photo could not be made.')) as { url: string };
+  return result.url;
+}
+
 const NEW_SLOT = -1;
 
 export default function BlogPhotoPrompts({ postId, companyId, prompts, article, disabled, onReplace }: {
@@ -78,6 +91,9 @@ export default function BlogPhotoPrompts({ postId, companyId, prompts, article, 
   const [copied, setCopied] = useState('');
   const [making, setMaking] = useState(false);
   const [uploading, setUploading] = useState<number | null>(null);
+  // The slot whose photo is being made, and how far "Make all photos" has got.
+  const [generating, setGenerating] = useState<number | null>(null);
+  const [batch, setBatch] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState('');
   // Alt text being typed, by slot, saved when the box is left.
   const [altDrafts, setAltDrafts] = useState<Record<number, string>>({});
@@ -85,7 +101,8 @@ export default function BlogPhotoPrompts({ postId, companyId, prompts, article, 
   const uploadTarget = useRef<number>(NEW_SLOT);
 
   const places = photoPlaces(article.body);
-  const busy = disabled || making || uploading !== null;
+  const busy = disabled || making || uploading !== null || generating !== null;
+  const missing = prompts.map((slot, index) => ({ slot, index })).filter(({ slot }) => slot.prompt && !slot.url);
   const hasCover = prompts.some((slot) => isCoverPlace(slot.place) && slot.url);
   const promptCount = prompts.filter((slot) => slot.prompt).length;
 
@@ -137,6 +154,46 @@ export default function BlogPhotoPrompts({ postId, companyId, prompts, article, 
     }
   };
 
+  /** Makes one slot's photo from its prompt and saves it into a copy of the slots, which is returned
+   *  so "Make all photos" can carry on from it. */
+  const generateInto = async (slots: ImagePrompt[], index: number): Promise<ImagePrompt[]> => {
+    setGenerating(index);
+    const url = await generatePhoto(postId, slots[index]);
+    const next = slots.map((slot, n) => (n === index ? { ...slot, url } : slot));
+    await onReplace(cleanPhotoSlots(next));
+    return next;
+  };
+
+  const generate = async (index: number) => {
+    if (prompts[index]?.url && !window.confirm('Make a new photo in place of this one?')) return;
+    setError('');
+    try {
+      await generateInto(prompts, index);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The photo could not be made.');
+    } finally {
+      setGenerating(null);
+    }
+  };
+
+  const generateAll = async () => {
+    const todo = missing.map(({ index }) => index);
+    if (!todo.length) return;
+    setError('');
+    let slots = [...prompts];
+    try {
+      for (const [done, index] of todo.entries()) {
+        setBatch({ done, total: todo.length });
+        slots = await generateInto(slots, index);
+      }
+    } catch (cause) {
+      setError(`${cause instanceof Error ? cause.message : 'A photo could not be made.'} The photos made so far are saved.`);
+    } finally {
+      setGenerating(null);
+      setBatch(null);
+    }
+  };
+
   const remove = (index: number) => {
     const slot = prompts[index];
     if (!slot) return;
@@ -178,8 +235,13 @@ export default function BlogPhotoPrompts({ postId, companyId, prompts, article, 
         )}
       </div>
       <p className="text-sm text-muted">
-        Copy a prompt into an AI image tool such as Gemini or ChatGPT, make the photo, then press <strong>Upload photo</strong>. It goes into the post where it says.
+        Press <strong>Generate photo</strong> and the AI makes it here from its prompt, in about half a minute. Or make it in another app and press <strong>Upload photo</strong>. Each photo goes into the post where it says.
       </p>
+      {missing.length > 1 && (
+        <button type="button" className="btn btn-primary btn-sm" style={{ alignSelf: 'flex-start' }} disabled={busy} onClick={() => void generateAll()}>
+          <Sparkles size={13} /> {batch ? `Making photo ${batch.done + 1} of ${batch.total}…` : `Make all ${missing.length} photos`}
+        </button>
+      )}
 
       {error && <p className="text-sm text-danger" role="alert">{error}</p>}
 
@@ -208,9 +270,21 @@ export default function BlogPhotoPrompts({ postId, companyId, prompts, article, 
                   <p className="blog-photo-prompt">{slot.prompt}</p>
                 ) : null}
 
+                {generating === index && <p className="text-sm text-muted" role="status">Making the photo. This takes about half a minute…</p>}
+
                 <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+                  {slot.prompt && !slot.url && (
+                    <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => void generate(index)}>
+                      <Sparkles size={13} /> {generating === index ? 'Making…' : 'Generate photo'}
+                    </button>
+                  )}
                   {slot.url ? (
                     <>
+                      {slot.prompt && (
+                        <button type="button" className="btn btn-secondary btn-sm" disabled={busy} aria-label={`Generate photo ${index + 1} again`} onClick={() => void generate(index)}>
+                          <Sparkles size={13} /> {generating === index ? 'Making…' : 'Generate again'}
+                        </button>
+                      )}
                       <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => pickFile(index)}>
                         <Upload size={13} /> {uploading === index ? 'Uploading…' : 'Replace photo'}
                       </button>
@@ -219,7 +293,7 @@ export default function BlogPhotoPrompts({ postId, companyId, prompts, article, 
                       </button>
                     </>
                   ) : (
-                    <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => pickFile(index)}>
+                    <button type="button" className={`btn ${slot.prompt ? 'btn-secondary' : 'btn-primary'} btn-sm`} disabled={busy} onClick={() => pickFile(index)}>
                       <Upload size={13} /> {uploading === index ? 'Uploading…' : 'Upload photo'}
                     </button>
                   )}
