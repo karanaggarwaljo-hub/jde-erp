@@ -2,6 +2,24 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-11-20 — Blog: photos in one press, fuller articles, share on WhatsApp
+
+From the blog audit.
+
+- **Photos in one press.** In **Photos for this post**, each photo now has **Generate photo**: the AI
+  makes it here from its prompt in about half a minute, with the same Gemini image service as the
+  Website Catalog, and it goes into the post. **Make all photos** makes every missing one in turn.
+  **Generate again** (it asks first) makes a new one in place of a photo you do not like. Upload
+  photo is still there for photos you make elsewhere or take yourself.
+- **Fuller articles.** Your first posts were written by the backup AI at about half the length you
+  asked for (about 550 words of 1,000). Drafts are now always started with Gemini, which writes the
+  fuller article, and given 25 seconds before the backup is asked. A draft that still comes back
+  well short is sent back once to be filled out, keeping its headings.
+- **Share on WhatsApp.** A published post has **Share on WhatsApp** in the editor and in the Blog
+  list. WhatsApp opens with the title, summary and link ready; pick a customer, a group or a
+  broadcast list. **View on the website** now opens the post on jd-enterprise.com.
+- After publishing or saving a published post, the website shows it within a minute.
+
 ## 2026-11-20 — Blog: every new post in a different format
 
 You asked for each new blog post to come out in a different format.

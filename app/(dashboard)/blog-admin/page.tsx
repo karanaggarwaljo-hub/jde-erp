@@ -1,14 +1,14 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Globe, Newspaper, Pencil, PenLine, Trash2, Undo2 } from 'lucide-react';
+import { Globe, MessageCircle, Newspaper, Pencil, PenLine, Trash2, Undo2 } from 'lucide-react';
 import { useCompany } from '@/components/CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import SummaryLine from '@/components/SummaryLine';
 import RowMenu from '@/components/RowMenu';
 import BlogWriterModal, { type WrittenDraft } from '@/components/blog/BlogWriterModal';
 import BlogEditor, { type BlogPatch, type BlogPost } from '@/components/blog/BlogEditor';
-import { machineLabel, topicCoverage, uniqueSlug } from '@/lib/blog';
+import { machineLabel, postUrl, topicCoverage, uniqueSlug, whatsappShareUrl } from '@/lib/blog';
 import { DEFAULT_FORMAT, formatLabel, nextFormat, type FormatId } from '@/lib/blog-formats';
 
 /**
@@ -209,7 +209,8 @@ export default function BlogAdminPage() {
                         <td className="text-center">
                           <div className="flex gap-1 items-center" style={{ justifyContent: 'flex-end' }}>
                             <button type="button" className="btn btn-ghost btn-sm" aria-label={`Edit ${post.title}`} title={isLive ? 'Edit' : 'Check and publish'} onClick={() => setEditingId(post.id)}><Pencil size={14} /></button>
-                            {isLive && <a className="btn btn-ghost btn-sm" aria-label={`View ${post.title} on the website`} title="View on the website" href={`/blog/${post.slug}`} target="_blank" rel="noreferrer"><Globe size={14} /></a>}
+                            {isLive && <a className="btn btn-ghost btn-sm" aria-label={`Share ${post.title} on WhatsApp`} title="Share on WhatsApp" href={whatsappShareUrl(post, SITE_HOST)} target="_blank" rel="noreferrer"><MessageCircle size={14} /></a>}
+                            {isLive && <a className="btn btn-ghost btn-sm" aria-label={`View ${post.title} on the website`} title="View on the website" href={postUrl(SITE_HOST, post.slug)} target="_blank" rel="noreferrer"><Globe size={14} /></a>}
                             <RowMenu
                               label={`More for ${post.title}`}
                               items={[

@@ -1,6 +1,6 @@
 import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 import { checkCompanyAccess } from '@/lib/auth/dal';
-import { cleanDraft, isMachine, lengthWords, machineLabel, topicById } from '@/lib/blog';
+import { cleanDraft, isMachine, isShortDraft, lengthWords, machineLabel, topicById, wordCount } from '@/lib/blog';
 import { DEFAULT_FORMAT, formatById, isFormat } from '@/lib/blog-formats';
 import { IMAGE_PROMPTS_SCHEMA, PHOTO_GUIDANCE } from '@/lib/blog-photo-prompts';
 
@@ -85,6 +85,25 @@ const SYSTEM_PROMPT = [
 
 const text = (value: unknown, max: number) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
+// Timing, within the function's maxDuration of 90 seconds. Gemini writes the fuller, better article
+// but takes 15 to 30 seconds. Before, the first provider was picked at random (to spread the free
+// allowances) and had a 4 second head start, so the backup (Groq) wrote every post, at about half
+// the length asked. Drafts now always start with Gemini (keepOrder) and give it 25 seconds alone;
+// a draft that still comes back short is filled out once, if time allows.
+const DRAFT_HEAD_START_MS = 25_000;
+const DRAFT_TIMEOUT_MS = 60_000;
+const LENGTHEN_IF_STARTED_BEFORE_MS = 45_000;
+const FINISH_BY_MS = 82_000;
+
+const LENGTHEN_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    body: { type: 'string', description: BLOG_JSON_SCHEMA.properties.body.description },
+  },
+  required: ['body'],
+};
+
 /**
  * Writes a first draft of one blog article. Nothing is saved here: the Blog screen saves what comes
  * back as a draft, which the owner reads and edits before publishing.
@@ -112,19 +131,57 @@ export async function POST(request: Request) {
     notes ? `Notes from the shop owner (true, use them): ${notes}` : null,
   ].filter(Boolean).join('\n');
 
+  const started = Date.now();
   try {
     const { data, model } = await generateJson<Record<string, unknown>>({
       system: SYSTEM_PROMPT,
       prompt,
       schema: BLOG_JSON_SCHEMA,
       schemaName: 'blog_article',
-      timeoutMs: 60_000,
+      timeoutMs: DRAFT_TIMEOUT_MS,
+      hedgeMs: DRAFT_HEAD_START_MS,
+      keepOrder: true,
     });
     const draft = cleanDraft(data);
     if (!draft.title || draft.body.length < 200) {
       return Response.json({ error: 'The AI sent back an article that was too short to use. Please press Write the post again.' }, { status: 502 });
     }
-    return Response.json({ ...draft, format: format.id, model });
+
+    // Too short: asked once to fill it out, keeping its headings so the photo places still fit. If
+    // that fails or comes back no longer, the first draft is kept as it was.
+    let lengthenedBy = '';
+    const elapsed = Date.now() - started;
+    if (isShortDraft(draft.body, words) && elapsed < LENGTHEN_IF_STARTED_BEFORE_MS) {
+      const budget = Math.min(35_000, FINISH_BY_MS - elapsed);
+      try {
+        const longer = await generateJson<{ body?: unknown }>({
+          system: SYSTEM_PROMPT,
+          prompt: [
+            `This article came out at ${wordCount(draft.body)} words; it was asked for about ${words}.`,
+            `Write it again at about ${words} words, in the same layout (Format: ${format.label}).`,
+            'Keep every heading exactly as it is, in the same order, and every table, checklist and safety note. Add practical detail under each heading:',
+            'what to look at, what it means, what to do, and examples from Indian working conditions. Add no new figures, prices or part numbers.',
+            '',
+            `Title: ${draft.title}`,
+            '',
+            draft.body,
+          ].join('\n'),
+          schema: LENGTHEN_SCHEMA,
+          schemaName: 'blog_article_body',
+          timeoutMs: budget,
+          hedgeMs: Math.min(15_000, Math.floor(budget / 2)),
+          keepOrder: true,
+        });
+        const body = cleanDraft({ title: draft.title, body: longer.data?.body }).body;
+        if (wordCount(body) > wordCount(draft.body)) {
+          draft.body = body;
+          lengthenedBy = longer.model;
+        }
+      } catch (error) {
+        console.error('ai-blog-draft: lengthening the short draft failed; keeping the first draft:', error);
+      }
+    }
+    return Response.json({ ...draft, format: format.id, model: lengthenedBy ? `${model}, lengthened by ${lengthenedBy}` : model });
   } catch (error) {
     console.error('ai-blog-draft route failed:', error);
     return aiErrorResponse(error, 'The article could not be written.');
