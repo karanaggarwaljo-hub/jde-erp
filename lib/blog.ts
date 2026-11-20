@@ -339,9 +339,11 @@ export const lengthWords = (id: unknown): number => (LENGTHS.find((entry) => ent
  *   ## Heading  /  ### Smaller heading      (a single # is read as ##: the title is the only h1)
  *   - item  or  * item                       a bulleted list
  *   1. item                                  a numbered list
+ *   - [ ] item                               a checklist, drawn with tick boxes
  *   > text                                   a tip or a safety note, drawn as a box
+ *   | a | b |  then  | --- | --- |          a table: the first row is its heading row
  *   **bold**  and  *italic*                  inside any line
- * Everything else is a paragraph. A blank line ends a paragraph or a list.
+ * Everything else is a paragraph. A blank line ends a paragraph, a list or a table.
  * ------------------------------------------------------------------------------------------- */
 
 export type Inline = { text: string; bold?: boolean; italic?: boolean };
@@ -351,7 +353,33 @@ export type Block =
   | { kind: 'photo'; url: string; alt: string }
   | { kind: 'p'; text: Inline[] }
   | { kind: 'note'; text: Inline[] }
-  | { kind: 'ul' | 'ol'; items: Inline[][] };
+  | { kind: 'ul' | 'ol' | 'checklist'; items: Inline[][] }
+  /** `head` is empty for a table written without a heading row. Every row has head's width. */
+  | { kind: 'table'; head: Inline[][]; rows: Inline[][][] };
+
+/** A table is cut to this size: wider than this does not fit on a phone, longer is not a table. */
+export const TABLE_MAX_COLUMNS = 5;
+export const TABLE_MAX_ROWS = 30;
+
+const TABLE_SEPARATOR = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/;
+
+/** The cells of one "| a | b |" line, without the outer pipes. */
+const tableCells = (line: string): string[] =>
+  line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim());
+
+/** Table lines as a table block: the first line is the heading row when a separator line follows
+ *  it. Separator lines are dropped, rows are padded or cut to the same width. */
+function tableBlock(lines: readonly string[]): Block | null {
+  const hasHead = lines.length > 1 && TABLE_SEPARATOR.test(lines[1]);
+  const rowsText = lines.filter((line) => !TABLE_SEPARATOR.test(line)).map(tableCells);
+  if (!rowsText.length) return null;
+  const width = Math.min(TABLE_MAX_COLUMNS, Math.max(...rowsText.map((row) => row.length)));
+  const shaped = rowsText.map((row) => Array.from({ length: width }, (_, index) => parseInline(row[index] ?? '')));
+  const [first, ...rest] = shaped;
+  return hasHead
+    ? { kind: 'table', head: first, rows: rest.slice(0, TABLE_MAX_ROWS) }
+    : { kind: 'table', head: [], rows: shaped.slice(0, TABLE_MAX_ROWS) };
+}
 
 /** **bold** and *italic* within one line. Unclosed markers are left as the characters they are. */
 export function parseInline(line: string): Inline[] {
@@ -371,9 +399,10 @@ export function parseInline(line: string): Inline[] {
 export function parseBody(body: string): Block[] {
   const blocks: Block[] = [];
   let paragraph: string[] = [];
-  let listKind: 'ul' | 'ol' | null = null;
+  let listKind: 'ul' | 'ol' | 'checklist' | null = null;
   let items: Inline[][] = [];
   let note: string[] = [];
+  let table: string[] = [];
 
   const flushParagraph = () => {
     if (paragraph.length) blocks.push({ kind: 'p', text: parseInline(paragraph.join(' ')) });
@@ -388,11 +417,26 @@ export function parseBody(body: string): Block[] {
     if (note.length) blocks.push({ kind: 'note', text: parseInline(note.join(' ')) });
     note = [];
   };
-  const flushAll = () => { flushParagraph(); flushList(); flushNote(); };
+  const flushTable = () => {
+    const block = table.length ? tableBlock(table) : null;
+    if (block) blocks.push(block);
+    table = [];
+  };
+  const flushAll = () => { flushParagraph(); flushList(); flushNote(); flushTable(); };
 
   for (const rawLine of String(body ?? '').replace(/\r\n?/g, '\n').split('\n')) {
     const line = rawLine.trim();
     if (!line) { flushAll(); continue; }
+
+    // A line starting with "|" is a table row; the table ends at the first line that is not one.
+    if (line.startsWith('|')) {
+      flushParagraph();
+      flushList();
+      flushNote();
+      table.push(line);
+      continue;
+    }
+    flushTable();
 
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
@@ -406,10 +450,13 @@ export function parseBody(body: string): Block[] {
     if (bullet || numbered) {
       flushParagraph();
       flushNote();
-      const kind = bullet ? 'ul' : 'ol';
+      // "- [ ] item" or "- [x] item": an item of a checklist. Every box is drawn empty, to be ticked
+      // by the reader at the machine.
+      const box = bullet?.[1].match(/^\[[ xX]?\]\s*(.*)$/);
+      const kind = box ? 'checklist' : bullet ? 'ul' : 'ol';
       if (listKind !== kind) flushList();
       listKind = kind;
-      items.push(parseInline((bullet ?? numbered)![1]));
+      items.push(parseInline(box ? box[1] : (bullet ?? numbered)![1]));
       continue;
     }
     const quoted = line.match(/^>\s?(.*)$/);
@@ -504,6 +551,8 @@ export function bodyToHtml(body: string, photos: readonly PublicPhoto[] = []): s
       case 'note': return `<aside class="blog-note">${inlineHtml(block.text)}</aside>`;
       case 'ul': return `<ul>${block.items.map((item) => `<li>${inlineHtml(item)}</li>`).join('')}</ul>`;
       case 'ol': return `<ol>${block.items.map((item) => `<li>${inlineHtml(item)}</li>`).join('')}</ol>`;
+      case 'checklist': return `<ul class="blog-checklist">${block.items.map((item) => `<li>${inlineHtml(item)}</li>`).join('')}</ul>`;
+      case 'table': return `<div class="blog-table"><table>${block.head.length ? `<thead><tr>${block.head.map((cell) => `<th>${inlineHtml(cell)}</th>`).join('')}</tr></thead>` : ''}<tbody>${block.rows.map((row) => `<tr>${row.map((cell) => `<td>${inlineHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
       default: return `<p>${inlineHtml(block.text)}</p>`;
     }
   }).join('');
@@ -513,7 +562,13 @@ export function bodyToHtml(body: string, photos: readonly PublicPhoto[] = []): s
 /** The article as plain words: for counting, and for a summary when none was written. */
 export function plainText(body: string): string {
   return parseBody(body)
-    .map((block) => (block.kind === 'photo' ? '' : 'items' in block ? block.items.map((item) => item.map((part) => part.text).join('')).join(' ') : block.text.map((part) => part.text).join('')))
+    .map((block) => {
+      const words = (parts: Inline[]) => parts.map((part) => part.text).join('');
+      if (block.kind === 'photo') return '';
+      if (block.kind === 'table') return [block.head, ...block.rows].map((row) => row.map(words).join(' ')).join(' ');
+      if ('items' in block) return block.items.map(words).join(' ');
+      return words(block.text);
+    })
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();

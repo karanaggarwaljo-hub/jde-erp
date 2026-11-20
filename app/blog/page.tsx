@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Newspaper } from 'lucide-react';
 import { listPublishedBlogPosts } from '@/lib/db';
 import { MACHINES, isSafePhotoUrl, machineLabel, type PublicPhoto } from '@/lib/blog';
+import { machineAndFormat } from '@/lib/blog-formats';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,7 +63,7 @@ export default async function BlogListPage({ searchParams }: { searchParams: Pro
                 // eslint-disable-next-line @next/next/no-img-element
                 <img className="blog-card-cover" src={cover.url} alt={cover.alt || String(post.title ?? '')} loading="lazy" />
               )}
-              <span className="blog-card-machine">{machineLabel(String(post.machine ?? ''))}</span>
+              <span className="blog-card-machine">{machineAndFormat(machineLabel(String(post.machine ?? '')), post.format)}</span>
               <strong>{String(post.title ?? '')}</strong>
               {post.summary ? <span className="blog-card-summary">{String(post.summary)}</span> : null}
               <small>{dateOf(post.published_at)}</small>

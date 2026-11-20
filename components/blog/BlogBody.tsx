@@ -31,6 +31,16 @@ export default function BlogBody({ body, photos = [] }: { body: string; photos?:
           case 'note': return <aside key={index} className="blog-note"><InlineText parts={block.text} /></aside>;
           case 'ul': return <ul key={index}>{block.items.map((item, n) => <li key={n}><InlineText parts={item} /></li>)}</ul>;
           case 'ol': return <ol key={index}>{block.items.map((item, n) => <li key={n}><InlineText parts={item} /></li>)}</ol>;
+          case 'checklist': return <ul key={index} className="blog-checklist">{block.items.map((item, n) => <li key={n}><InlineText parts={item} /></li>)}</ul>;
+          // Wrapped so a wide table scrolls sideways on a phone instead of widening the page.
+          case 'table': return (
+            <div key={index} className="blog-table">
+              <table>
+                {block.head.length > 0 && <thead><tr>{block.head.map((cell, n) => <th key={n}><InlineText parts={cell} /></th>)}</tr></thead>}
+                <tbody>{block.rows.map((row, r) => <tr key={r}>{row.map((cell, n) => <td key={n}><InlineText parts={cell} /></td>)}</tr>)}</tbody>
+              </table>
+            </div>
+          );
           // A plain <img>, not next/image: the same markup as the website feed, and the photo was
           // already shrunk to at most 1600px when it was uploaded.
           // eslint-disable-next-line @next/next/no-img-element

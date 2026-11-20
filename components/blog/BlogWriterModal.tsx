@@ -6,19 +6,25 @@
  * Three choices and one button. The topic bank (lib/blog.ts TOPICS) lists the topics not yet written
  * first, so working through "every topic" is simply taking the next one down the list. Nothing is
  * published from here: what comes back is saved as a draft and opened for the owner to check.
+ *
+ * The format (lib/blog-formats.ts) comes already chosen: the one the recent posts have not used, so
+ * every new post reads differently. The owner can pick another, but need not touch it.
  */
 
 import { useState } from 'react';
-import { CheckCircle2, PenLine } from 'lucide-react';
+import { CheckCircle2, PenLine, Shuffle } from 'lucide-react';
 import { parseJsonOrThrow } from '@/lib/parseJsonOrThrow';
 import { LENGTHS, MACHINES, topicsFor, type BlogDraft, type LengthId, type Machine } from '@/lib/blog';
+import { FORMATS, formatById, type FormatId } from '@/lib/blog-formats';
 
-export type WrittenDraft = BlogDraft & { model: string; machine: Machine; topic: string; topicId: string | null };
+export type WrittenDraft = BlogDraft & { model: string; machine: Machine; topic: string; topicId: string | null; format: FormatId };
 
-export default function BlogWriterModal({ companyId, writtenTopicIds, onWritten, onClose }: {
+export default function BlogWriterModal({ companyId, writtenTopicIds, suggestedFormat, onWritten, onClose }: {
   companyId: string;
   /** Topics that already have a post, draft or published. */
   writtenTopicIds: ReadonlySet<string>;
+  /** The format no recent post has used (lib/blog-formats.ts nextFormat), chosen to start with. */
+  suggestedFormat: FormatId;
   /** Called with the draft once it is written. The page saves it and opens it. */
   onWritten: (draft: WrittenDraft) => Promise<void>;
   onClose: () => void;
@@ -28,6 +34,7 @@ export default function BlogWriterModal({ companyId, writtenTopicIds, onWritten,
   const [ownTopic, setOwnTopic] = useState('');
   const [notes, setNotes] = useState('');
   const [length, setLength] = useState<LengthId>('standard');
+  const [format, setFormat] = useState<FormatId>(suggestedFormat);
   const [writing, setWriting] = useState(false);
   const [error, setError] = useState('');
 
@@ -48,10 +55,10 @@ export default function BlogWriterModal({ companyId, writtenTopicIds, onWritten,
       const res = await fetch('/api/ai-blog-draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyId, machine, topic, topicId: ownTopic.trim() ? null : topicId, notes, length }),
+        body: JSON.stringify({ companyId, machine, topic, topicId: ownTopic.trim() ? null : topicId, notes, length, format }),
       });
       const draft = (await parseJsonOrThrow(res, 'The article could not be written.')) as BlogDraft & { model?: string };
-      await onWritten({ ...draft, model: draft.model ?? '', machine, topic, topicId: ownTopic.trim() ? null : topicId });
+      await onWritten({ ...draft, model: draft.model ?? '', machine, topic, topicId: ownTopic.trim() ? null : topicId, format });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The article could not be written. Please try again.');
       setWriting(false);
@@ -111,6 +118,24 @@ export default function BlogWriterModal({ companyId, writtenTopicIds, onWritten,
           </div>
 
           <div className="form-group" style={{ marginBottom: 0 }}>
+            <span className="form-label" id="blog-format-label">4. What kind of article?</span>
+            <p className="text-muted text-sm blog-format-note" id="blog-format-note">
+              <Shuffle size={13} aria-hidden="true" /> {format === suggestedFormat
+                ? <><strong>{formatById(suggestedFormat).label}</strong> is chosen because your recent posts have not used it, so this one reads differently. Pick another if you like.</>
+                : <>You chose <strong>{formatById(format).label}</strong>. <button type="button" className="link-button" disabled={writing} onClick={() => setFormat(suggestedFormat)}>Go back to {formatById(suggestedFormat).label}</button></>}
+            </p>
+            <div className="blog-format-choices" role="radiogroup" aria-labelledby="blog-format-label" aria-describedby="blog-format-note">
+              {FORMATS.map((entry) => (
+                <button key={entry.id} type="button" role="radio" aria-checked={format === entry.id} disabled={writing}
+                  className={`blog-format${format === entry.id ? ' active' : ''}`} onClick={() => setFormat(entry.id)}>
+                  <span>{entry.label}{entry.id === suggestedFormat && <em className="blog-format-next">Up next</em>}</span>
+                  <small>{entry.hint}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="form-group" style={{ marginBottom: 0 }}>
             <span className="form-label" id="blog-length-label">How long?</span>
             <div className="pay-how blog-length-choices" role="group" aria-labelledby="blog-length-label">
               {LENGTHS.map((entry) => (
@@ -126,7 +151,7 @@ export default function BlogWriterModal({ companyId, writtenTopicIds, onWritten,
 
         <div className="modal-footer modal-footer--sticky">
           <span className="text-muted text-sm" style={{ marginRight: 'auto' }}>
-            {writing ? 'Writing the article. This can take up to a minute…' : topic ? `Topic: ${topic}` : 'Choose a topic above, or type your own.'}
+            {writing ? 'Writing the article. This can take up to a minute…' : topic ? `${formatById(format).label}: ${topic}` : 'Choose a topic above, or type your own.'}
           </span>
           <button type="button" className="btn btn-secondary" disabled={writing} onClick={onClose}>Cancel</button>
           <button type="button" className="btn btn-primary" disabled={!topic || writing} onClick={write}>

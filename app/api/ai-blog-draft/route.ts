@@ -1,6 +1,7 @@
 import { aiErrorResponse, generateJson } from '@/lib/ai/generate';
 import { checkCompanyAccess } from '@/lib/auth/dal';
 import { cleanDraft, isMachine, lengthWords, machineLabel, topicById } from '@/lib/blog';
+import { DEFAULT_FORMAT, formatById, isFormat } from '@/lib/blog-formats';
 import { IMAGE_PROMPTS_SCHEMA, PHOTO_GUIDANCE } from '@/lib/blog-photo-prompts';
 
 export const dynamic = 'force-dynamic';
@@ -23,8 +24,10 @@ const BLOG_JSON_SCHEMA = {
     body: {
       type: 'string',
       description:
-        'The article, using ONLY this formatting: "## " for a section heading, "### " for a smaller heading, "- " for a bullet, "1. " for a numbered step, "> " for one short safety note or tip, **bold** and *italic*. A blank line between paragraphs. ' +
-        'No title heading at the top (the title is shown separately), no tables, no links, no images, no HTML. Start with a short opening paragraph, then 4 to 7 sections with "## " headings. End with a short closing section that sums up what to do.',
+        'The article, laid out exactly as the Format in the request says, using ONLY this formatting: "## " for a section heading, "### " for a smaller heading, "- " for a bullet, "1. " for a numbered step, ' +
+        '"- [ ] " for an item of a checklist, "> " for a short safety note, tip or fact, **bold** and *italic*. A blank line between paragraphs, lists and tables. ' +
+        'A table only where the Format asks for one: a heading row such as "| Symptom | Likely causes | What to check first |", then the line "| --- | --- | --- |", then one row per line, at most 5 columns, a few words per cell. ' +
+        'No title heading at the top (the title is shown separately), no links, no images, no HTML.',
     },
     faq: {
       type: 'array',
@@ -98,10 +101,13 @@ export async function POST(request: Request) {
   if (!topic) return Response.json({ error: 'Choose a topic or type one.' }, { status: 400 });
   const notes = text(body?.notes, 1500);
   const words = lengthWords(body?.length);
+  // The writer sends the format it picked (lib/blog-formats.ts nextFormat) or the owner chose.
+  const format = formatById(isFormat(body?.format) ? body.format : DEFAULT_FORMAT);
 
   const prompt = [
     `Machine: ${machineLabel(machine)}`,
     `Topic: ${topic}`,
+    `Format: ${format.label}. ${format.structure}`,
     `Length: about ${words} words in the body.`,
     notes ? `Notes from the shop owner (true, use them): ${notes}` : null,
   ].filter(Boolean).join('\n');
@@ -118,7 +124,7 @@ export async function POST(request: Request) {
     if (!draft.title || draft.body.length < 200) {
       return Response.json({ error: 'The AI sent back an article that was too short to use. Please press Write the post again.' }, { status: 502 });
     }
-    return Response.json({ ...draft, model });
+    return Response.json({ ...draft, format: format.id, model });
   } catch (error) {
     console.error('ai-blog-draft route failed:', error);
     return aiErrorResponse(error, 'The article could not be written.');

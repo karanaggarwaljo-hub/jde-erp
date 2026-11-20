@@ -2,6 +2,25 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-11-20 — Blog: every new post in a different format
+
+You asked for each new blog post to come out in a different format.
+
+- **Write a new post** now has **4. What kind of article?** with ten formats: Complete guide,
+  Step-by-step, Checklist, Mistakes to avoid, Fault finder, Myths and facts, Comparison, How it
+  works, Quick tips and Buyer's guide. The AI lays the article out in that shape: a checklist has
+  tick boxes to follow at the machine, a fault finder starts with a table of symptoms, causes and
+  what to check first, myths and facts puts each myth against the truth, and so on.
+- **You do not need to choose.** The writer opens with the format your recent posts have not used
+  already chosen, marked **Up next**. No two posts in a row share a format, and all ten are used
+  before any comes round again. Tap another format if you want something else.
+- Articles can now have **tick-box checklists** and **tables**, on the ERP's pages, in the preview
+  and on jd-enterprise.com. If you edit an article by hand: `- [ ] item` makes a checklist item, and
+  a table is `| Heading | Heading |`, then `| --- | --- |`, then one row per line.
+- The Blog list shows each post's format under its machine, the editor shows "Written as: …", and
+  the website shows it on the card and above the title, for example "BACKHOE LOADER · CHECKLIST".
+  Posts written before this read as a guide, as before.
+
 ## 2026-11-20 — Website Catalog: remove a listing's photo
 
 You asked for a way to remove the photo on a Website Catalog listing.

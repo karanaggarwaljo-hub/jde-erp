@@ -6,6 +6,7 @@ import { ArrowLeft, Newspaper, Phone, PackageSearch } from 'lucide-react';
 import BlogBody from '@/components/blog/BlogBody';
 import { getCompanyPublicContact, getPublishedBlogPost, getStorefrontCompanyId } from '@/lib/db';
 import { isSafePhotoUrl, machineLabel, readMinutes, type FaqItem, type PublicPhoto } from '@/lib/blog';
+import { machineAndFormat } from '@/lib/blog-formats';
 
 export const dynamic = 'force-dynamic';
 
@@ -115,7 +116,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       <Link href="/blog" className="text-muted text-sm flex items-center gap-2" style={{ textDecoration: 'none', marginBottom: '14px' }}>
         <ArrowLeft size={14} /> All guides
       </Link>
-      <p className="blog-card-machine">{machineLabel(String(post.machine ?? ''))}</p>
+      <p className="blog-card-machine">{machineAndFormat(machineLabel(String(post.machine ?? '')), post.format)}</p>
       <h1>{title}</h1>
       <p className="blog-meta">{[dateOf(post.published_at), `${readMinutes(body)} min read`].filter(Boolean).join(' · ')}</p>
       {cover && (

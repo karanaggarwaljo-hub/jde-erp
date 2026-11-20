@@ -6,7 +6,8 @@
 -- Additive: one new table, one trigger function. Nothing existing is altered. Service role only,
 -- like every jde_ table. Rehearsed in rolled-back transactions (publish stamps the date once, a
 -- repeated or malformed web address is refused); applied 2026-11-19 as migration blog_posts.
--- The image_prompts column was added afterwards by scripts/blog-photo-prompts.sql.
+-- The image_prompts column was added afterwards by scripts/blog-photo-prompts.sql, and the format
+-- column by scripts/blog-formats.sql.
 
 create table if not exists public.jde_blog_posts (
   id text primary key default gen_random_uuid()::text,
