@@ -24,8 +24,11 @@ import {
   bodyToHtml,
   cleanImagePrompts,
   imagePromptsText,
+  TABLE_MAX_COLUMNS,
+  TABLE_MAX_ROWS,
   TOPICS,
   cleanDraft,
+  plainText,
   isValidSlug,
   lengthWords,
   parseBody,
@@ -135,6 +138,40 @@ test('the article is read into headings, paragraphs, lists and notes', () => {
   assert.equal(bullets.items[0].map((part) => part.text).join(''), 'Grease the chisel before every shift');
 });
 
+test('a checklist and a table are read as their own blocks', () => {
+  const blocks = parseBody([
+    'Before you start:',
+    '- [ ] Boom lowered to the ground',
+    '- [x] Engine **off**',
+    '- [] Key out',
+    '- plain bullet',
+    '',
+    '| Symptom | Likely cause | What to do |',
+    '| --- | :---: | --- |',
+    '| Boom drifts down | Worn cylinder seals | Have the seals *checked* |',
+    '| Slow lift | Low oil |',
+    '| a | b | c | d | e | f | g |',
+    'After the table.',
+  ].join('\n'));
+  assert.deepEqual(blocks.map((block) => block.kind), ['p', 'checklist', 'ul', 'table', 'p']);
+  const checklist = blocks[1] as { items: Array<Array<{ text: string; bold?: boolean }>> };
+  assert.deepEqual(checklist.items.map((item) => item.map((part) => part.text).join('')), ['Boom lowered to the ground', 'Engine off', 'Key out']);
+  assert.equal(checklist.items[1][1].bold, true);
+  const table = blocks[3] as Extract<ReturnType<typeof parseBody>[number], { kind: 'table' }>;
+  const words = (cells: Array<Array<{ text: string }>>) => cells.map((cell) => cell.map((part) => part.text).join(''));
+  assert.deepEqual(words(table.head), ['Symptom', 'Likely cause', 'What to do', '', '']);
+  assert.equal(table.rows.length, 3, 'the separator line is not a row');
+  assert.deepEqual(words(table.rows[1]), ['Slow lift', 'Low oil', '', '', ''], 'a short row is padded');
+  assert.equal(table.rows[2].length, TABLE_MAX_COLUMNS, 'a wide row is cut to what fits on a phone');
+  assert.equal(table.rows[0][2][1].italic, true);
+
+  // Without a separator line there is no heading row; a table is cut to TABLE_MAX_ROWS.
+  const plain = parseBody(Array.from({ length: 40 }, (_, n) => `| row ${n} | x |`).join('\n'))[0] as typeof table;
+  assert.deepEqual(plain.head, []);
+  assert.equal(plain.rows.length, TABLE_MAX_ROWS);
+  assert.match(plainText('| Part | Check |\n|---|---|\n| Pin | Play |'), /^Part Check Pin Play$/);
+});
+
 test('nothing in the article can become markup on the page', () => {
   const hostile = [
     '## <img src=x onerror=alert(1)>',
@@ -142,13 +179,15 @@ test('nothing in the article can become markup on the page', () => {
     '- <a href="javascript:alert(1)">click</a>',
     '> <iframe src="https://example.com"></iframe>',
     '**<b>bold</b>**',
+    '| <script>x</script> | <img src=x> |',
+    '- [ ] <svg onload=alert(1)>',
   ].join('\n');
   const html = renderToStaticMarkup(createElement(BlogBody, { body: hostile }));
-  assert.doesNotMatch(html, /<script|<img|<iframe|<a /i);
+  assert.doesNotMatch(html, /<script|<img|<iframe|<a |<svg/i);
   assert.match(html, /&lt;script&gt;/);
   // Only the elements the reader draws itself.
   const tags = new Set((html.match(/<([a-z0-9]+)/g) ?? []).map((tag) => tag.slice(1)));
-  for (const tag of tags) assert.ok(['h2', 'h3', 'p', 'ul', 'ol', 'li', 'aside', 'strong', 'em', 'div'].includes(tag), tag);
+  for (const tag of tags) assert.ok(['h2', 'h3', 'p', 'ul', 'ol', 'li', 'aside', 'strong', 'em', 'div', 'table', 'thead', 'tbody', 'tr', 'th', 'td'].includes(tag), tag);
 });
 
 test('words, reading time and tags', () => {
@@ -178,11 +217,14 @@ test('a draft only needs a title and its own address to be saved', () => {
 });
 
 test('the website feed gets the same HTML the ERP pages draw, every word escaped', () => {
-  const body = '## Daily <checks>\nGrease **every** pin & *bush*.\n\n- one\n- two\n1. first\n> **Safety:** "stop" first';
+  const body = '## Daily <checks>\nGrease **every** pin & *bush*.\n\n- one\n- two\n1. first\n> **Safety:** "stop" first\n\n- [ ] Boom **down**\n- [ ] Key out\n\n| Part | What to look for |\n|---|---|\n| Pin | Play & *scoring* |\n\n| no | heading |';
   const fromReact = renderToStaticMarkup(createElement(BlogBody, { body }));
   // React writes ' as &#x27; and does not escape " in text; compare after evening those out.
   const tidy = (html: string) => html.replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"');
   assert.equal(tidy(bodyToHtml(body)), tidy(fromReact));
+  assert.match(bodyToHtml(body), /<ul class="blog-checklist"><li>Boom <strong>down<\/strong><\/li><li>Key out<\/li><\/ul>/);
+  assert.match(bodyToHtml(body), /<div class="blog-table"><table><thead><tr><th>Part<\/th><th>What to look for<\/th><\/tr><\/thead><tbody><tr><td>Pin<\/td><td>Play &amp; <em>scoring<\/em><\/td><\/tr><\/tbody><\/table><\/div>/);
+  assert.match(bodyToHtml(body), /<div class="blog-table"><table><tbody><tr><td>no<\/td><td>heading<\/td><\/tr><\/tbody><\/table><\/div>/);
   const hostile = bodyToHtml('<script>alert(1)</script>\n- <img src=x onerror=alert(1)>');
   assert.doesNotMatch(hostile, /<script|<img/);
   assert.match(hostile, /&lt;script&gt;/);

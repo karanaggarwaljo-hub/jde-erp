@@ -6,6 +6,7 @@ import { shopDay } from '../logbook';
 import type { StartFreshCounts } from '../start-fresh';
 import { listingFitment, type PartFitmentResult } from '../part-fitment';
 import { publicPhotos } from '../blog';
+import { formatLabel } from '../blog-formats';
 
 export type { TableName };
 
@@ -905,14 +906,16 @@ async function withPartNumbers(companyId: string, rows: Array<Record<string, unk
  *  publishing" notes, the topic and which AI wrote it never leave the ERP. image_prompts is read
  *  only to be turned into its uploaded photos (lib/blog.ts publicPhotos) and is never returned:
  *  the photo prompts themselves stay in the ERP. */
-const PUBLIC_BLOG_LIST_COLUMNS = 'slug, title, summary, machine, tags, published_at, updated_at';
+const PUBLIC_BLOG_LIST_COLUMNS = 'slug, title, summary, machine, format, tags, published_at, updated_at';
 const PUBLIC_BLOG_POST_COLUMNS = `${PUBLIC_BLOG_LIST_COLUMNS}, body, faq`;
 
-/** A post row with its photo slots replaced by the photos the public may see. */
+/** A post row with its photo slots replaced by the photos the public may see, and the name of its
+ *  format (lib/blog-formats.ts) for the website to show: "Checklist", "Myths and facts". */
 function withPublicPhotos(row: Record<string, unknown>, { inline }: { inline: boolean }): Record<string, unknown> {
   const { image_prompts: slots, ...rest } = row;
   const { cover, photos } = publicPhotos(slots);
-  return inline ? { ...rest, cover, photos } : { ...rest, cover };
+  const shown = { ...rest, format_label: formatLabel(rest.format) };
+  return inline ? { ...shown, cover, photos } : { ...shown, cover };
 }
 
 /** Server-only: every published blog post of the storefront company, newest first, without the

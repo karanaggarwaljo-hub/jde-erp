@@ -31,6 +31,7 @@ import {
   type ImagePrompt,
   type Machine,
 } from '@/lib/blog';
+import { formatLabel } from '@/lib/blog-formats';
 
 export type BlogPost = {
   id: string;
@@ -41,6 +42,8 @@ export type BlogPost = {
   machine: string;
   topic: string;
   topic_id: string | null;
+  /** How the article is laid out (lib/blog-formats.ts). "guide" for posts from before formats. */
+  format?: string | null;
   body: string;
   faq: FaqItem[] | null;
   tags: string[] | null;
@@ -231,6 +234,7 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
               <select id="blog-machine" className="form-input form-select" value={form.machine} disabled={Boolean(busy)} onChange={(event) => set('machine', event.target.value as Machine)}>
                 {MACHINES.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
               </select>
+              <span className="text-muted text-sm">Written as: {formatLabel(post.format)}</span>
             </div>
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label className="form-label" htmlFor="blog-tags">Tags <span className="text-muted" style={{ fontWeight: 400 }}>(with commas)</span></label>
@@ -258,7 +262,7 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
             {tab === 'write' ? (
               <>
                 <textarea aria-label="Article text" className="form-input blog-body-input" rows={22} value={form.body} disabled={Boolean(busy)} onChange={(event) => set('body', event.target.value)} />
-                <span className="text-muted text-sm">## heading · - bullet point · 1. step · &gt; safety note · **bold** · {words} words, {readMinutes(form.body)} min read</span>
+                <span className="text-muted text-sm">## heading · - bullet point · 1. step · - [ ] checklist · | table | row | · &gt; safety note · **bold** · {words} words, {readMinutes(form.body)} min read</span>
               </>
             ) : (
               <div className="blog-preview">

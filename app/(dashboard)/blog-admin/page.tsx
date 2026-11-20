@@ -9,6 +9,7 @@ import RowMenu from '@/components/RowMenu';
 import BlogWriterModal, { type WrittenDraft } from '@/components/blog/BlogWriterModal';
 import BlogEditor, { type BlogPatch, type BlogPost } from '@/components/blog/BlogEditor';
 import { machineLabel, topicCoverage, uniqueSlug } from '@/lib/blog';
+import { DEFAULT_FORMAT, formatLabel, nextFormat, type FormatId } from '@/lib/blog-formats';
 
 /**
  * Blog: articles for the company website about backhoe loaders, rock breakers and excavators.
@@ -17,6 +18,9 @@ import { machineLabel, topicCoverage, uniqueSlug } from '@/lib/blog';
  * picks a machine and a topic from the topic bank (lib/blog.ts), the AI writes a first draft, and it
  * opens here to be checked and published. Published posts appear on the public /blog pages and in
  * /api/public/blog, which the website reads; drafts never leave the ERP.
+ *
+ * Each new post is written in a different format from the last ones (lib/blog-formats.ts): the
+ * writer opens with the format used least recently already chosen, and the owner can pick another.
  */
 
 type Row = BlogPost & Record<string, unknown>;
@@ -33,6 +37,8 @@ export default function BlogAdminPage() {
   const { configError } = useCompany();
   const { rows: posts, loading, error: loadError, create, update, remove, activeCompany } = useCompanyTable<Row>('blog_posts');
   const [writing, setWriting] = useState(false);
+  // The format the next post is written in, picked when the writer opens.
+  const [nextUp, setNextUp] = useState<FormatId>(DEFAULT_FORMAT);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [show, setShow] = useState<Show>('all');
   const [feedback, setFeedback] = useState('');
@@ -56,6 +62,15 @@ export default function BlogAdminPage() {
 
   const editing = editingId ? posts.find((post) => post.id === editingId) : undefined;
 
+  /** Opens the writer with the format no recent post has used. */
+  const openWriter = () => {
+    const newestFirst = [...posts].sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')));
+    setNextUp(nextFormat(newestFirst.map((post) => post.format)));
+    setFeedback('');
+    setError('');
+    setWriting(true);
+  };
+
   /** The AI's draft, saved straight away so nothing it wrote can be lost, then opened to be checked. */
   const saveWritten = async (draft: WrittenDraft) => {
     const created = await create({
@@ -65,6 +80,7 @@ export default function BlogAdminPage() {
       machine: draft.machine,
       topic: draft.topic,
       topic_id: draft.topicId,
+      format: draft.format,
       body: draft.body,
       faq: draft.faq,
       tags: draft.tags,
@@ -136,7 +152,7 @@ export default function BlogAdminPage() {
           {published.length > 0 && (
             <a href="/blog" target="_blank" rel="noreferrer" className="btn btn-secondary"><Globe size={16} /> View the blog</a>
           )}
-          <button type="button" className="btn btn-primary" disabled={!activeCompany || Boolean(loadError)} onClick={() => { setFeedback(''); setError(''); setWriting(true); }}>
+          <button type="button" className="btn btn-primary" disabled={!activeCompany || Boolean(loadError)} onClick={openWriter}>
             <PenLine size={16} /> Write a new post
           </button>
         </div>
@@ -160,7 +176,7 @@ export default function BlogAdminPage() {
             <h2>Write your first post</h2>
             <p>Pick a machine and a topic, such as <em>Why rock breaker chisels break</em>. The AI writes the first draft in about a minute. You read it, change anything you want, and press Publish.</p>
             <p className="text-muted text-sm">There are {coverage.total} ready topics on backhoe loaders, rock breakers, excavators and parts, or type your own.</p>
-            <button type="button" className="btn btn-primary btn-lg" disabled={!activeCompany} onClick={() => setWriting(true)}><PenLine size={18} /> Write a new post</button>
+            <button type="button" className="btn btn-primary btn-lg" disabled={!activeCompany} onClick={openWriter}><PenLine size={18} /> Write a new post</button>
           </div>
         ) : (
           <div className="table-wrap">
@@ -176,7 +192,7 @@ export default function BlogAdminPage() {
             <div style={{ overflowX: 'auto' }}>
               <table className="erp-table" style={{ minWidth: '720px' }}>
                 <thead>
-                  <tr><th>Post</th><th>Machine</th><th>Status</th><th>Date</th><th className="text-center">Actions</th></tr>
+                  <tr><th>Post</th><th>Machine and format</th><th>Status</th><th>Date</th><th className="text-center">Actions</th></tr>
                 </thead>
                 <tbody>
                   {visible.map((post) => {
@@ -187,7 +203,7 @@ export default function BlogAdminPage() {
                           <button type="button" className="part-name-btn" style={{ textAlign: 'left' }} onClick={() => setEditingId(post.id)}>{post.title}</button>
                           {post.summary && <div className="text-muted text-sm truncate">{post.summary}</div>}
                         </td>
-                        <td>{machineLabel(post.machine)}</td>
+                        <td>{machineLabel(post.machine)}<div className="text-muted text-sm">{formatLabel(post.format)}</div></td>
                         <td>{isLive ? <span className="badge badge-success">Published</span> : <span className="badge badge-muted">Draft</span>}</td>
                         <td className="text-muted">{dateOf(isLive ? post.published_at : post.updated_at)}</td>
                         <td className="text-center">
@@ -222,7 +238,7 @@ export default function BlogAdminPage() {
       )}
 
       {writing && activeCompany && (
-        <BlogWriterModal companyId={activeCompany.id} writtenTopicIds={writtenTopicIds} onWritten={saveWritten} onClose={() => setWriting(false)} />
+        <BlogWriterModal companyId={activeCompany.id} writtenTopicIds={writtenTopicIds} suggestedFormat={nextUp} onWritten={saveWritten} onClose={() => setWriting(false)} />
       )}
     </div>
   );
