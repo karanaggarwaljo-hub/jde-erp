@@ -20,7 +20,7 @@ export const config = {
 // The blog (app/blog, app/api/public/blog) is public for the same reason as the catalogue: it is
 // the company's website. Its admin screen is /blog-admin, which the '/blog' prefix does NOT match
 // (a prefix only matches itself or a path beneath it), so it stays behind the login.
-const PUBLIC_EXACT = new Set(['/login', '/forgot-password', '/auth/callback', '/api/auth/login', '/api/auth/logout', '/api/auth/forgot-password', '/api/catalog-rfq', '/api/catalog-event', '/api/public/catalog', '/api/public/blog', '/sitemap.xml', '/robots.txt']);
+const PUBLIC_EXACT = new Set(['/login', '/forgot-password', '/auth/callback', '/api/auth/login', '/api/auth/logout', '/api/auth/forgot-password', '/api/catalog-rfq', '/api/catalog-event', '/api/public/catalog', '/api/public/blog', '/api/public/site-hit', '/sitemap.xml', '/robots.txt']);
 const PUBLIC_PREFIXES = ['/catalog', '/blog'];
 
 

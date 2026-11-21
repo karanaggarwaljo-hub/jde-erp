@@ -2598,6 +2598,25 @@ button.part-photo.is-empty:hover svg { opacity: 0.85; }
 .blog-topic.is-written { color: var(--ink-3); }
 .blog-topic small { align-items: center; color: var(--em); display: inline-flex; flex-shrink: 0; font-size: 12px; gap: 4px; }
 .blog-topic:focus-visible { box-shadow: var(--ring); outline: none; }
+/* Website visits (app/(dashboard)/site-visits): visits per day. One bar a day, anchored at the
+   base line with a rounded top, 2px apart; each names its day and count when pointed at or focused. */
+.visits-chart-card { display: flex; flex-direction: column; gap: 12px; }
+.visits-chart { align-items: flex-end; border-bottom: 1px solid var(--line-2); display: flex; gap: 2px; height: 160px; padding-top: 28px; }
+.visits-chart-slot { align-items: flex-end; display: flex; flex: 1 1 0; height: 100%; min-width: 0; position: relative; }
+.visits-chart-bar { background: var(--amber-2); border-radius: 4px 4px 0 0; display: block; width: 100%; }
+.visits-chart-slot:hover .visits-chart-bar, .visits-chart-slot:focus-visible .visits-chart-bar { background: var(--amber-3); }
+.visits-chart-slot:focus-visible { outline: 2px solid var(--amber-2); outline-offset: 2px; }
+.visits-chart-slot:hover::after, .visits-chart-slot:focus-visible::after {
+  background: var(--ink); border-radius: var(--radius-sm); bottom: calc(100% - 22px); color: var(--surface); content: attr(data-tip);
+  font-size: 12px; left: 50%; padding: 3px 8px; pointer-events: none; position: absolute; transform: translateX(-50%); white-space: nowrap; z-index: 2;
+}
+.visits-chart-slot:first-child:hover::after, .visits-chart-slot:first-child:focus-visible::after { left: 0; transform: none; }
+.visits-chart-slot:last-child:hover::after, .visits-chart-slot:last-child:focus-visible::after { left: auto; right: 0; transform: none; }
+.visits-chart-axis { display: flex; justify-content: space-between; }
+
+/* "Schedule…": the go-live time, chosen above the save bar. */
+.blog-schedule { display: flex; flex-direction: column; gap: 10px; margin: 0 0 12px; }
+.blog-schedule .form-label { align-items: center; display: flex; gap: 6px; margin: 0; }
 /* "What kind of article?": the formats (lib/blog-formats.ts), the one chosen for variety marked "Up next". */
 .blog-format-note { margin: 0 0 8px; }
 .blog-format-note svg { display: inline; margin-right: 3px; vertical-align: -2px; }

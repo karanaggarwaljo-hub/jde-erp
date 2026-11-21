@@ -12,19 +12,24 @@
  */
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Eye, Globe, MessageCircle, Plus, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CalendarClock, Eye, Globe, MessageCircle, Plus, Trash2, X } from 'lucide-react';
 import BlogBody from '@/components/blog/BlogBody';
 import BlogPhotoPrompts from '@/components/blog/BlogPhotoPrompts';
 import {
   MACHINES,
   SUMMARY_SHOWN,
   TITLE_SHOWN,
+  defaultScheduleLocal,
+  indiaLocalToIso,
+  indiaWhen,
   isMachine,
+  postState,
   postUrl,
   publicPhotos,
   publishProblems,
   readMinutes,
   saveProblems,
+  scheduleProblem,
   slugify,
   splitTags,
   whatsappShareUrl,
@@ -59,7 +64,7 @@ export type BlogPost = {
   published_at: string | null;
 };
 
-export type BlogPatch = Partial<Pick<BlogPost, 'title' | 'slug' | 'summary' | 'machine' | 'body' | 'faq' | 'tags' | 'status' | 'image_prompts'>>;
+export type BlogPatch = Partial<Pick<BlogPost, 'title' | 'slug' | 'summary' | 'machine' | 'body' | 'faq' | 'tags' | 'status' | 'image_prompts' | 'published_at'>>;
 
 type Form = { title: string; slug: string; summary: string; machine: Machine; tags: string; body: string; faq: FaqItem[] };
 
@@ -94,8 +99,14 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
   const [error, setError] = useState('');
   const [problems, setProblems] = useState<string[]>([]);
   const [message, setMessage] = useState('');
+  // "Schedule…": the go-live time being chosen, in India time ("2026-11-24T09:00"), or '' when closed.
+  const [scheduleAt, setScheduleAt] = useState('');
 
   const published = post.status === 'published';
+  // Published with a later go-live time is scheduled; the website shows it once that time comes.
+  const state = postState(post);
+  const live = state === 'live';
+  const when = indiaWhen(post.published_at);
   const dirty = !same(form, saved);
   const words = wordCount(form.body);
 
@@ -161,6 +172,29 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
     void run('publish', { ...patch, status: 'published' }, 'Published. It shows on the website within a minute. Press Share on WhatsApp to send it to your customers.');
   };
 
+  const schedule = () => {
+    const patch = patchOf();
+    const found = publishProblems({ title: patch.title ?? '', slug: patch.slug ?? '', body: patch.body ?? '', summary: patch.summary ?? '' }, otherSlugs);
+    const at = indiaLocalToIso(scheduleAt);
+    const timeProblem = scheduleProblem(at);
+    if (found.length > 0 || timeProblem) { setProblems([...found, ...(timeProblem ? [timeProblem] : [])]); return; }
+    setScheduleAt('');
+    void run('publish', { ...patch, status: 'published', published_at: at }, `Scheduled. It goes on the website on ${indiaWhen(at)}.`);
+  };
+
+  /** A scheduled post, live straight away: no time sent, so the database stamps it now. */
+  const publishNow = () => {
+    const patch = patchOf();
+    const found = publishProblems({ title: patch.title ?? '', slug: patch.slug ?? '', body: patch.body ?? '', summary: patch.summary ?? '' }, otherSlugs);
+    if (found.length > 0) { setProblems(found); return; }
+    void run('publish', { ...patch, status: 'published', published_at: null }, 'Published. It shows on the website within a minute. Press Share on WhatsApp to send it to your customers.');
+  };
+
+  const cancelSchedule = () => {
+    if (!window.confirm('Cancel the schedule? The post stays here as a draft.')) return;
+    void run('unpublish', { ...patchOf(), status: 'draft', published_at: null }, 'Schedule cancelled. It is a draft again.');
+  };
+
   const unpublish = () => {
     if (!window.confirm('Take this post off the website? It is kept here as a draft, and you can publish it again.')) return;
     void run('unpublish', { ...patchOf(), status: 'draft' }, 'Taken off the website. It is a draft again.');
@@ -199,10 +233,12 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
           </button>
           <h1 className="page-title flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
             {published ? 'Edit post' : 'Check and publish'}
-            <span className={`badge ${published ? 'badge-success' : 'badge-muted'}`}>{published ? 'Published' : 'Draft'}</span>
+            {state === 'scheduled'
+              ? <span className="badge badge-warning">Scheduled · {when}</span>
+              : <span className={`badge ${live ? 'badge-success' : 'badge-muted'}`}>{live ? 'Published' : 'Draft'}</span>}
           </h1>
         </div>
-        {published && (
+        {live && (
           <div className="flex gap-2" style={{ marginLeft: 'auto', flexWrap: 'wrap' }}>
             {/* Sends the post to customers: WhatsApp opens with the title, summary and link ready. */}
             <a href={whatsappShareUrl(post, siteHost)} target="_blank" rel="noreferrer" className="btn btn-secondary">
@@ -328,17 +364,34 @@ export default function BlogEditor({ post, otherSlugs, siteHost, onSave, onDelet
         </aside>
       </div>
 
+      {scheduleAt && (
+        <div className="card blog-schedule" role="group" aria-labelledby="blog-schedule-label">
+          <label className="form-label" id="blog-schedule-label" htmlFor="blog-schedule-at"><CalendarClock size={15} aria-hidden="true" /> When should it go on the website?</label>
+          <div className="flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
+            <input id="blog-schedule-at" type="datetime-local" className="form-input" style={{ width: 'auto' }} value={scheduleAt} disabled={Boolean(busy)}
+              onChange={(event) => { setProblems([]); setScheduleAt(event.target.value); }} />
+            <span className="text-muted text-sm">India time. It appears by itself at that time, within a minute.</span>
+          </div>
+          <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={schedule}><CalendarClock size={16} /> Schedule</button>
+            <button type="button" className="btn btn-ghost" disabled={Boolean(busy)} onClick={() => setScheduleAt('')}>Cancel</button>
+          </div>
+        </div>
+      )}
+
       <div className={`save-bar blog-save-bar${dirty ? ' has-changes' : ''}`}>
         <div className="save-bar-text">
-          <strong>{busy ? 'Saving…' : dirty ? 'Changes not saved yet' : published ? 'On the website' : 'Draft: not on the website yet'}</strong>
+          <strong>{busy ? 'Saving…' : dirty ? 'Changes not saved yet' : live ? 'On the website' : state === 'scheduled' ? `Goes on the website on ${when}` : 'Draft: not on the website yet'}</strong>
         </div>
         <div className="flex gap-2" style={{ flexWrap: 'wrap' }}>
           <button type="button" className="btn btn-ghost" style={{ color: 'var(--color-danger)' }} disabled={Boolean(busy)} onClick={remove}><Trash2 size={15} /> Delete</button>
-          {published && <button type="button" className="btn btn-secondary" disabled={Boolean(busy)} onClick={unpublish}>Take off the website</button>}
+          {live && <button type="button" className="btn btn-secondary" disabled={Boolean(busy)} onClick={unpublish}>Take off the website</button>}
+          {state === 'scheduled' && <button type="button" className="btn btn-secondary" disabled={Boolean(busy)} onClick={cancelSchedule}>Cancel schedule</button>}
           {!published && <button type="button" className="btn btn-secondary" disabled={Boolean(busy) || !dirty} onClick={saveDraft}>Save draft</button>}
-          {published
-            ? <button type="button" className="btn btn-primary" disabled={Boolean(busy) || !dirty} onClick={saveDraft}>Save changes</button>
-            : <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={publish}><Globe size={16} /> Publish</button>}
+          {published && <button type="button" className={`btn ${live ? 'btn-primary' : 'btn-secondary'}`} disabled={Boolean(busy) || !dirty} onClick={saveDraft}>Save changes</button>}
+          {!published && <button type="button" className="btn btn-secondary" disabled={Boolean(busy)} onClick={() => { setProblems([]); setScheduleAt(defaultScheduleLocal()); }}><CalendarClock size={16} /> Schedule…</button>}
+          {!published && <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={publish}><Globe size={16} /> Publish</button>}
+          {state === 'scheduled' && <button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={publishNow}><Globe size={16} /> Publish now</button>}
         </div>
       </div>
     </div>

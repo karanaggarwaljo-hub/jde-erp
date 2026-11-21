@@ -24,6 +24,8 @@ test('the menu still reaches every screen it reached before', () => {
     '/jobs',
     // Added November 2026: articles for the website, written with AI.
     '/blog-admin',
+    // Added November 2026: visits to the website, counted in the ERP.
+    '/site-visits',
   ];
   assert.deepEqual(everyScreen.map((item) => item.href).sort(), [...before].sort());
 });
@@ -42,7 +44,7 @@ test('the menu is one plain list, in the order of a working day, with More last'
   const more = navItems[navItems.length - 1];
   assert.ok(isMenu(more));
   assert.deepEqual(more.items.map((item) => item.name), [
-    'Job Cards', 'Bills & Invoices', 'Cheques', 'What to Order', 'Log Book', 'Website Catalog', 'Blog',
+    'Job Cards', 'Bills & Invoices', 'Cheques', 'What to Order', 'Log Book', 'Website Catalog', 'Blog', 'Website visits',
   ]);
   assert.equal(navItems.filter(isMenu).length, 1);
 });
