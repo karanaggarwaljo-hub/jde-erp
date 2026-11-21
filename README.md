@@ -76,6 +76,7 @@ Every page and API route requires a real, signed-in staff account — enforced c
    - `ERP_INTEGRATION_TOKEN` — required only when connecting the Adaptive Skill Platform. Keep it server-side. Companies are read from `jde_companies`, so a newly created company is available to the integration immediately without changing deployment settings.
    - `GEMINI_API_KEY` — optional, only needed for the AI features. Get one at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
    - `GROQ_API_KEY` — optional but recommended. The backup AI provider: when Gemini is rate-limited or overloaded, the AI features automatically retry on Groq instead of failing. Free, no card, from [console.groq.com](https://console.groq.com) → API Keys. See "AI provider fallback" below.
+   - `OPENROUTER_API_KEY` — optional. A last-resort backup, asked only after Gemini, Groq and Cerebras have all failed or run out: one key for many companies' models, several of them free. From [openrouter.ai](https://openrouter.ai) → Keys. Text only. `OPENROUTER_MODEL` picks the model (several with commas, tried in turn); by default a short list of free models is tried, since free models come and go (`lib/ai/providers/openrouter.ts`).
 
 4. **Create the first owner account** — a valid Supabase Auth login isn't enough by itself; it also needs a matching `jde_users` row, and there's no signup form (accounts are created by invite — see "Authentication" below). For the very first account on a fresh project, create both halves manually once: add a user under Supabase Dashboard → Authentication → Users (or reuse one that's already there), then insert their `jde_users` row:
    ```sql
@@ -172,6 +173,9 @@ It runs the real cache code under a reserved feature key, asserts the allowance 
 Not everything can fail over. Gemini remains the only provider here that reads PDFs, does Google
 Search grounding (Website Catalog → Reference Search) or generates images, so those three keep their
 existing behaviour of failing safely with a message. Invoice scans of *images* do fall back to Groq.
+OpenRouter, the fourth provider, is a backup only: it is never rotated to go first and is always
+asked last, even when `AI_PROVIDER_ORDER` was set before it existed and leaves it out, so its small
+free allowance is kept for the day the other three are spent.
 
 To verify the chain end to end, including a forced failure:
 
