@@ -7,6 +7,7 @@ import type { StartFreshCounts } from '../start-fresh';
 import { listingFitment, type PartFitmentResult } from '../part-fitment';
 import { publicPhotos } from '../blog';
 import { formatLabel } from '../blog-formats';
+import type { SiteHit, VisitRow } from '../site-visits';
 
 export type { TableName };
 
@@ -918,8 +919,9 @@ function withPublicPhotos(row: Record<string, unknown>, { inline }: { inline: bo
   return inline ? { ...shown, cover, photos } : { ...shown, cover };
 }
 
-/** Server-only: every published blog post of the storefront company, newest first, without the
- *  article text. Scoped like listPublishedCatalogProducts: the storefront company only. */
+/** Server-only: every live blog post of the storefront company (published, and its go-live time
+ *  passed), newest first, without the article text. Scoped like listPublishedCatalogProducts: the
+ *  storefront company only. */
 export async function listPublishedBlogPosts(): Promise<Array<Record<string, unknown>>> {
   const companyId = await getStorefrontCompanyId();
   if (!companyId) return [];
@@ -928,6 +930,8 @@ export async function listPublishedBlogPosts(): Promise<Array<Record<string, unk
     .select(`${PUBLIC_BLOG_LIST_COLUMNS}, image_prompts`)
     .eq('company_id', companyId)
     .eq('status', 'published')
+    // A post scheduled for later (lib/blog.ts postState) stays out until its time comes.
+    .lte('published_at', new Date().toISOString())
     .order('published_at', { ascending: false });
   if (error) throw error;
   return ((data as Array<Record<string, unknown>>) ?? []).map((row) => withPublicPhotos(row, { inline: false }));
@@ -942,6 +946,7 @@ export async function getPublishedBlogPost(slug: string): Promise<Record<string,
     .select(`${PUBLIC_BLOG_POST_COLUMNS}, image_prompts`)
     .eq('company_id', companyId)
     .eq('status', 'published')
+    .lte('published_at', new Date().toISOString())
     .eq('slug', slug)
     .maybeSingle();
   if (error) throw error;
@@ -1027,6 +1032,57 @@ export async function logCatalogEvent(input: CatalogEventInput): Promise<void> {
     zero_results: input.zeroResults ?? null,
   });
   if (error) throw error;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Website visits (lib/site-visits.ts, scripts/site-visits.sql)
+ * ------------------------------------------------------------------------------------------- */
+
+/** Server-only: adds one to a page's count for the day, for the storefront company, the one the
+ *  website shows. Like logCatalogEvent, the company is never taken from the request. */
+export async function recordSiteHit(hit: SiteHit, day: string): Promise<void> {
+  const companyId = await getStorefrontCompanyId();
+  if (!companyId) return;
+  const { error } = await getClient().rpc('jde_site_hit', { p_company: companyId, p_day: day, p_path: hit.path, p_kind: hit.kind, p_source: hit.source });
+  if (error) throw error;
+}
+
+/** Server-only: a company's visit counts from `from` to `to` (India days, inclusive), every row,
+ *  paged past the API's 1,000-row cap in a stable order. */
+export async function listSiteVisits(companyId: string, from: string, to: string): Promise<VisitRow[]> {
+  const pageSize = 1000;
+  const rows: VisitRow[] = [];
+  for (;;) {
+    const { data, error } = await getClient()
+      .from('jde_site_visits')
+      .select('day, path, kind, source, count')
+      .eq('company_id', companyId)
+      .gte('day', from)
+      .lte('day', to)
+      .order('day').order('path').order('kind').order('source')
+      .range(rows.length, rows.length + pageSize - 1);
+    if (error) throw error;
+    const page = (data as VisitRow[]) ?? [];
+    rows.push(...page);
+    // Only an empty page ends it: the server may cap a page below pageSize (see listRows).
+    if (page.length === 0) return rows;
+  }
+}
+
+/** Server-only: the names to show beside visit counts: blog post titles by web address, and the
+ *  website's product names by the id in their address (jde_catalog_products, which the website's
+ *  catalogue feed is read from). */
+export async function siteVisitNames(companyId: string): Promise<{ postTitles: Map<string, string>; productTitles: Map<string, string> }> {
+  const [posts, products] = await Promise.all([
+    getClient().from(supaTable('blog_posts')).select('slug, title').eq('company_id', companyId),
+    getClient().from(supaTable('catalog_products')).select('id, title').eq('company_id', companyId),
+  ]);
+  if (posts.error) throw posts.error;
+  if (products.error) throw products.error;
+  return {
+    postTitles: new Map(((posts.data as Array<{ slug: string; title: string }>) ?? []).map((row) => [row.slug, row.title])),
+    productTitles: new Map(((products.data as Array<{ id: string; title: string }>) ?? []).map((row) => [String(row.id), row.title])),
+  };
 }
 
 /** Server-only: the minimal public contact info for one company, for the website's "Request a

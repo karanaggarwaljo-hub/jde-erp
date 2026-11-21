@@ -8,7 +8,7 @@ import SummaryLine from '@/components/SummaryLine';
 import RowMenu from '@/components/RowMenu';
 import BlogWriterModal, { type WrittenDraft } from '@/components/blog/BlogWriterModal';
 import BlogEditor, { type BlogPatch, type BlogPost } from '@/components/blog/BlogEditor';
-import { machineLabel, postUrl, topicCoverage, uniqueSlug, whatsappShareUrl } from '@/lib/blog';
+import { indiaWhen, machineLabel, postState, postUrl, topicCoverage, uniqueSlug, whatsappShareUrl } from '@/lib/blog';
 import { DEFAULT_FORMAT, formatLabel, nextFormat, type FormatId } from '@/lib/blog-formats';
 
 /**
@@ -49,7 +49,8 @@ export default function BlogAdminPage() {
     [posts]
   );
   const writtenTopicIds = useMemo(() => new Set(posts.map((post) => post.topic_id).filter((id): id is string => Boolean(id))), [posts]);
-  const published = posts.filter((post) => post.status === 'published');
+  const published = posts.filter((post) => postState(post) === 'live');
+  const scheduled = posts.filter((post) => postState(post) === 'scheduled');
   const drafts = posts.filter((post) => post.status !== 'published');
   const coverage = topicCoverage(writtenTopicIds);
 
@@ -96,10 +97,12 @@ export default function BlogAdminPage() {
 
   const setStatus = async (post: Row, status: 'draft' | 'published') => {
     setError('');
-    if (status === 'draft' && !window.confirm(`Take "${post.title}" off the website? It stays here as a draft.`)) return;
+    const wasScheduled = postState(post) === 'scheduled';
+    if (status === 'draft' && !window.confirm(wasScheduled ? `Cancel the schedule for "${post.title}"? It stays here as a draft.` : `Take "${post.title}" off the website? It stays here as a draft.`)) return;
     try {
-      await update(post.id, { status });
-      setFeedback(status === 'published' ? `"${post.title}" is on the website.` : `"${post.title}" was taken off the website.`);
+      // A scheduled post taken off forgets its time, so publishing it later means publishing then.
+      await update(post.id, wasScheduled ? { status, published_at: null } : { status });
+      setFeedback(status === 'published' ? `"${post.title}" is on the website.` : wasScheduled ? `The schedule for "${post.title}" was cancelled. It is a draft again.` : `"${post.title}" was taken off the website.`);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That did not save.');
     }
@@ -143,6 +146,7 @@ export default function BlogAdminPage() {
           {posts.length > 0
             ? <SummaryLine facts={[
                 { value: String(published.length), label: 'published', tone: published.length > 0 ? 'good' : undefined },
+                ...(scheduled.length > 0 ? [{ value: String(scheduled.length), label: 'scheduled', hint: 'Go on the website by themselves at the time chosen' }] : []),
                 { value: String(drafts.length), label: drafts.length === 1 ? 'draft' : 'drafts', tone: drafts.length > 0 ? 'warn' : undefined, hint: 'Written, but not on the website until you publish them' },
                 { value: `${coverage.written} of ${coverage.total}`, label: 'topics written', hint: 'Topics in the topic bank that already have a post' },
               ]} />
@@ -196,7 +200,8 @@ export default function BlogAdminPage() {
                 </thead>
                 <tbody>
                   {visible.map((post) => {
-                    const isLive = post.status === 'published';
+                    const state = postState(post);
+                    const isLive = state === 'live';
                     return (
                       <tr key={post.id}>
                         <td style={{ maxWidth: '440px' }}>
@@ -204,8 +209,10 @@ export default function BlogAdminPage() {
                           {post.summary && <div className="text-muted text-sm truncate">{post.summary}</div>}
                         </td>
                         <td>{machineLabel(post.machine)}<div className="text-muted text-sm">{formatLabel(post.format)}</div></td>
-                        <td>{isLive ? <span className="badge badge-success">Published</span> : <span className="badge badge-muted">Draft</span>}</td>
-                        <td className="text-muted">{dateOf(isLive ? post.published_at : post.updated_at)}</td>
+                        <td>{state === 'scheduled'
+                          ? <span className="badge badge-warning" title="Goes on the website by itself at this time">Scheduled</span>
+                          : isLive ? <span className="badge badge-success">Published</span> : <span className="badge badge-muted">Draft</span>}</td>
+                        <td className="text-muted">{state === 'scheduled' ? `Goes live ${indiaWhen(post.published_at)}` : dateOf(isLive ? post.published_at : post.updated_at)}</td>
                         <td className="text-center">
                           <div className="flex gap-1 items-center" style={{ justifyContent: 'flex-end' }}>
                             <button type="button" className="btn btn-ghost btn-sm" aria-label={`Edit ${post.title}`} title={isLive ? 'Edit' : 'Check and publish'} onClick={() => setEditingId(post.id)}><Pencil size={14} /></button>
@@ -216,7 +223,9 @@ export default function BlogAdminPage() {
                               items={[
                                 isLive
                                   ? { label: 'Take off the website', icon: <Undo2 size={15} />, onSelect: () => void setStatus(post, 'draft') }
-                                  : { label: 'Check and publish', icon: <Globe size={15} />, onSelect: () => setEditingId(post.id) },
+                                  : state === 'scheduled'
+                                    ? { label: 'Cancel the schedule', icon: <Undo2 size={15} />, onSelect: () => void setStatus(post, 'draft') }
+                                    : { label: 'Check and publish', icon: <Globe size={15} />, onSelect: () => setEditingId(post.id) },
                                 { label: 'Delete', icon: <Trash2 size={15} />, danger: true, onSelect: () => void deletePost(post) },
                               ]}
                             />

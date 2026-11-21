@@ -32,6 +32,12 @@ import {
   plainText,
   isShortDraft,
   postUrl,
+  postState,
+  indiaLocalToIso,
+  isoToIndiaLocal,
+  defaultScheduleLocal,
+  scheduleProblem,
+  indiaWhen,
   whatsappShareUrl,
   isValidSlug,
   lengthWords,
@@ -199,6 +205,39 @@ test('a draft well short of the length asked is sent back once to be filled out'
   assert.equal(isShortDraft('word '.repeat(550), 1000), true, 'the published post: about 550 words of the 1,000 asked');
   assert.equal(isShortDraft('word '.repeat(700), 1000), false);
   assert.equal(isShortDraft('word '.repeat(450), 600), false, 'a short post asked to be short is fine');
+});
+
+test('a post published with a later time is scheduled, and becomes live by itself when the time comes', () => {
+  const now = Date.parse('2026-11-21T06:00:00Z');
+  assert.equal(postState({ status: 'draft', published_at: null }, now), 'draft');
+  assert.equal(postState({ status: 'draft', published_at: '2026-12-01T03:30:00Z' }, now), 'draft');
+  assert.equal(postState({ status: 'published', published_at: '2026-11-20T10:00:00Z' }, now), 'live');
+  assert.equal(postState({ status: 'published', published_at: null }, now), 'live', 'just published, before the database stamps the time');
+  assert.equal(postState({ status: 'published', published_at: '2026-11-24T03:30:00Z' }, now), 'scheduled');
+  assert.equal(postState({ status: 'published', published_at: '2026-11-24T03:30:00Z' }, Date.parse('2026-11-24T03:30:01Z')), 'live');
+});
+
+test('go-live times are chosen and shown in India time', () => {
+  // 9:00 in the morning in India is 3:30 UTC; India has no daylight saving, so in June too.
+  assert.equal(indiaLocalToIso('2026-11-24T09:00'), '2026-11-24T03:30:00.000Z');
+  assert.equal(indiaLocalToIso('2026-06-24T09:00'), '2026-06-24T03:30:00.000Z');
+  assert.equal(indiaLocalToIso('2026-11-24T00:15'), '2026-11-23T18:45:00.000Z', 'just after midnight in India is the evening before in UTC');
+  assert.equal(isoToIndiaLocal('2026-11-23T18:45:00.000Z'), '2026-11-24T00:15');
+  assert.equal(indiaLocalToIso('2026-02-30T09:00'), '', 'no 30th of February');
+  assert.equal(indiaLocalToIso('tomorrow'), '');
+  assert.equal(defaultScheduleLocal(Date.parse('2026-11-21T20:00:00Z')), '2026-11-23T09:00', 'at 1:30 am on the 22nd in India, tomorrow is the 23rd');
+  assert.equal(defaultScheduleLocal(Date.parse('2026-11-21T06:00:00Z')), '2026-11-22T09:00');
+  assert.match(indiaWhen('2026-11-24T03:30:00Z'), /^24 Nov,? 9:00\s?am$/i);
+  assert.equal(indiaWhen(null), '');
+});
+
+test('a go-live time must be a little ahead and within a year', () => {
+  const now = Date.parse('2026-11-21T06:00:00Z');
+  assert.equal(scheduleProblem('2026-11-22T03:30:00.000Z', now), '');
+  assert.match(scheduleProblem('', now), /Choose the date and time/);
+  assert.match(scheduleProblem('2026-11-21T06:02:00.000Z', now), /few minutes from now/);
+  assert.match(scheduleProblem('2026-11-20T06:00:00.000Z', now), /few minutes from now/, 'a time already passed');
+  assert.match(scheduleProblem('2028-01-01T00:00:00.000Z', now), /within the next year/);
 });
 
 test('a published post is shared on WhatsApp with its title, summary and website address', () => {

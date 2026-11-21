@@ -579,6 +579,69 @@ export const wordCount = (body: string): number => (plainText(body).match(/\S+/g
 /** Minutes to read, at a steady 200 words a minute, never less than one. */
 export const readMinutes = (body: string): number => Math.max(1, Math.round(wordCount(body) / 200));
 
+/* ---------------------------------------------------------------------------------------------
+ * Scheduling
+ *
+ * A post is live once it is published and its go-live time (published_at) has come. Publishing
+ * with a later time schedules it: the public feed, the ERP's own /blog pages and the sitemap show
+ * only posts whose time has passed (lib/db listPublishedBlogPosts), so a scheduled post appears by
+ * itself, with nothing to run at that moment. Times are chosen and shown in India time, which has
+ * no daylight saving, so a fixed +05:30 is exact.
+ * ------------------------------------------------------------------------------------------- */
+
+export type PostState = 'draft' | 'scheduled' | 'live';
+
+export function postState(post: { status: string; published_at?: string | null }, now: number = Date.now()): PostState {
+  if (post.status !== 'published') return 'draft';
+  const at = post.published_at ? new Date(post.published_at).getTime() : NaN;
+  return Number.isFinite(at) && at > now ? 'scheduled' : 'live';
+}
+
+const INDIA_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+/** Nearer than this, scheduling is just publishing late; further than this is almost surely a typo. */
+export const SCHEDULE_MIN_MS = 5 * 60 * 1000;
+export const SCHEDULE_MAX_MS = 365 * 24 * 60 * 60 * 1000;
+
+/** "2026-11-24T09:00" read as India time, as an ISO timestamp; '' if it is not a date and time. */
+export function indiaLocalToIso(local: string): string {
+  const match = String(local).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+  if (!match) return '';
+  const [, y, mo, d, h, mi] = match.map(Number);
+  const utc = Date.UTC(y, mo - 1, d, h, mi) - INDIA_OFFSET_MS;
+  const check = new Date(utc + INDIA_OFFSET_MS);
+  if (check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return '';
+  return new Date(utc).toISOString();
+}
+
+/** An ISO timestamp as "2026-11-24T09:00" in India time, for a date-and-time box. */
+export function isoToIndiaLocal(iso: string | number | Date): string {
+  const time = new Date(iso).getTime();
+  if (!Number.isFinite(time)) return '';
+  return new Date(time + INDIA_OFFSET_MS).toISOString().slice(0, 16);
+}
+
+/** Tomorrow at 9 in the morning, India time: a sensible first suggestion. */
+export function defaultScheduleLocal(now: number = Date.now()): string {
+  const tomorrow = isoToIndiaLocal(now + 24 * 60 * 60 * 1000).slice(0, 10);
+  return `${tomorrow}T09:00`;
+}
+
+/** Why this go-live time cannot be used, or '' if it can. */
+export function scheduleProblem(iso: string, now: number = Date.now()): string {
+  const at = new Date(iso).getTime();
+  if (!iso || !Number.isFinite(at)) return 'Choose the date and time it should go on the website.';
+  if (at < now + SCHEDULE_MIN_MS) return 'Choose a time at least a few minutes from now, or press Publish now.';
+  if (at > now + SCHEDULE_MAX_MS) return 'Choose a date within the next year.';
+  return '';
+}
+
+/** "24 Nov, 9:00 am", in India time. */
+export function indiaWhen(iso: string | null | undefined): string {
+  const time = new Date(String(iso ?? '')).getTime();
+  if (!Number.isFinite(time)) return '';
+  return new Date(time).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' });
+}
+
 /** The post's address on the company website. */
 export const postUrl = (siteHost: string, slug: string): string => `https://${siteHost}/blog/${slug}`;
 

@@ -2,6 +2,28 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-11-21 — Blog: schedule posts, and see who visits your website
+
+From the blog audit, items 1 and 9.
+
+**Schedule a post**
+- In a post, **Schedule…** (next to Publish) asks when it should go on the website, in India
+  time; it suggests tomorrow at 9 in the morning. Press **Schedule** and the post appears on
+  jd-enterprise.com by itself at that time, within a minute. Write several posts in one sitting
+  and schedule them a few days apart.
+- A scheduled post shows **Scheduled** with its time in the Blog list and the editor. Until then
+  it is not on the website, in the website's list of articles or in the sitemap. **Publish now**
+  puts it on straight away; **Cancel schedule** makes it a draft again.
+
+**Website visits** (under More)
+- A new screen shows how many times each page of your website was opened, and how many WhatsApp,
+  call and share taps each page brought, for the last 7, 30 or 90 days: totals, visits per day,
+  every blog post and product with its own numbers, and where visitors came from (Google,
+  WhatsApp, typed in and so on).
+- Built into the ERP as you chose: no outside account and no cookies. Only the counts are kept,
+  never anything about who visited. Search engine robots are not counted.
+- Counting starts when the website update is live.
+
 ## 2026-11-20 — Blog: photos in one press, fuller articles, share on WhatsApp
 
 From the blog audit.

@@ -18,5 +18,8 @@ test('the blog is public, but the screen that writes it is not', () => {
   assert.equal(isPublicPath('/blogs'), false);
   assert.equal(isPublicPath('/api/ai-blog-draft'), false);
   assert.equal(isPublicPath('/api/ai-blog-photo-generate'), false);
+  // The website counts its visits here without a login; reading them back needs one.
+  assert.equal(isPublicPath('/api/public/site-hit'), true);
+  assert.equal(isPublicPath('/api/site-visits'), false);
   assert.equal(isPublicPath('/api/local/blog_posts'), false);
 });
