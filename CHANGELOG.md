@@ -2,6 +2,21 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-11-21 — A fourth AI service: OpenRouter
+
+You asked to add another AI company as a backup.
+
+- The ERP can now use **OpenRouter** as well as Google (Gemini), Groq and Cerebras. One OpenRouter
+  key reaches many companies' AI models, several of them free.
+- It is a **backup only**: the ERP asks it last, when the other three have failed or used up their
+  free allowance for the day. It never goes first, so it never slows anything down and its small
+  free allowance is kept for when it is needed.
+- Free models on OpenRouter come and go, so the ERP tries a short list of good free ones in turn,
+  passing over any that has gone or is busy. It writes text only (articles, descriptions,
+  summaries); photos still need Google.
+- **To switch it on:** make a key at openrouter.ai (Keys), then in Vercel open your ERP project →
+  Settings → Environment Variables, add `OPENROUTER_API_KEY` with the key, and redeploy.
+
 ## 2026-11-21 — Blog: schedule posts, and see who visits your website
 
 From the blog audit, items 1 and 9.

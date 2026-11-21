@@ -3,12 +3,14 @@ import { isAvailable, markHealthy, markUnavailable } from './health';
 import { geminiProvider } from './providers/gemini';
 import { groqProvider } from './providers/groq';
 import { cerebrasProvider } from './providers/cerebras';
+import { openRouterProvider } from './providers/openrouter';
 import type { AiJsonRequest, AiPriority, AiProvider } from './types';
 
 const REGISTRY: Record<string, AiProvider> = {
   gemini: geminiProvider,
   groq: groqProvider,
   cerebras: cerebrasProvider,
+  openrouter: openRouterProvider,
 };
 
 /** Adds a provider under an extra name. Exists for scripts/ai-fallback-check.ts, which needs a
@@ -25,8 +27,8 @@ export function registerProvider(name: string, provider: AiProvider): void {
 // longer take every AI feature down with it — which is what nearly happened when Google's quota
 // ran out and Groq was left carrying the whole app alone. It reads no images, so the gateway
 // skips it for invoice scans by itself (see its `supports`).
-const DEFAULT_ORDER = 'gemini,groq,cerebras';
-const DEFAULT_FAST_ORDER = 'groq,cerebras,gemini';
+const DEFAULT_ORDER = 'gemini,groq,cerebras,openrouter';
+const DEFAULT_FAST_ORDER = 'groq,cerebras,gemini,openrouter';
 
 /** Keep the primary provider on a short leash so a slow provider does not make the user wait
  * before the already-configured fallback gets a chance. Attachments genuinely take longer to
@@ -69,12 +71,16 @@ function orderedProviders(request: AiJsonRequest): AiProvider[] {
       ? process.env.AI_FAST_ORDER || DEFAULT_FAST_ORDER
       : process.env.AI_PROVIDER_ORDER || DEFAULT_ORDER;
 
-  return configured
+  const named = configured
     .split(',')
     .map((name) => name.trim().toLowerCase())
     .filter(Boolean)
     .map((name) => REGISTRY[name])
     .filter((provider): provider is AiProvider => Boolean(provider));
+  // A backup-only provider (OpenRouter) is always on the end, even when an order set before it
+  // existed (AI_PROVIDER_ORDER in the deployment's settings) leaves it out.
+  const backups = Object.values(REGISTRY).filter((provider) => provider.backupOnly && !named.includes(provider));
+  return [...named.filter((provider) => !provider.backupOnly), ...named.filter((provider) => provider.backupOnly), ...backups];
 }
 
 /** Which provider starts, when more than one could.
@@ -248,11 +254,16 @@ export async function generateJson<T>(request: AiJsonRequest): Promise<{ data: T
 
   // Share the heavy work around rather than stacking it all on whichever name is first. Applied
   // to the healthy list, so rotation can never hand the job to a provider already cooling down.
-  const candidates = rotateForFairShare(available, {
-    priority: request.priority,
-    rotate: process.env.AI_ROTATE !== 'off' && request.keepOrder !== true,
-    pick: (count) => Math.floor(Math.random() * count),
-  });
+  // Backup-only providers stay out of the rotation and on the end, so they are asked only once the
+  // others have been.
+  const candidates = [
+    ...rotateForFairShare(available.filter((provider) => !provider.backupOnly), {
+      priority: request.priority,
+      rotate: process.env.AI_ROTATE !== 'off' && request.keepOrder !== true,
+      pick: (count) => Math.floor(Math.random() * count),
+    }),
+    ...available.filter((provider) => provider.backupOnly),
+  ];
 
   const attempts: Attempt[] = [];
 

@@ -35,6 +35,9 @@ export interface AiProvider {
   configured(): boolean;
   /** False when this request needs something the provider can't do (e.g. a PDF attachment). */
   supports(request: AiJsonRequest): boolean;
+  /** Asked only after every other provider, and never rotated to go first (generate.ts), even
+   *  when the configured order leaves it out. For a provider kept for when the others are spent. */
+  readonly backupOnly?: boolean;
   generateJson(request: AiJsonRequest, signal: AbortSignal): Promise<AiProviderResult>;
 }
 
