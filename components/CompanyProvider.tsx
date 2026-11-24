@@ -19,13 +19,15 @@ export type Company = {
   contact_phone?: string | null;
   /** Printed on tax invoices (scripts/company-bank-details.sql). */
   invoice_declaration?: string | null;
+  /** Which part numbers bills print (lib/tally-invoice.ts PART_NUMBER_CHOICES). */
+  bill_part_numbers?: string | null;
   /** On the invoice letterhead when filled in (scripts/company-letterhead-details.sql). */
   udyam_no?: string | null;
   website?: string | null;
   iec_code?: string | null;
 };
 
-type NewCompanyInput = { name: string; gstin: string; state_code?: string | null; invoice_prefix: string; po_prefix: string; address: string; contact_email?: string; contact_phone?: string; invoice_declaration?: string; udyam_no?: string; website?: string; iec_code?: string };
+type NewCompanyInput = { name: string; gstin: string; state_code?: string | null; invoice_prefix: string; po_prefix: string; address: string; contact_email?: string; contact_phone?: string; invoice_declaration?: string; udyam_no?: string; website?: string; iec_code?: string; bill_part_numbers?: string };
 
 type CompanyContextValue = {
   companies: Company[];

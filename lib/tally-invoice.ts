@@ -12,6 +12,7 @@
 import { invoiceFigures, type FigureInvoice, type FigureItem, type FigureReturn } from './invoice-figures';
 import { GST_STATES, sellerStateCode, supplyTax } from './gst-supply';
 import { DISPATCH_FIELDS, type DispatchKey } from './invoice-dispatch';
+import { looksLikeAnInventedCode } from './detail-import';
 
 export { GST_STATES };
 
@@ -28,7 +29,34 @@ export type TallyCompany = {
   udyam_no?: string | null;
   website?: string | null;
   iec_code?: string | null;
+  /** Which part numbers the bill prints under each line (Settings): see PART_NUMBER_CHOICES. */
+  bill_part_numbers?: string | null;
 };
+
+/**
+ * Part numbers on a bill are optional (the owner, November 2026). Many parts carry a code the ERP
+ * made up because none was entered when the part was added ("BKT-P127", "SP-014"); printed under
+ * the goods they read like real part numbers to a customer. The company chooses in Settings:
+ *   all   every part number, as before (the default);
+ *   real  only real ones: a code the ERP made up (lib/detail-import.ts looksLikeAnInventedCode) is
+ *         left off;
+ *   none  no part numbers at all, only the part's name.
+ * The saved PDF follows too: a different choice changes the bill, so it is redrawn when next opened.
+ */
+export const PART_NUMBER_CHOICES = [
+  { id: 'all', label: 'Print every part number' },
+  { id: 'real', label: 'Only real part numbers (hide made-up codes)' },
+  { id: 'none', label: "Don't print part numbers" },
+] as const;
+export type PartNumberChoice = (typeof PART_NUMBER_CHOICES)[number]['id'];
+
+/** The part number to print under a line of goods, or '' to print none. */
+export function printedPartNumber(partNumber: unknown, choice: unknown): string {
+  const code = String(partNumber ?? '').trim();
+  if (!code || choice === 'none') return '';
+  if (choice === 'real' && looksLikeAnInventedCode(code)) return '';
+  return code;
+}
 
 export type TallyCustomer = { address?: string | null; phone?: string | null; gstin?: string | null } | null;
 
@@ -94,8 +122,13 @@ export type TallyInvoice = {
   taxTotal: TaxRow;
   taxInWords: string;
   declaration: string;
-  /** What has been received and what is still owed — not on a Tally invoice, but asked at the counter. */
+  /** What has been received and what is still owed. Worked out but no longer printed: the owner
+   *  asked for it to come off the bill (November 2026), with the "computer generated" line. */
   payment: { paid: string; balance: string; writtenOff: string } | null;
+  /** Whether Bill To / Ship To print "Place of Supply" and "State Code". The owner asked for them to
+   *  come off the bill; they stay only where GST Rule 46 asks for them: a sale to another state,
+   *  and a sale of Rs. 50,000 or more to a buyer without a GSTIN. */
+  placeOfSupplyShown: boolean;
   emptyNote: string | null;
   /** Set on a cancelled invoice: printed across it, with when and why. */
   cancelled: { on: string; reason: string } | null;
@@ -197,6 +230,10 @@ function percentText(value: number): string {
   return `${Number.isInteger(value) ? value : round2(value)}%`;
 }
 
+/** GST Rule 46: a bill of this taxable value or more to a buyer without a GSTIN must name the
+ *  state of delivery and its code. */
+export const PLACE_OF_SUPPLY_B2C_LIMIT = 50000;
+
 export const DEFAULT_DECLARATION = 'We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct.';
 
 export function buildTallyInvoice(source: {
@@ -247,7 +284,7 @@ export function buildTallyInvoice(source: {
     return {
       sl: index + 1,
       description: text(item.name) || 'Item',
-      partNumber: text(item.part_number),
+      partNumber: printedPartNumber(item.part_number, company.bill_part_numbers),
       hsn: text(item.hsn),
       qty: String(num(item.qty)),
       unit: 'Pcs',
@@ -357,6 +394,7 @@ export function buildTallyInvoice(source: {
     payment: invoice.status !== 'cancelled' && (paid > 0 || f.writtenOff > 0)
       ? { paid: indianAmount(paid), balance: indianAmount(f.balanceDue), writtenOff: f.writtenOff > 0 ? indianAmount(f.writtenOff) : '' }
       : null,
+    placeOfSupplyShown: interState || (!text(customer?.gstin) && f.netTaxableValue >= PLACE_OF_SUPPLY_B2C_LIMIT),
     emptyNote: items.length === 0 ? 'Line items were not recorded for this older invoice; only the total is available.' : null,
     cancelled: invoice.status === 'cancelled'
       ? { on: invoice.cancelled_at ? tallyDate(String(invoice.cancelled_at).slice(0, 10)) : '', reason: text(invoice.cancel_reason) }

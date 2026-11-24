@@ -2,6 +2,21 @@
 
 All notable changes to JDE ERP, in plain language, newest first.
 
+## 2026-11-24 — Bills: part numbers optional, and three lines taken off
+
+You asked for part numbers on bills to be optional, and for some lines to come off the bill.
+
+- **Part numbers on bills** is a new choice in Settings → Companies → Edit: print every part number
+  (as before), print only real part numbers, or don't print part numbers. "Only real" leaves off the
+  codes the ERP made up for parts added without their real number (like BKT-P127); 164 of your 263
+  parts have one of those. The part's name is always printed.
+- **Taken off every bill:** "This is a computer generated invoice." and the "Received / Balance due"
+  line under it.
+- **Place of Supply and State Code** under Bill To and Ship To are taken off too, except where GST
+  rules ask for them: a sale to another state, and a sale of Rs. 50,000 or more to a customer
+  without a GSTIN. Those bills still show them.
+- Bills you have already made follow all of this when they are next opened, printed or saved as PDF.
+
 ## 2026-11-21 — A fourth AI service: OpenRouter
 
 You asked to add another AI company as a backup.

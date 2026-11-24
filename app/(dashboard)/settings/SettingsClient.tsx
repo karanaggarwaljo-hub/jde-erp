@@ -20,6 +20,7 @@ import { GST_STATES, PLACE_OF_SUPPLY_OPTIONS, stateCodeOfGstin } from '@/lib/gst
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { inviteUser as sendInvite } from '@/lib/client-auth';
 import { ROLE_LABELS, isRole } from '@/lib/authTypes';
+import { PART_NUMBER_CHOICES } from '@/lib/tally-invoice';
 
 export type SettingsTab = 'users' | 'company' | 'drive' | 'backups';
 type UserAccount = { email: string; company_id: string; name: string; role: string; status: string };
@@ -28,7 +29,7 @@ type UserAccount = { email: string; company_id: string; name: string; role: stri
 // nothing about who has access, and adds no request.
 type UserFilter = 'all' | 'active' | 'invited';
 
-const emptyCompanyForm = { name: '', gstin: '', state_code: '', invoice_prefix: 'INV', po_prefix: 'PO', address: '', contact_email: '', contact_phone: '', invoice_declaration: '', udyam_no: '', website: '', iec_code: '' };
+const emptyCompanyForm = { name: '', gstin: '', state_code: '', invoice_prefix: 'INV', po_prefix: 'PO', address: '', contact_email: '', contact_phone: '', invoice_declaration: '', udyam_no: '', website: '', iec_code: '', bill_part_numbers: 'all' };
 
 // Categorical dot colours for the role chip — the dot only tells roles apart, it carries no
 // status meaning, so green / amber / rose are deliberately absent here: on this screen those
@@ -131,7 +132,7 @@ export default function SettingsClient({ initialTab = 'users', driveOutcome = nu
 
   const openEditCompany = (company: Company) => {
     setEditingCompanyId(company.id);
-    setCompanyForm({ name: company.name, gstin: company.gstin, state_code: company.state_code || '', invoice_prefix: company.invoice_prefix, po_prefix: company.po_prefix, address: company.address, contact_email: company.contact_email || '', contact_phone: company.contact_phone || '', invoice_declaration: company.invoice_declaration || '', udyam_no: company.udyam_no || '', website: company.website || '', iec_code: company.iec_code || '' });
+    setCompanyForm({ name: company.name, gstin: company.gstin, state_code: company.state_code || '', invoice_prefix: company.invoice_prefix, po_prefix: company.po_prefix, address: company.address, contact_email: company.contact_email || '', contact_phone: company.contact_phone || '', invoice_declaration: company.invoice_declaration || '', udyam_no: company.udyam_no || '', website: company.website || '', iec_code: company.iec_code || '', bill_part_numbers: company.bill_part_numbers || 'all' });
     setCompanyError('');
     setCompanyModalOpen(true);
   };
@@ -493,6 +494,14 @@ export default function SettingsClient({ initialTab = 'users', driveOutcome = nu
         {/* Printed at the foot of every tax invoice (lib/tally-invoice.ts). */}
         <div className="form-group"><label className="form-label">Invoice Declaration</label><textarea className="form-input" rows={2} placeholder="We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct." value={companyForm.invoice_declaration} onChange={(event) => setCompanyForm({ ...companyForm, invoice_declaration: event.target.value })} /></div>
         <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '-8px' }}>Printed on every tax invoice. Your state is taken from the GSTIN above. Leave it blank to use the standard declaration.</p>
+        {/* Part numbers on bills are optional (lib/tally-invoice.ts PART_NUMBER_CHOICES). */}
+        <div className="form-group">
+          <label className="form-label" htmlFor="company-bill-part-numbers">Part numbers on bills</label>
+          <select id="company-bill-part-numbers" className="form-input form-select" value={companyForm.bill_part_numbers} onChange={(event) => setCompanyForm({ ...companyForm, bill_part_numbers: event.target.value })}>
+            {PART_NUMBER_CHOICES.map((choice) => <option key={choice.id} value={choice.id}>{choice.label}</option>)}
+          </select>
+        </div>
+        <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '-8px' }}>Printed in small type under each part&apos;s name. A made-up code is one the ERP gave a part added without its real number, like BKT-P127. Bills already made follow the new choice too, when they are next opened or printed.</p>
       </div>
       <div className="modal-footer"><button type="button" className="btn btn-secondary" onClick={() => setCompanyModalOpen(false)}>Cancel</button><button type="submit" className="btn btn-primary" disabled={companySubmitting}>{companySubmitting ? 'Saving…' : editingCompanyId ? 'Save Changes' : 'Add Company'}</button></div>
     </form></div></div>}
