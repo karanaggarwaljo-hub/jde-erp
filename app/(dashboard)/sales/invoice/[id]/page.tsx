@@ -41,7 +41,7 @@ export default function SalesInvoicePrintPage() {
       invoice: issued.invoice as unknown as Invoice,
       items,
       company: (activeCompany ?? { name: 'Company' }) as TallyCompany,
-      customer: customer ? { address: customer.address, phone: customer.phone, gstin: customer.gstin } : null,
+      customer: customer ? { address: customer.address, shipping_address: customer.shipping_address, phone: customer.phone, gstin: customer.gstin } : null,
       returns,
     });
   }, [invoice, invoiceItems, customers, salesReturns, parts, activeCompany]);

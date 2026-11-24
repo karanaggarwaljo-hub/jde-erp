@@ -24,7 +24,7 @@ const RED = rgb(0.78, 0, 0);
 
 /** Part of every saved PDF's fingerprint (lib/invoice-archive.ts): changing how the bill is drawn
  *  changes it, so PDFs saved in the old layout are drawn again the next time they are wanted. */
-export const PDF_LAYOUT = 'a4-full-page-4-no-foot-lines';
+export const PDF_LAYOUT = 'a4-full-page-5-ship-to';
 
 // The extra characters the built-in fonts' WinAnsi encoding has beyond Latin-1.
 const WIN_ANSI_EXTRA = new Set(Array.from('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'));
@@ -156,11 +156,12 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
     return out;
   };
   const buyer = partyLines(doc.buyer);
+  const consignee = partyLines(doc.consignee);
   const detailLabelWidth = Math.max(...doc.details.map(([label]) => fonts.regular.widthOfTextAtSize(label, 8))) + 6;
   // A long detail (terms of delivery run to 200 characters) wraps inside its column.
   const detailLines = doc.details.map(([label, value]) => [label, wrap(`: ${value}`, fonts.bold, 8, third - detailLabelWidth - 10)] as const);
   const detailCount = detailLines.reduce((sum, [, pieces]) => sum + pieces.length, 0);
-  const partyHeight = Math.max(18 + buyer.length * 10.5, 10 + detailCount * 11.5);
+  const partyHeight = Math.max(18 + Math.max(buyer.length, consignee.length) * 10.5, 10 + detailCount * 11.5);
   box(LEFT, y, WIDTH, partyHeight);
   line(LEFT + third, y, LEFT + third, y - partyHeight);
   line(LEFT + 2 * third, y, LEFT + 2 * third, y - partyHeight);
@@ -168,7 +169,7 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
     const x = LEFT + index * third + 5;
     text(caption, x, y - 9, 6.5, fonts.bold, GREY);
     let lineAt = y - 20;
-    for (const [value, font, size] of buyer) { text(wrap(value, font, size, third - 10)[0], x, lineAt, size, font); lineAt -= 10.5; }
+    for (const [value, font, size] of index === 0 ? buyer : consignee) { text(wrap(value, font, size, third - 10)[0], x, lineAt, size, font); lineAt -= 10.5; }
   }
   at = y - 11;
   for (const [label, pieces] of detailLines) {

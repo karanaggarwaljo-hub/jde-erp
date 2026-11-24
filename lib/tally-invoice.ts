@@ -58,7 +58,8 @@ export function printedPartNumber(partNumber: unknown, choice: unknown): string 
   return code;
 }
 
-export type TallyCustomer = { address?: string | null; phone?: string | null; gstin?: string | null } | null;
+/** `shipping_address` is optional: left blank, Ship To repeats the billing address. */
+export type TallyCustomer = { address?: string | null; shipping_address?: string | null; phone?: string | null; gstin?: string | null } | null;
 
 /** With the dispatch details typed on the bill (lib/invoice-dispatch.ts). */
 export type TallyInvoiceInput = FigureInvoice & Partial<Record<DispatchKey, string | null>> & {
@@ -99,6 +100,8 @@ export type TallyInvoice = {
    *  website; then GSTIN and state; then the MSME (Udyam) number and IE Code. */
   letterhead: { contact: string; gstin: string; registrations: string };
   buyer: Party;
+  /** Ship To: the buyer at their shipping address, or at the billing address when none is saved. */
+  consignee: Party;
   /** The invoice details beside Bill To / Ship To: [label, value] pairs, one per line. */
   details: Array<[string, string]>;
   items: TallyItem[];
@@ -365,6 +368,15 @@ export function buildTallyInvoice(source: {
     buyer: {
       name: text(invoice.customer) || 'Cash',
       lines: addressLines(customer?.address),
+      gstin: text(customer?.gstin).toUpperCase(),
+      state: supply.placeName,
+      stateCode: supply.placeCode,
+      phone: text(customer?.phone),
+      email: '',
+    },
+    consignee: {
+      name: text(invoice.customer) || 'Cash',
+      lines: addressLines(text(customer?.shipping_address) || customer?.address),
       gstin: text(customer?.gstin).toUpperCase(),
       state: supply.placeName,
       stateCode: supply.placeCode,

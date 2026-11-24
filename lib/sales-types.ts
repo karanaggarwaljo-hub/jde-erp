@@ -36,6 +36,8 @@ export type Customer = {
   email: string;
   gstin: string;
   address: string;
+  /** Optional. Blank means goods go to the billing address, and Ship To repeats it. */
+  shipping_address?: string | null;
   type: string;
   balance: number;
   /** What this customer may owe at most; 0 or blank means no limit (lib/credit.ts). */

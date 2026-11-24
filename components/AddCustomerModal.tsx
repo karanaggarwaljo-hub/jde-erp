@@ -3,9 +3,9 @@
 import { FormEvent, useState } from 'react';
 import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 
-const emptyForm = { name: '', phone: '', email: '', gstin: '', address: '', type: 'retail', credit_limit: '' };
+const emptyForm = { name: '', phone: '', email: '', gstin: '', address: '', shipping_address: '', type: 'retail', credit_limit: '' };
 
-type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; type: string; balance: number };
+type Customer = { id: string; company_id: string; name: string; phone: string; email: string; gstin: string; address: string; shipping_address?: string | null; type: string; balance: number };
 
 type AddCustomerModalProps = {
   onClose: () => void;
@@ -21,7 +21,7 @@ export default function AddCustomerModal({ onClose, onSave, onCreated, customer 
   const editing = Boolean(customer);
   const [form, setForm] = useState(() => customer ? {
     name: text(customer.name), phone: text(customer.phone), email: text(customer.email), gstin: text(customer.gstin),
-    address: text(customer.address), type: text(customer.type) || 'retail',
+    address: text(customer.address), shipping_address: text(customer.shipping_address), type: text(customer.type) || 'retail',
     credit_limit: Number(customer.credit_limit) > 0 ? String(Number(customer.credit_limit)) : '',
   } : emptyForm);
   const [saving, setSaving] = useState(false);
@@ -35,7 +35,10 @@ export default function AddCustomerModal({ onClose, onSave, onCreated, customer 
       const creditLimit = Number(form.credit_limit) > 0 ? Number(form.credit_limit) : null;
       // An edit leaves the name alone: bills, payments and the balance find the customer by it.
       const { name, ...details } = form;
-      const created = await onSave(editing ? { ...details, credit_limit: creditLimit } : { ...form, name, credit_limit: creditLimit, balance: 0 });
+      const shippingAddress = form.shipping_address.trim() || null;
+      const created = await onSave(editing
+        ? { ...details, shipping_address: shippingAddress, credit_limit: creditLimit }
+        : { ...form, name, shipping_address: shippingAddress, credit_limit: creditLimit, balance: 0 });
       onCreated(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save this customer — please try again.');
@@ -59,7 +62,8 @@ export default function AddCustomerModal({ onClose, onSave, onCreated, customer 
           <div className="form-group"><label className="form-label">Customer Type</label><select className="form-input form-select" value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value })}><option value="retail">Retail</option><option value="wholesale">Wholesale</option><option value="dealer">Dealer</option></select></div>
         </div>
         <div className="form-group"><label className="form-label">Credit limit (₹)</label><input type="number" min="0" step="1" className="form-input" placeholder="Leave blank for no limit" value={form.credit_limit} onChange={(event) => setForm({ ...form, credit_limit: event.target.value })} /><span className="text-muted" style={{ fontSize: 12 }}>The most this customer may owe. Billing warns you before going over it.</span></div>
-        <div className="form-group"><label className="form-label" htmlFor="customer-address">Billing Address</label><textarea id="customer-address" className="form-input" rows={3} placeholder="Full postal address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></div>
+        <div className="form-group"><label className="form-label" htmlFor="customer-address">Bill To address</label><textarea id="customer-address" className="form-input" rows={3} placeholder="Full postal address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /></div>
+        <div className="form-group"><label className="form-label" htmlFor="customer-shipping-address">Ship To address (optional)</label><textarea id="customer-shipping-address" className="form-input" rows={3} placeholder="Leave blank if goods go to the Bill To address" value={form.shipping_address} onChange={(event) => setForm({ ...form, shipping_address: event.target.value })} /><span className="text-muted" style={{ fontSize: 12 }}>Left blank, Ship To on the bill shows the Bill To address.</span></div>
       </div>
       <div className="modal-footer"><span className="text-muted text-sm" style={{ marginRight: 'auto' }}>{SAVE_SHORTCUT_HINT}</span><button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button><button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving…' : editing ? 'Save changes' : 'Save Customer'}</button></div>
     </form></div></div>

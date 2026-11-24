@@ -220,3 +220,18 @@ test('the saved PDF has no "computer generated" or "Received / Balance due" line
   assert.equal(has('Balance due'), false);
   assert.equal(has('Place of Supply'), false, 'an ordinary sale inside the state');
 });
+
+test('Ship To prints the shipping address when one is saved, and repeats Bill To when it is left blank', () => {
+  const build = (customer: { address: string; shipping_address?: string | null }) => buildTallyInvoice({
+    invoice: invoice(), items: [item()], company: COMPANY, customer: { ...customer, gstin: '03ZZZZZ9999Z1Z9', phone: '98000 00001' },
+  });
+  const both = build({ address: 'SCO 5, Sector 17, Chandigarh', shipping_address: 'Site office\nVillage Mullanpur, Mohali' });
+  assert.deepEqual(both.buyer.lines, ['SCO 5', 'Sector 17', 'Chandigarh']);
+  assert.deepEqual(both.consignee.lines, ['Site office', 'Village Mullanpur', 'Mohali']);
+  assert.equal(both.consignee.name, both.buyer.name);
+  assert.equal(both.consignee.gstin, '03ZZZZZ9999Z1Z9');
+  for (const blank of [undefined, null, '', '   ']) {
+    const same = build({ address: 'SCO 5, Sector 17, Chandigarh', shipping_address: blank });
+    assert.deepEqual(same.consignee.lines, same.buyer.lines, `shipping address ${JSON.stringify(blank)}: Ship To repeats Bill To`);
+  }
+});
