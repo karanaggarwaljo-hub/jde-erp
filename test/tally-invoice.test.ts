@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { amountInWords, buildTallyInvoice, paymentTerms, indianAmount, rupeesInWords, stateOfGstin, tallyDate, type TallyItemInput, type TallyInvoiceInput } from '../lib/tally-invoice';
+import { PART_NUMBER_CHOICES, amountInWords, buildTallyInvoice, paymentTerms, indianAmount, printedPartNumber, rupeesInWords, stateOfGstin, tallyDate, type TallyItemInput, type TallyInvoiceInput } from '../lib/tally-invoice';
 
 const COMPANY = { name: 'Jai Durga Enterprises', address: 'Shop 12, Industrial Area, Mohali', gstin: '03ABCDE1234F1Z5', contact_phone: '98140 00000' };
 const invoice = (overrides: Partial<TallyInvoiceInput> = {}): TallyInvoiceInput => ({
@@ -167,4 +167,56 @@ test('payment terms follow what was received: Paid, Part paid or Credit', () => 
   assert.equal(paymentTerms('cash', 0, 500), 'Credit');
   const paidBill = buildTallyInvoice({ invoice: invoice({ mode: 'Credit', paid: 1180 }), items: [item()], company: COMPANY, customer: null });
   assert.deepEqual(paidBill.details[2], ['Payment Terms', 'Paid']);
+});
+
+test('part numbers on a bill are optional: all, only real ones, or none', () => {
+  assert.deepEqual(PART_NUMBER_CHOICES.map((choice) => choice.id), ['all', 'real', 'none']);
+  const lines = [item({ part_number: '911-12400' }), item({ part_number: 'BKT-P127', name: 'bkt pin bush kit' }), item({ part_number: 'SP-014', name: 'seal' }), item({ part_number: '', name: 'loose bolt' })];
+  const printed = (choice: string | null | undefined) =>
+    buildTallyInvoice({ invoice: invoice({ total: 4720, gst_amount: 720 }), items: lines, company: { ...COMPANY, bill_part_numbers: choice }, customer: null }).items.map((line) => line.partNumber);
+  assert.deepEqual(printed('all'), ['911-12400', 'BKT-P127', 'SP-014', '']);
+  assert.deepEqual(printed(undefined), ['911-12400', 'BKT-P127', 'SP-014', ''], 'a company that has not chosen prints them all, as before');
+  assert.deepEqual(printed('real'), ['911-12400', '', '', ''], 'codes the ERP made up are left off');
+  assert.deepEqual(printed('none'), ['', '', '', '']);
+  assert.equal(printedPartNumber('  32/925994 ', 'real'), '32/925994');
+  assert.equal(printedPartNumber(null, 'all'), '');
+  // The goods themselves are unchanged whichever is chosen.
+  const descriptions = (choice: string) => buildTallyInvoice({ invoice: invoice({ total: 4720, gst_amount: 720 }), items: lines, company: { ...COMPANY, bill_part_numbers: choice }, customer: null }).items.map((line) => [line.description, line.amount]);
+  assert.deepEqual(descriptions('none'), descriptions('all'));
+});
+
+test('Place of Supply and State Code print only where GST Rule 46 asks for them', () => {
+  const shown = (overrides: Partial<TallyInvoiceInput>, customer: { gstin?: string } | null, lineTotal = 1000) =>
+    buildTallyInvoice({ invoice: invoice(overrides), items: [item({ line_total: lineTotal, unit_price: lineTotal / 2 })], company: COMPANY, customer }).placeOfSupplyShown;
+  assert.equal(shown({}, null), false, 'an ordinary sale inside the state: left off');
+  assert.equal(shown({}, { gstin: '03AAAAA1111A1Z1' }, 80000), false, 'a large sale to a registered buyer in the state: left off');
+  assert.equal(shown({}, { gstin: '06AAAAA1111A1Z1' }), true, 'a sale to another state: kept');
+  assert.equal(shown({ place_of_supply: '04' }, null), true, 'goods going to another state by the place chosen on the bill: kept');
+  assert.equal(shown({ total: 59000, gst_amount: 9000 }, null, 50000), true, 'Rs. 50,000 or more to a buyer without a GSTIN: kept');
+  assert.equal(shown({ total: 58999, gst_amount: 8999.82 }, null, 49999), false);
+  // The state is still worked out either way; only printing it is decided here.
+  const counter = buildTallyInvoice({ invoice: invoice({ customer: '' }), items: [item()], company: COMPANY, customer: null });
+  assert.equal(counter.buyer.stateCode, '03');
+});
+
+test('the saved PDF has no "computer generated" or "Received / Balance due" line', async () => {
+  const { renderTallyInvoicePdf } = await import('../lib/tally-invoice-pdf');
+  const { PDFDocument } = await import('pdf-lib');
+  const paid = buildTallyInvoice({ invoice: invoice({ paid: 1180 }), items: [item()], company: COMPANY, customer: null });
+  assert.ok(paid.payment, 'the payment is still worked out');
+  const bytes = await renderTallyInvoicePdf(paid);
+  // The page's drawing instructions are stored compressed; unpack every stream, then look for the
+  // text as pdf-lib writes it (a hex string per piece of text).
+  const { inflateSync } = await import('node:zlib');
+  const raw = Buffer.from(bytes).toString('latin1');
+  const unpacked = [...raw.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)].map((match) => {
+    try { return inflateSync(Buffer.from(match[1], 'latin1')).toString('latin1'); } catch { return match[1]; }
+  }).join('\n');
+  const hex = (value: string) => Buffer.from(value, 'latin1').toString('hex').toUpperCase();
+  const has = (value: string) => unpacked.includes(value) || unpacked.toUpperCase().includes(hex(value));
+  assert.equal((await PDFDocument.load(bytes)).getPageCount(), 1);
+  assert.ok(has('GRAND TOTAL'), 'the check can see text that is on the page');
+  assert.equal(has('This is a computer generated invoice.'), false);
+  assert.equal(has('Balance due'), false);
+  assert.equal(has('Place of Supply'), false, 'an ordinary sale inside the state');
 });

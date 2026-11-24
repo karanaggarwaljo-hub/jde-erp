@@ -48,7 +48,6 @@ const CSS = `
 .gst .g-charges td { padding:5px 8px; font-size:12.5px; }
 .gst .g-grand { display:flex; justify-content:flex-end; align-items:center; gap:24px; padding:6px 7px; background:#f0f0f0; border-bottom:1px solid #000; font-weight:700; font-size:13px; }
 .gst .g-sign { display:flex; flex-direction:column; justify-content:space-between; min-height:86px; text-align:right; }
-.gst .g-foot { text-align:center; font-size:9.5px; margin-top:4px; }
 .gst .g-void { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; }
 .gst .g-void span { transform:rotate(-28deg); font-size:84px; font-weight:800; letter-spacing:6px; color:rgba(200,0,0,.28); border:6px solid rgba(200,0,0,.28); padding:4px 24px; }
 .gst .g-void-note { text-align:center; color:#c00; font-weight:700; margin:2px 0 4px; }
@@ -56,7 +55,8 @@ const CSS = `
 @media print { .gst { max-width:none; aspect-ratio:auto; min-height:272mm; } .gst .g-items thead th, .gst .g-grand { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
 `;
 
-function PartyBox({ caption, party }: { caption: string; party: Party }) {
+/** `showPlace`: print Place of Supply and State Code (TallyInvoice.placeOfSupplyShown). */
+function PartyBox({ caption, party, showPlace }: { caption: string; party: Party; showPlace: boolean }) {
   return (
     <div className="g-col">
       <div className="g-cap">{caption}</div>
@@ -65,8 +65,8 @@ function PartyBox({ caption, party }: { caption: string; party: Party }) {
       <dl className="g-kv" style={{ marginTop: 4 }}>
         {party.phone && <><dt>Contact No.</dt><dd style={{ fontWeight: 400 }}>{party.phone}</dd></>}
         {party.gstin && <><dt>GSTIN/UIN</dt><dd>{party.gstin}</dd></>}
-        {party.state && <><dt>Place of Supply</dt><dd style={{ fontWeight: 400 }}>{party.state}</dd></>}
-        {party.stateCode && <><dt>State Code</dt><dd style={{ fontWeight: 400 }}>{party.stateCode}</dd></>}
+        {showPlace && party.state && <><dt>Place of Supply</dt><dd style={{ fontWeight: 400 }}>{party.state}</dd></>}
+        {showPlace && party.stateCode && <><dt>State Code</dt><dd style={{ fontWeight: 400 }}>{party.stateCode}</dd></>}
       </dl>
     </div>
   );
@@ -99,8 +99,8 @@ export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
         </div>
 
         <div className="g-row">
-          <PartyBox caption="Bill To" party={doc.buyer} />
-          <PartyBox caption="Ship To" party={doc.buyer} />
+          <PartyBox caption="Bill To" party={doc.buyer} showPlace={doc.placeOfSupplyShown} />
+          <PartyBox caption="Ship To" party={doc.buyer} showPlace={doc.placeOfSupplyShown} />
           <div className="g-col">
             <dl className="g-kv">
               {doc.details.map(([label, value]) => (
@@ -185,12 +185,6 @@ export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
           </div>
         </div>
       </div>
-      <p className="g-foot">This is a computer generated invoice.</p>
-      {doc.payment && (
-        <p className="g-foot" style={{ fontSize: 10.5 }}>
-          Received: ₹ {doc.payment.paid}{doc.payment.writtenOff && <> · Settled short: ₹ {doc.payment.writtenOff}</>} · Balance due: <b>₹ {doc.payment.balance}</b>
-        </p>
-      )}
     </div>
   );
 }

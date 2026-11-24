@@ -24,7 +24,7 @@ const RED = rgb(0.78, 0, 0);
 
 /** Part of every saved PDF's fingerprint (lib/invoice-archive.ts): changing how the bill is drawn
  *  changes it, so PDFs saved in the old layout are drawn again the next time they are wanted. */
-export const PDF_LAYOUT = 'a4-full-page-3-bigger-tax-box';
+export const PDF_LAYOUT = 'a4-full-page-4-no-foot-lines';
 
 // The extra characters the built-in fonts' WinAnsi encoding has beyond Latin-1.
 const WIN_ANSI_EXTRA = new Set(Array.from('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'));
@@ -151,8 +151,8 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
     for (const addressLine of party.lines) for (const piece of wrap(addressLine, fonts.regular, 8, third - 12)) out.push([piece, fonts.regular, 8]);
     if (party.phone) out.push([`Contact No.  ${party.phone}`, fonts.regular, 8]);
     if (party.gstin) out.push([`GSTIN/UIN  ${party.gstin}`, fonts.bold, 8]);
-    if (party.state) out.push([`Place of Supply  ${party.state}`, fonts.regular, 8]);
-    if (party.stateCode) out.push([`State Code  ${party.stateCode}`, fonts.regular, 8]);
+    if (doc.placeOfSupplyShown && party.state) out.push([`Place of Supply  ${party.state}`, fonts.regular, 8]);
+    if (doc.placeOfSupplyShown && party.stateCode) out.push([`State Code  ${party.stateCode}`, fonts.regular, 8]);
     return out;
   };
   const buyer = partyLines(doc.buyer);
@@ -191,7 +191,9 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   const sumHeight = Math.max(18 + words.length * 11, 44, 12 + charges.length * 15);
   const declaration = wrap(doc.declaration, fonts.regular, 7.5, split - LEFT - 10);
   const footHeight = Math.max(80, 22 + declaration.length * 9);
-  const footNote = doc.payment ? 26 : 14;
+  // The "computer generated" and "Received / Balance due" lines under the box came off the bill at
+  // the owner's request (November 2026); a little room is kept below the last box.
+  const footNote = 6;
   const after = 16 + sumHeight + 20 + footHeight + footNote;
 
   let tableTop = y;
@@ -286,10 +288,6 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   right('Authorised Signatory', RIGHT - 5, y - footHeight + 8, 8);
   y -= footHeight;
 
-  center('This is a computer generated invoice.', LEFT, WIDTH, y - 11, 7);
-  if (doc.payment) {
-    center(`Received: Rs. ${doc.payment.paid}${doc.payment.writtenOff ? `  |  Settled short: Rs. ${doc.payment.writtenOff}` : ''}  |  Balance due: Rs. ${doc.payment.balance}`, LEFT, WIDTH, y - 22, 7.5, fonts.bold);
-  }
 
   const pages = pdf.getPages();
   // A cancelled invoice is stamped across every page.
