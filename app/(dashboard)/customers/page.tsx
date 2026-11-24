@@ -1,7 +1,7 @@
 'use client';
 
 import { Fragment, useMemo, useState } from 'react';
-import { Plus, Phone, Mail, MapPin, Sparkles, Tag, Users, ChevronLeft, ChevronRight, MessageCircle, Gauge } from 'lucide-react';
+import { Plus, Phone, Mail, MapPin, Sparkles, Tag, Users, ChevronLeft, ChevronRight, MessageCircle, Gauge, Pencil } from 'lucide-react';
 import SummaryLine from '@/components/SummaryLine';
 import { money, wholeMoney } from '@/lib/money';
 import { useCompanyTable } from '@/lib/useCompanyTable';
@@ -85,6 +85,7 @@ export default function CustomersPage() {
   const { rows: invoiceItems } = useCompanyTable<InvoiceItem>('invoice_items');
   const { rows: stockConsumptions } = useCompanyTable<StockConsumption>('stock_consumptions');
   const [showModal, setShowModal] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [payingCustomerId, setPayingCustomerId] = useState<string | null>(null);
   const [reminderCustomer, setReminderCustomer] = useState<Customer | null>(null);
   const [offerCustomerId, setOfferCustomerId] = useState<string | null>(null);
@@ -427,6 +428,7 @@ export default function CustomersPage() {
                             <button className="btn btn-ghost btn-sm" aria-label={`Draft payment reminder for ${customer.name}`} title="Draft a payment reminder" disabled={!customer.balance} onClick={() => setReminderCustomer(customer)}><Sparkles size={14} /></button>
                             {/* Available whatever the grade — a New customer is often exactly who
                                 you want to make an opening offer to. */}
+                            <button className="btn btn-ghost btn-sm" aria-label={`Edit ${customer.name}`} title="Edit address, phone, GSTIN" onClick={() => setEditingCustomer(customer)}><Pencil size={14} /></button>
                             <button className="btn btn-ghost btn-sm" aria-label={`Set the credit limit of ${customer.name}`} title="Credit limit" onClick={() => { setLimitCustomer(customer); setLimitValue(Number(customer.credit_limit) > 0 ? String(Number(customer.credit_limit)) : ''); setLimitError(''); }}><Gauge size={14} /></button>
                             <button className="btn btn-ghost btn-sm" aria-label={`Draft an offer for ${customer.name}`} title="Draft an offer" disabled={!insight} onClick={() => setOfferCustomerId(customer.id)}><Tag size={14} /></button>
                           </div>
@@ -484,6 +486,14 @@ export default function CustomersPage() {
         )}
       </div>
 
+      {editingCustomer && (
+        <AddCustomerModal
+          customer={editingCustomer}
+          onClose={() => setEditingCustomer(null)}
+          onSave={(data) => updateCustomer(editingCustomer.id, data)}
+          onCreated={(customer) => { setEditingCustomer(null); setFeedback(`${customer.name} updated. Bills show the new details next time they are opened.`); }}
+        />
+      )}
       {showModal && (
         <AddCustomerModal
           onClose={() => setShowModal(false)}
