@@ -1653,7 +1653,7 @@ export async function getInvoicePdfSource(companyId: string, invoiceId: string) 
   const row = invoice.data as Record<string, unknown> | null;
   if (!row) return null;
   const customer = await client
-    .from('jde_customers').select('address, phone, gstin')
+    .from('jde_customers').select('address, shipping_address, phone, gstin')
     .eq('company_id', companyId).eq('name', String(row.customer ?? '')).limit(1).maybeSingle();
   if (customer.error) throw customer.error;
   // A cancelled invoice prints as it was issued, stamped cancelled (lib/tally-invoice.ts asIssued).

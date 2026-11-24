@@ -32,6 +32,7 @@ type Customer = {
   email: string;
   gstin: string;
   address: string;
+  shipping_address?: string | null;
   type: string;
   balance: number;
   /** What this customer may owe at most; 0 or blank means no limit (lib/credit.ts). */

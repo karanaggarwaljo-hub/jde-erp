@@ -100,7 +100,7 @@ export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
 
         <div className="g-row">
           <PartyBox caption="Bill To" party={doc.buyer} showPlace={doc.placeOfSupplyShown} />
-          <PartyBox caption="Ship To" party={doc.buyer} showPlace={doc.placeOfSupplyShown} />
+          <PartyBox caption="Ship To" party={doc.consignee} showPlace={doc.placeOfSupplyShown} />
           <div className="g-col">
             <dl className="g-kv">
               {doc.details.map(([label, value]) => (
