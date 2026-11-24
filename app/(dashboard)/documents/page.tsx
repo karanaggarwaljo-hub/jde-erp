@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { shopDay } from '@/lib/logbook';
-import { Ban, ExternalLink, Eye, FileDown, FileText, FolderOpen, Paperclip, Search } from 'lucide-react';
+import Link from 'next/link';
+import { Ban, ExternalLink, Eye, FileDown, FileText, FolderOpen, Paperclip, Printer, Search } from 'lucide-react';
 import { useCompany } from '@/components/CompanyProvider';
 import { useCompanyTable } from '@/lib/useCompanyTable';
 import { money } from '@/lib/money';
@@ -60,6 +61,9 @@ export default function DocumentsPage() {
     .filter((invoice) => inRange(invoice.date, range))
     .filter((invoice) => !term || `${invoice.id} ${invoice.customer}`.toLowerCase().includes(term))
     .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id)), [invoices, range, term]);
+  // "Print all": the office copies of every bill issued in the chosen month, whatever is searched.
+  const printMonth = range === 'all' ? 'all' : range === 'month' ? thisMonth() : lastMonth();
+  const printCount = invoices.filter((invoice) => invoice.status !== DRAFT_STATUS && inRange(invoice.date, range)).length;
   const issuedTotal = issued.filter((invoice) => invoice.status !== CANCELLED_STATUS).reduce((sum, invoice) => sum + Number(invoice.total || 0), 0);
 
   // Supplier bills: purchases with a bill uploaded, or (switched on) the ones still missing one.
@@ -108,11 +112,16 @@ export default function DocumentsPage() {
 
       {tab === 'issued' && (
         <div className="card" style={{ padding: 0 }}>
-          <div className="card-header" style={{ padding: '12px 16px' }}>
+          <div className="card-header" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             <span className="text-muted text-sm">
               {issued.length} invoice{issued.length === 1 ? '' : 's'}
               {issued.some((invoice) => invoice.status === CANCELLED_STATUS) ? ` (${issued.filter((invoice) => invoice.status === CANCELLED_STATUS).length} cancelled)` : ''} · ₹{money(issuedTotal)} billed
             </span>
+            {printCount > 0 && (
+              <Link className="btn btn-secondary btn-sm" href={`/documents/print/${printMonth}`} title="Every bill in this period as an Office Copy, one per page, to print for your CA">
+                <Printer size={14} /> Print all {printCount} bill{printCount === 1 ? '' : 's'} for the CA
+              </Link>
+            )}
           </div>
           <div className="table-wrap">
             <table className="erp-table">

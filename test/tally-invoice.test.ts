@@ -235,3 +235,26 @@ test('Ship To prints the shipping address when one is saved, and repeats Bill To
     assert.deepEqual(same.consignee.lines, same.buyer.lines, `shipping address ${JSON.stringify(blank)}: Ship To repeats Bill To`);
   }
 });
+
+test('the saved PDF is the customer\'s copy, marked Original for Recipient; office copies are labelled apart', async () => {
+  const { COPY_LABELS } = await import('../lib/tally-invoice');
+  const { renderTallyInvoicePdf } = await import('../lib/tally-invoice-pdf');
+  const { inflateSync } = await import('node:zlib');
+  assert.equal(COPY_LABELS.original, 'Original for Recipient');
+  assert.equal(COPY_LABELS.office, 'Office Copy');
+  const bytes = Buffer.from(await renderTallyInvoicePdf(buildTallyInvoice({ invoice: invoice(), items: [item()], company: COMPANY, customer: null })));
+  let text = '';
+  for (const match of bytes.toString('latin1').matchAll(/stream\r?\n([\s\S]*?)endstream/g)) {
+    try { text += inflateSync(Buffer.from(match[1], 'latin1')).toString('latin1'); } catch { /* not a content stream */ }
+  }
+  const hex = (value: string) => Buffer.from(value).toString('hex').toUpperCase();
+  assert.ok(text.toUpperCase().includes(hex('ORIGINAL FOR RECIPIENT')) || text.includes('ORIGINAL FOR RECIPIENT'));
+});
+
+test('a Documents print link names its month, and refuses what is not one', async () => {
+  const { monthTitle } = await import('../lib/invoice-print-doc');
+  assert.equal(monthTitle('2026-11'), 'November 2026');
+  assert.equal(monthTitle('2027-01'), 'January 2027');
+  assert.equal(monthTitle('all'), 'all months');
+  for (const bad of ['2026-13', '2026-1', 'november', '']) assert.equal(monthTitle(bad), null, bad);
+});

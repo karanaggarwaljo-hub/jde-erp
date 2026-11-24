@@ -10,7 +10,7 @@
  */
 
 import { degrees, PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
-import type { TallyInvoice } from './tally-invoice';
+import { COPY_LABELS, type TallyInvoice } from './tally-invoice';
 
 const PAGE: [number, number] = [595.28, 841.89]; // A4
 const LEFT = 28;
@@ -24,7 +24,7 @@ const RED = rgb(0.78, 0, 0);
 
 /** Part of every saved PDF's fingerprint (lib/invoice-archive.ts): changing how the bill is drawn
  *  changes it, so PDFs saved in the old layout are drawn again the next time they are wanted. */
-export const PDF_LAYOUT = 'a4-full-page-5-ship-to';
+export const PDF_LAYOUT = 'a4-full-page-6-original-label';
 
 // The extra characters the built-in fonts' WinAnsi encoding has beyond Latin-1.
 const WIN_ANSI_EXTRA = new Set(Array.from('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'));
@@ -123,6 +123,8 @@ export async function renderTallyInvoicePdf(doc: TallyInvoice): Promise<Uint8Arr
   // ── Title and letterhead ─────────────────────────────────────────────────────────────────
   center(doc.title, LEFT, WIDTH, y - 10, 10, fonts.bold);
   center(doc.subtitle, LEFT, WIDTH, y - 19, 6.5);
+  // The saved PDF is what the customer gets: their original.
+  right(COPY_LABELS.original.toUpperCase(), LEFT + WIDTH, y - 10, 7, fonts.bold);
   y -= 24;
   if (doc.cancelled) {
     const note = pdfSafe(`CANCELLED${doc.cancelled.on ? ` on ${doc.cancelled.on}` : ''}${doc.cancelled.reason ? ` - ${doc.cancelled.reason}` : ''}`).slice(0, 120);

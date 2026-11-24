@@ -59,6 +59,10 @@ export function printedPartNumber(partNumber: unknown, choice: unknown): string 
 }
 
 /** `shipping_address` is optional: left blank, Ship To repeats the billing address. */
+/** Printed at the top right of a bill, saying whose copy it is. The customer gets the original (the
+ *  saved PDF is that copy too); the shop keeps an office copy on file for the CA. */
+export const COPY_LABELS = { original: 'Original for Recipient', office: 'Office Copy' } as const;
+
 export type TallyCustomer = { address?: string | null; shipping_address?: string | null; phone?: string | null; gstin?: string | null } | null;
 
 /** With the dispatch details typed on the bill (lib/invoice-dispatch.ts). */
