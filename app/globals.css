@@ -1993,6 +1993,10 @@ Modal
    element carrying the class renders normally. */
 .no-print { }
 
+/* Several bills on one page (an office copy, or a month of them): apart on screen, one to a sheet of
+   paper when printed. */
+.invoice-sheet + .invoice-sheet { margin-top: 24px; }
+
 .invoice-sheet {
   max-width: 800px;
   margin: 0 auto;
@@ -2081,6 +2085,8 @@ Modal
   .report-summary .report-line {
     break-inside: avoid;
   }
+
+  .invoice-sheet + .invoice-sheet { margin-top: 0 !important; break-before: page; }
 }
 
 /* ===================================================

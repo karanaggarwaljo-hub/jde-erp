@@ -15,7 +15,8 @@ const CSS = `
 .gst { position:relative; background:#fff; color:#000; font-family: Arial, Helvetica, sans-serif; font-size:11px; line-height:1.4; max-width:800px; min-width:640px; margin:0 auto;
   display:flex; flex-direction:column; aspect-ratio:210 / 297; }
 .gst * { box-sizing:border-box; }
-.gst .g-top { text-align:center; margin-bottom:4px; }
+.gst .g-top { position:relative; text-align:center; margin-bottom:4px; }
+.gst .g-top .g-copy { position:absolute; right:0; top:1px; display:inline; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; }
 .gst .g-top b { font-size:13px; letter-spacing:.3px; }
 .gst .g-top span { display:block; font-size:9px; }
 .gst .g-box { border:1px solid #000; flex:1 1 auto; display:flex; flex-direction:column; }
@@ -72,7 +73,8 @@ function PartyBox({ caption, party, showPlace }: { caption: string; party: Party
   );
 }
 
-export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
+/** `copyLabel`: whose copy this is, printed at the top right (COPY_LABELS). */
+export default function TallyInvoiceSheet({ doc, copyLabel }: { doc: TallyInvoice; copyLabel?: string }) {
   const showDiscount = doc.items.some((item) => item.discount);
   // The goods columns' widths; the description takes what is left. Shared by the goods, the empty
   // space beneath them and the total line, so their column lines meet.
@@ -82,7 +84,7 @@ export default function TallyInvoiceSheet({ doc }: { doc: TallyInvoice }) {
   return (
     <div className="gst">
       <style>{CSS}</style>
-      <div className="g-top"><b>{doc.title}</b><span>{doc.subtitle}</span></div>
+      <div className="g-top"><b>{doc.title}</b><span>{doc.subtitle}</span>{copyLabel && <span className="g-copy">{copyLabel}</span>}</div>
       {doc.cancelled && (
         <>
           <div className="g-void" aria-hidden="true"><span>CANCELLED</span></div>
