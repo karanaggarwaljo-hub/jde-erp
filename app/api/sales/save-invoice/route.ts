@@ -1,4 +1,4 @@
-import { dbErrorMessage, getRow, saveSalesInvoice, setInvoiceDispatch, setInvoicePlaceOfSupply } from '@/lib/db';
+import { dbErrorMessage, getRow, renameSalesInvoice, saveSalesInvoice, setInvoiceDispatch, setInvoicePlaceOfSupply } from '@/lib/db';
 import { cleanDispatch } from '@/lib/invoice-dispatch';
 import { isStateCode } from '@/lib/gst-supply';
 import { checkCompanyAccess } from '@/lib/auth/dal';
@@ -33,9 +33,10 @@ export async function POST(request: Request) {
   if (!Array.isArray(items)) {
     return Response.json({ error: 'items must be an array' }, { status: 400 });
   }
-  // A new bill may carry a number typed by hand; blank leaves the numbering to the database. The
-  // database checks it again, and checks that no bill in any company already has it.
-  const typedNumber = isEdit ? '' : cleanInvoiceNumber(invoiceNumber);
+  // A new bill may carry a number typed by hand; blank leaves the numbering to the database. On an
+  // edit, a different number renumbers the bill first. The database checks it again, and checks
+  // that no bill in any company already has it.
+  const typedNumber = cleanInvoiceNumber(invoiceNumber);
   const numberProblem = invoiceNumberProblem(typedNumber);
   if (numberProblem) return Response.json({ error: numberProblem }, { status: 400 });
 
@@ -44,10 +45,19 @@ export async function POST(request: Request) {
     // an amount received quietly becoming a different number — so the audit entry has to be able
     // to say what it was, not only what it became.
     const before = isEdit ? await getRow('invoices', String(invoiceId)) : null;
+    let editId = isEdit ? String(invoiceId) : null;
+    if (editId && typedNumber && typedNumber !== editId) {
+      const renamed = await renameSalesInvoice(companyId, editId, typedNumber);
+      await recordAudit({
+        companyId, action: 'invoice.renumber', entity: 'invoices', entityId: renamed,
+        summary: `Changed invoice number ${editId} to ${renamed}`, details: { from: editId, to: renamed },
+      });
+      editId = renamed;
+    }
 
     const invoice = await saveSalesInvoice({
       companyId,
-      invoiceId: isEdit ? invoiceId : typedNumber || null,
+      invoiceId: isEdit ? editId : typedNumber || null,
       isEdit: Boolean(isEdit),
       customerLabel: String(customerLabel ?? ''),
       oldCustomerId: oldCustomerId ?? null,

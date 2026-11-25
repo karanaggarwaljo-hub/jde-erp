@@ -384,6 +384,14 @@ export type SaveSalesInvoiceInput = {
  *  consumption/restoration, and customer balance — as one database transaction (jde_save_sales_invoice),
  *  instead of the 6-10 separate browser-initiated calls the Sales page used to make, which could leave
  *  stock/balances/the invoice itself out of sync if one step failed partway through. */
+/** Changes a saved bill's number, moving everything linked to it (jde_rename_invoice). Returns the
+ *  number it now has. */
+export async function renameSalesInvoice(companyId: string, invoiceId: string, newNumber: string): Promise<string> {
+  const { data, error } = await getClient().rpc('jde_rename_invoice', { p_company_id: companyId, p_old_id: invoiceId, p_new_id: newNumber });
+  if (error) throw error;
+  return String(data);
+}
+
 export async function saveSalesInvoice(input: SaveSalesInvoiceInput): Promise<Record<string, unknown>> {
   const { data, error } = await getClient()
     .rpc('jde_save_sales_invoice', {

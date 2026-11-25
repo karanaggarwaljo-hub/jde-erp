@@ -154,7 +154,7 @@ test('the keyboard shortcuts are stated on the form', () => {
   assert.match(markup, /Ctrl\+Enter saves/);
 });
 
-test('a new bill offers an optional invoice number; an edit keeps its own', () => {
+test('a new bill offers an optional invoice number; an edit shows its own and can change it', () => {
   const blank = renderForm([]);
   assert.match(blank, /Invoice No\./);
   assert.match(blank, /\(optional\)/);
@@ -164,6 +164,11 @@ test('a new bill offers an optional invoice number; an edit keeps its own', () =
   assert.match(typed, /This bill will get this number/);
   const taken = renderForm([], { invoiceNumber: 'INV-1024', invoiceNumberError: 'INV-1024 is already used by another bill. Type a different number, or leave it blank.' });
   assert.match(taken, /INV-1024 is already used by another bill/);
-  const edit = renderForm([], { editingInvoice: { id: 'INV-1024', status: 'unpaid' } });
-  assert.doesNotMatch(edit, /id="invoice-number"/);
+  const edit = renderForm([], { editingInvoice: { id: 'INV-1024', status: 'unpaid' }, invoiceNumber: 'INV-1024' });
+  assert.match(edit, /id="invoice-number"/);
+  assert.match(edit, /value="INV-1024"/);
+  assert.doesNotMatch(edit, /\(optional\)/);
+  assert.match(edit, /Type a new number to change it/);
+  const renumber = renderForm([], { editingInvoice: { id: 'INV-1024', status: 'unpaid' }, invoiceNumber: 'JDE/25-26/024' });
+  assert.match(renumber, /Saving changes the number from INV-1024/);
 });

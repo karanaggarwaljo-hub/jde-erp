@@ -160,7 +160,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
             <h3 id="invoice-modal-title" className="modal-title">{editingInvoice ? `Edit ${editingInvoice.id}` : 'Make a bill'}</h3>
             {/* A new sale's number is either typed in the Invoice No. box or, left blank, made
                 inside jde_save_sales_invoice on the server when it saves. An edit shows the real
-                one, which is already in the title, and cannot change it. */}
+                one in the title and in the box, where typing another renumbers the bill. */}
             <div className="text-muted text-sm flex items-center gap-2" style={{ marginTop: '3px', flexWrap: 'wrap' }}>
               <span>Tax invoice under GST</span>
               {placeOfSupply && <><span aria-hidden="true">·</span><span>Place of supply · {placeOfSupply}</span></>}
@@ -198,17 +198,17 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
               )}
             </div>
             <div className="flex gap-3" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
-              {!editingInvoice && (
-                <div className="form-group" style={{ flex: '1 1 150px' }}>
-                  <label className="form-label" htmlFor="invoice-number">Invoice No. <span className="text-muted" style={{ fontWeight: 400 }}>(optional)</span></label>
-                  <input id="invoice-number" className="form-input" placeholder="Automatic" maxLength={INVOICE_NUMBER_MAX} autoComplete="off"
-                    value={invoiceNumber} aria-invalid={Boolean(invoiceNumberError)}
-                    onChange={(event) => setInvoiceNumber(event.target.value.toUpperCase())} />
-                  {invoiceNumberError
-                    ? <span className="text-danger text-sm" role="alert">{invoiceNumberError}</span>
-                    : <span className="text-muted text-sm">{invoiceNumber.trim() ? 'This bill will get this number' : 'Leave blank for the next number'}</span>}
-                </div>
-              )}
+              <div className="form-group" style={{ flex: '1 1 150px' }}>
+                <label className="form-label" htmlFor="invoice-number">Invoice No. {!editingInvoice && <span className="text-muted" style={{ fontWeight: 400 }}>(optional)</span>}</label>
+                <input id="invoice-number" className="form-input" placeholder={editingInvoice ? editingInvoice.id : 'Automatic'} maxLength={INVOICE_NUMBER_MAX} autoComplete="off"
+                  value={invoiceNumber} aria-invalid={Boolean(invoiceNumberError)}
+                  onChange={(event) => setInvoiceNumber(event.target.value.toUpperCase())} />
+                {invoiceNumberError
+                  ? <span className="text-danger text-sm" role="alert">{invoiceNumberError}</span>
+                  : <span className="text-muted text-sm">{editingInvoice
+                    ? (invoiceNumber.trim() && invoiceNumber.trim() !== editingInvoice.id ? `Saving changes the number from ${editingInvoice.id}` : 'Type a new number to change it')
+                    : invoiceNumber.trim() ? 'This bill will get this number' : 'Leave blank for the next number'}</span>}
+              </div>
               <div className="form-group" style={{ flex: '1 1 150px' }}>
                 <label className="form-label" htmlFor="invoice-date">Invoice Date</label>
                 <input id="invoice-date" type="date" className="form-input" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} />
