@@ -318,6 +318,13 @@ export default function SalesPage() {
   // money: parking it added nothing to the customer's balance, so confirming it has to start from
   // zero outstanding. Starting from its total would reverse a debt that was never recorded.
   const editingDraft = Boolean(editingInvoice && editingInvoice.status === DRAFT_STATUS);
+  // The number typed in the bill form: optional on a new bill (blank = the next number), required on
+  // an edit, where a different number renumbers the bill. The bill's own number does not count as taken.
+  const invoiceNumberError = editingInvoice
+    ? (cleanInvoiceNumber(invoiceNumber)
+      ? invoiceNumberProblem(invoiceNumber, invoices.filter((row) => row.id !== editingInvoice.id).map((row) => row.id))
+      : 'Type the invoice number. It cannot be left blank on a saved bill.')
+    : invoiceNumberProblem(invoiceNumber, invoices.map((row) => row.id));
   const editingOldOutstanding = editingInvoice && !editingDraft ? invoiceBalanceDue(editingInvoice) : 0;
   const newOutstanding = total - paidAmount;
   // The customer's credit limit against what they will owe once this bill is saved. Drafts put
@@ -425,6 +432,7 @@ export default function SalesPage() {
     setEditingInvoice(invoice);
     setCustomer(invoice.customer === WALK_IN_CUSTOMER ? '' : invoice.customer);
     setInvoiceDate(invoice.date);
+    setInvoiceNumber(invoice.id);
     setDiscountPercent(Number(invoice.discount_percent));
     // Was hardcoded to 18, which silently changed the tax on any invoice not saved at 18%.
     // Older invoices have no stored rate at all, so 18 stays the fallback for those only.
@@ -771,8 +779,7 @@ export default function SalesPage() {
     // A parked draft reserves its stock there and then, so it is warned about like a sale.
     if (!confirmStockShortfalls(items, editingDraft && editingInvoice ? editingInvoice.id : null)) return;
 
-    const draftNumberProblem = editingDraft ? null : invoiceNumberProblem(invoiceNumber, invoices.map((row) => row.id));
-    if (draftNumberProblem) { setInvoiceError(draftNumberProblem); return; }
+    if (invoiceNumberError) { setInvoiceError(invoiceNumberError); return; }
 
     setInvoiceError('');
     setSavingDraft(true);
@@ -787,7 +794,7 @@ export default function SalesPage() {
       const invoice = await saveSalesInvoice({
         companyId: activeCompany.id,
         invoiceId: editingRow ? editingRow.id : null,
-        invoiceNumber: editingRow ? null : cleanInvoiceNumber(invoiceNumber) || null,
+        invoiceNumber: cleanInvoiceNumber(invoiceNumber) || null,
         isEdit: Boolean(editingRow),
         customerLabel,
         oldCustomerId: oldCustomerRow?.id ?? null,
@@ -863,8 +870,7 @@ Save it anyway?`,
     }
     if (!confirmStockShortfalls(items, editingInvoice ? editingInvoice.id : null)) return;
 
-    const numberProblem = editingInvoice ? null : invoiceNumberProblem(invoiceNumber, invoices.map((row) => row.id));
-    if (numberProblem) { setInvoiceError(numberProblem); return; }
+    if (invoiceNumberError) { setInvoiceError(invoiceNumberError); return; }
 
     setInvoiceError('');
     setSavingInvoice(true);
@@ -879,10 +885,11 @@ Save it anyway?`,
         // Atomic on the database side (jde_save_sales_invoice): fully undoes the old invoice's
         // stock effect, draws fresh FIFO batches for the new lines, and adjusts the customer
         // balance, all as one transaction — a failure partway through leaves nothing half-done.
-        await saveSalesInvoice({
+        const saved = await saveSalesInvoice({
           money: moneyChoice,
           companyId: activeCompany.id,
           invoiceId: editingInvoice.id,
+          invoiceNumber: cleanInvoiceNumber(invoiceNumber) || null,
           isEdit: true,
           customerLabel,
           oldCustomerId: oldCustomerRow?.id ?? null,
@@ -904,8 +911,11 @@ Save it anyway?`,
           dispatch,
         });
 
+        // The number it has now: different when it was renumbered in this edit.
+        const savedId = String(saved?.id ?? editingInvoice.id);
+        const renumbered = savedId !== editingInvoice.id ? ` Its number is now ${savedId}.` : '';
         await Promise.all([reloadInvoices(), reloadInvoiceItems(), reloadCustomers(), reloadProducts()]);
-        if (await finishJob(editingInvoice.id)) return;
+        if (await finishJob(savedId)) return;
         setShowInvoiceModal(false);
         setEditingInvoice(null);
         if (wasDraft) {
@@ -913,7 +923,7 @@ Save it anyway?`,
           setPaymentFilter('all');
           setPage(1);
         }
-        setFeedback(wasDraft ? `${editingInvoice.id} confirmed — the parked draft is now a live invoice.` : `${editingInvoice.id} updated.`);
+        setFeedback((wasDraft ? `${editingInvoice.id} confirmed — the parked draft is now a live invoice.` : `${editingInvoice.id} updated.`) + renumbered);
         return;
       }
 
@@ -1853,7 +1863,7 @@ Save it anyway?`,
           lines={lines} setLines={setLines} updateLine={updateLine}
           invoiceDate={invoiceDate} setInvoiceDate={setInvoiceDate}
           invoiceNumber={invoiceNumber} setInvoiceNumber={setInvoiceNumber}
-          invoiceNumberError={!editingInvoice ? invoiceNumberProblem(invoiceNumber, invoices.map((row) => row.id)) : null}
+          invoiceNumberError={invoiceNumberError}
           customer={customer} setCustomer={setCustomer}
           paymentStatus={paymentStatus} setPaymentStatus={setPaymentStatus}
           companyId={activeCompany?.id ?? ''} moneyChoice={moneyChoice} setMoneyChoice={setMoneyChoice}

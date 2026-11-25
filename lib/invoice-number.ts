@@ -22,7 +22,7 @@ export function invoiceNumberProblem(raw: unknown, takenIds: Iterable<string> = 
   if (!/^[A-Z0-9/-]+$/.test(number)) return 'Use only letters, numbers, - and / in an invoice number (no spaces).';
   if (!/[0-9]/.test(number)) return 'An invoice number needs at least one number in it.';
   for (const id of takenIds) {
-    if (String(id).toUpperCase() === number) return `${number} is already used by another bill. Type a different number, or leave it blank.`;
+    if (String(id).toUpperCase() === number) return `${number} is already used by another bill. Type a different number.`;
   }
   return null;
 }
