@@ -21,6 +21,7 @@
  */
 
 import { PLACE_OF_SUPPLY_OPTIONS } from '@/lib/gst-supply';
+import { INVOICE_NUMBER_MAX } from '@/lib/invoice-number';
 import { useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import MoneyPicker from '@/components/money/MoneyPicker';
 import type { MoneyChoice } from '@/lib/money-book';
@@ -47,6 +48,11 @@ export type InvoiceFormModalProps = {
   updateLine: (index: number, patch: Partial<InvoiceLine>) => void;
   invoiceDate: string;
   setInvoiceDate: (value: string) => void;
+  /** A new bill only: typed by hand, or blank for the next number (lib/invoice-number.ts). */
+  invoiceNumber: string;
+  setInvoiceNumber: (value: string) => void;
+  /** Why the typed number cannot be used, said beside the box; null when it can (or is blank). */
+  invoiceNumberError: string | null;
   customer: string;
   setCustomer: (value: string) => void;
   paymentStatus: PaymentStatus;
@@ -108,7 +114,7 @@ const PAID_CHOICES: ReadonlyArray<{ value: PaymentStatus; label: string }> = [
 
 export default function InvoiceFormModal(props: InvoiceFormModalProps) {
   const {
-    lines, setLines, updateLine, invoiceDate, setInvoiceDate, customer, setCustomer,
+    lines, setLines, updateLine, invoiceDate, setInvoiceDate, invoiceNumber, setInvoiceNumber, invoiceNumberError, customer, setCustomer,
     paymentStatus, setPaymentStatus, amountPaid, setAmountPaid, companyId, moneyChoice, setMoneyChoice, creditCheck,
     discountPercent, setDiscountPercent, gstPercent, setGstPercent, gstInclusive, setGstInclusive,
     totals, paidAmount, newOutstanding,
@@ -128,7 +134,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
   // captured from a stale render would point at the wrong row.
   const [lastAdded, setLastAdded] = useState('');
 
-  const canSubmit = Boolean(total) && !savingInvoice && !savingDraft && !creditSaleNeedsCustomer;
+  const canSubmit = Boolean(total) && !savingInvoice && !savingDraft && !creditSaleNeedsCustomer && !invoiceNumberError;
 
   // Whether "More options" starts open: only on a bill that already uses one of them. Decided once,
   // when the form opens — afterwards it opens and closes only when its heading is pressed, so it
@@ -152,13 +158,12 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
         <div className="modal-header">
           <div>
             <h3 id="invoice-modal-title" className="modal-title">{editingInvoice ? `Edit ${editingInvoice.id}` : 'Make a bill'}</h3>
-            {/* No invoice number is shown for a new sale: it is generated inside
-                jde_save_sales_invoice on the server and simply is not known until the save
-                comes back. An edit shows the real one, which is already in the title. */}
+            {/* A new sale's number is either typed in the Invoice No. box or, left blank, made
+                inside jde_save_sales_invoice on the server when it saves. An edit shows the real
+                one, which is already in the title, and cannot change it. */}
             <div className="text-muted text-sm flex items-center gap-2" style={{ marginTop: '3px', flexWrap: 'wrap' }}>
               <span>Tax invoice under GST</span>
               {placeOfSupply && <><span aria-hidden="true">·</span><span>Place of supply · {placeOfSupply}</span></>}
-              {!editingInvoice && <><span aria-hidden="true">·</span><span>Number assigned on save</span></>}
             </div>
           </div>
           <button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => { setShowInvoiceModal(false); setEditingInvoice(null); }}>✕</button>
@@ -192,10 +197,23 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                 <span className="text-muted text-sm">Walk-in sale — billed to the counter, no customer account.</span>
               )}
             </div>
-            <div className="form-group">
-              <label className="form-label">Invoice Date</label>
-              <input type="date" className="form-input" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} />
-              <span className="text-muted text-sm">Date the goods leave the counter</span>
+            <div className="flex gap-3" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              {!editingInvoice && (
+                <div className="form-group" style={{ flex: '1 1 150px' }}>
+                  <label className="form-label" htmlFor="invoice-number">Invoice No. <span className="text-muted" style={{ fontWeight: 400 }}>(optional)</span></label>
+                  <input id="invoice-number" className="form-input" placeholder="Automatic" maxLength={INVOICE_NUMBER_MAX} autoComplete="off"
+                    value={invoiceNumber} aria-invalid={Boolean(invoiceNumberError)}
+                    onChange={(event) => setInvoiceNumber(event.target.value.toUpperCase())} />
+                  {invoiceNumberError
+                    ? <span className="text-danger text-sm" role="alert">{invoiceNumberError}</span>
+                    : <span className="text-muted text-sm">{invoiceNumber.trim() ? 'This bill will get this number' : 'Leave blank for the next number'}</span>}
+                </div>
+              )}
+              <div className="form-group" style={{ flex: '1 1 150px' }}>
+                <label className="form-label" htmlFor="invoice-date">Invoice Date</label>
+                <input id="invoice-date" type="date" className="form-input" value={invoiceDate} onChange={(event) => setInvoiceDate(event.target.value)} />
+                <span className="text-muted text-sm">Date the goods leave the counter</span>
+              </div>
             </div>
           </div>
 

@@ -6,13 +6,14 @@ import { money, recordAudit } from '@/lib/audit-log';
 import { after } from 'next/server';
 import { keepInvoicePdf } from '@/lib/invoice-drive';
 import { recordMoney } from '@/lib/cash-book';
+import { cleanInvoiceNumber, invoiceNumberProblem } from '@/lib/invoice-number';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   const body = await request.json();
   const {
-    companyId, invoiceId, isEdit, customerLabel, oldCustomerId, newCustomerId,
+    companyId, invoiceId, invoiceNumber, isEdit, customerLabel, oldCustomerId, newCustomerId,
     oldOutstanding, newOutstanding, date, items, total, paid, status, mode,
     discountPercent, discountAmount, gstPercent, gstAmount, gstMode, placeOfSupply, dispatch,
   } = body ?? {};
@@ -24,13 +25,19 @@ export async function POST(request: Request) {
   if (!access.ok) return Response.json({ error: access.error }, { status: access.status });
   // Only required when editing an existing invoice — a new invoice's id is generated inside the
   // database transaction itself (globally unique across every company, not something the caller
-  // can safely guess), so invoiceId is ignored entirely when isEdit is false.
+  // can safely guess), so invoiceId is ignored entirely when isEdit is false. A new bill can
+  // instead carry a number typed by hand (invoiceNumber, below).
   if (isEdit && (typeof invoiceId !== 'string' || !invoiceId)) {
     return Response.json({ error: 'invoiceId is required when editing an invoice' }, { status: 400 });
   }
   if (!Array.isArray(items)) {
     return Response.json({ error: 'items must be an array' }, { status: 400 });
   }
+  // A new bill may carry a number typed by hand; blank leaves the numbering to the database. The
+  // database checks it again, and checks that no bill in any company already has it.
+  const typedNumber = isEdit ? '' : cleanInvoiceNumber(invoiceNumber);
+  const numberProblem = invoiceNumberProblem(typedNumber);
+  if (numberProblem) return Response.json({ error: numberProblem }, { status: 400 });
 
   try {
     // Read before writing, on an edit only. An edit is where money changes silently — a total or
@@ -40,7 +47,7 @@ export async function POST(request: Request) {
 
     const invoice = await saveSalesInvoice({
       companyId,
-      invoiceId: isEdit ? invoiceId : null,
+      invoiceId: isEdit ? invoiceId : typedNumber || null,
       isEdit: Boolean(isEdit),
       customerLabel: String(customerLabel ?? ''),
       oldCustomerId: oldCustomerId ?? null,

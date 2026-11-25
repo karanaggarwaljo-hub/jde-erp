@@ -17,6 +17,8 @@ export type SaveSalesInvoiceInput = {
    *  database generates the real id itself (globally unique across every company, not something
    *  the client can safely guess from its own company-scoped view of existing invoices). */
   invoiceId: string | null;
+  /** A new bill only: the number typed on it, or null/blank for the next number. */
+  invoiceNumber?: string | null;
   isEdit: boolean;
   customerLabel: string;
   oldCustomerId: string | null;

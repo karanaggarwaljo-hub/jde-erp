@@ -152,7 +152,7 @@ export function buildDayBook(sources: DayBookSources): DayBookEntry[] {
       value: round2(total),
       cashIn: atCounter,
       cashOut: 0,
-      href: `/sales/invoice/${invoice.id}`,
+      href: `/sales/invoice/${encodeURIComponent(invoice.id)}`,
     });
   }
 

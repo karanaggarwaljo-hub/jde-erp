@@ -69,6 +69,7 @@ function renderForm(lines: InvoiceLine[], overrides: Record<string, unknown> = {
   const props = {
     lines, setLines: () => {}, updateLine: () => {},
     invoiceDate: '2026-09-10', setInvoiceDate: () => {},
+    invoiceNumber: '', setInvoiceNumber: () => {}, invoiceNumberError: null,
     customer: 'jasspal', setCustomer: () => {},
     paymentStatus: 'unpaid' as const, setPaymentStatus: () => {},
     amountPaid: 0, setAmountPaid: () => {},
@@ -151,4 +152,18 @@ test('a one-off line renders without a catalogue part behind it', () => {
 test('the keyboard shortcuts are stated on the form', () => {
   const markup = renderForm([]);
   assert.match(markup, /Ctrl\+Enter saves/);
+});
+
+test('a new bill offers an optional invoice number; an edit keeps its own', () => {
+  const blank = renderForm([]);
+  assert.match(blank, /Invoice No\./);
+  assert.match(blank, /\(optional\)/);
+  assert.match(blank, /Leave blank for the next number/);
+  const typed = renderForm([], { invoiceNumber: 'JDE/25-26/001' });
+  assert.match(typed, /value="JDE\/25-26\/001"/);
+  assert.match(typed, /This bill will get this number/);
+  const taken = renderForm([], { invoiceNumber: 'INV-1024', invoiceNumberError: 'INV-1024 is already used by another bill. Type a different number, or leave it blank.' });
+  assert.match(taken, /INV-1024 is already used by another bill/);
+  const edit = renderForm([], { editingInvoice: { id: 'INV-1024', status: 'unpaid' } });
+  assert.doesNotMatch(edit, /id="invoice-number"/);
 });

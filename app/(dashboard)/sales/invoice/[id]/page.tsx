@@ -12,6 +12,10 @@ import { type SalesReturnRow } from '@/lib/client-sales-returns';
 import { COPY_LABELS, type TallyCompany } from '@/lib/tally-invoice';
 import { invoicePrintDoc, type PartHsn } from '@/lib/invoice-print-doc';
 
+function safeDecode(value: string): string {
+  try { return decodeURIComponent(value); } catch { return value; }
+}
+
 /** Remembered on this device only: whether printing a bill also prints the office copy. */
 const OFFICE_COPY_KEY = 'jde.print.officeCopy';
 
@@ -20,7 +24,10 @@ const OFFICE_COPY_KEY = 'jde.print.officeCopy';
  *  marked "Original for Recipient"; ticked, a second page marked "Office Copy" prints after it, for
  *  the file the CA collects at month end. */
 export default function SalesInvoicePrintPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id: rawId } = useParams<{ id: string }>();
+  // A typed invoice number can hold "/" (JDE/25-26/001), which arrives here still encoded (%2F).
+  // Invoice numbers never contain "%", so decoding cannot change any other number.
+  const id = safeDecode(rawId);
   const { activeCompany } = useCompany();
   const { rows: invoices, loading: invoicesLoading } = useCompanyTable<Invoice>('invoices');
   const { rows: invoiceItems, loading: itemsLoading } = useCompanyTable<InvoiceItem>('invoice_items');

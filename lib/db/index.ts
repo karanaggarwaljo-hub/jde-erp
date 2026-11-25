@@ -1632,7 +1632,9 @@ export type InvoiceFileRecord = {
 
 /** One file per invoice, replaced in place, so the archive never holds more than one copy. */
 export function invoicePdfPath(companyId: string, invoiceId: string): string {
-  const safe = (value: string) => value.replace(/[^A-Za-z0-9_-]/g, '');
+  // A typed invoice number may hold "/" (JDE/25-26/001): it becomes "_", which no invoice number
+  // can contain, so two numbers never share a file and none makes a folder.
+  const safe = (value: string) => value.replace(/\//g, '_').replace(/[^A-Za-z0-9_-]/g, '');
   return `${safe(companyId)}/${safe(invoiceId)}.pdf`;
 }
 
