@@ -27,6 +27,7 @@ import {
   HandCoins,
   History,
 } from 'lucide-react';
+import { cleanInvoiceNumber, invoiceNumberProblem } from '@/lib/invoice-number';
 import { saveSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance, receiveCustomerPayment, getInvoiceCost } from '@/lib/client-sales';
 import { realisedProfit, type InvoiceCost } from '@/lib/invoice-profit';
 import { invoiceBalanceDue, invoiceWrittenOff, wasSettledShort } from '@/lib/invoice-balance';
@@ -224,6 +225,8 @@ export default function SalesPage() {
 
   const [customer, setCustomer] = useState('');
   const [invoiceDate, setInvoiceDate] = useState(todayIso());
+  // Typed on a new bill, or left blank for the next number (lib/invoice-number.ts).
+  const [invoiceNumber, setInvoiceNumber] = useState('');
   const [lines, setLines] = useState<InvoiceLine[]>([]);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [gstPercent, setGstPercent] = useState(18);
@@ -409,6 +412,7 @@ export default function SalesPage() {
     setPlaceOfSupplyChoice('');
     setDispatch(EMPTY_DISPATCH);
     setInvoiceDate(todayIso());
+    setInvoiceNumber('');
     setPaymentStatus('unpaid');
     setAmountPaid(0);
     setInvoiceError('');
@@ -767,6 +771,9 @@ export default function SalesPage() {
     // A parked draft reserves its stock there and then, so it is warned about like a sale.
     if (!confirmStockShortfalls(items, editingDraft && editingInvoice ? editingInvoice.id : null)) return;
 
+    const draftNumberProblem = editingDraft ? null : invoiceNumberProblem(invoiceNumber, invoices.map((row) => row.id));
+    if (draftNumberProblem) { setInvoiceError(draftNumberProblem); return; }
+
     setInvoiceError('');
     setSavingDraft(true);
     try {
@@ -780,6 +787,7 @@ export default function SalesPage() {
       const invoice = await saveSalesInvoice({
         companyId: activeCompany.id,
         invoiceId: editingRow ? editingRow.id : null,
+        invoiceNumber: editingRow ? null : cleanInvoiceNumber(invoiceNumber) || null,
         isEdit: Boolean(editingRow),
         customerLabel,
         oldCustomerId: oldCustomerRow?.id ?? null,
@@ -855,6 +863,9 @@ Save it anyway?`,
     }
     if (!confirmStockShortfalls(items, editingInvoice ? editingInvoice.id : null)) return;
 
+    const numberProblem = editingInvoice ? null : invoiceNumberProblem(invoiceNumber, invoices.map((row) => row.id));
+    if (numberProblem) { setInvoiceError(numberProblem); return; }
+
     setInvoiceError('');
     setSavingInvoice(true);
     try {
@@ -913,6 +924,7 @@ Save it anyway?`,
         money: moneyChoice,
         companyId: activeCompany.id,
         invoiceId: null,
+        invoiceNumber: cleanInvoiceNumber(invoiceNumber) || null,
         isEdit: false,
         customerLabel,
         oldCustomerId: null,
@@ -944,7 +956,7 @@ Save it anyway?`,
       // rather than having to be hunted down in the list. It opens the real invoice route on the
       // id the server just returned — the same document the Print button on any row opens, so
       // there is one invoice document in the app rather than two that could drift apart.
-      window.open(`/sales/invoice/${createdId}`, '_blank');
+      window.open(`/sales/invoice/${encodeURIComponent(createdId)}`, '_blank');
       finishEntry();
     } catch (error) {
       setInvoiceError(error instanceof Error ? error.message : 'Failed to save this invoice — please check Sales and Stock before retrying.');
@@ -1278,7 +1290,7 @@ Save it anyway?`,
                         and one that cannot be used says why instead of only hinting on hover. */}
                     <td className="text-center"><div className="flex gap-1 items-center" style={{ justifyContent: 'flex-end' }}>
                       <button className="btn btn-ghost btn-sm" aria-label={`View ${invoice.id}`} title="View invoice" onClick={() => setViewingInvoice(invoice)}><Eye size={14} /></button>
-                      <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={() => window.open(`/sales/invoice/${invoice.id}`, '_blank')}><Printer size={14} /></button>
+                      <button className="btn btn-ghost btn-sm" aria-label={`Print ${invoice.id}`} title="Print invoice" onClick={() => window.open(`/sales/invoice/${encodeURIComponent(invoice.id)}`, '_blank')}><Printer size={14} /></button>
                       <RowMenu
                         label={`More for ${invoice.id}`}
                         items={[
@@ -1719,7 +1731,7 @@ Save it anyway?`,
               <Undo2 size={14} /> {viewingInvoice.status === DRAFT_STATUS ? 'Discard draft' : 'Return or cancel'}
             </button>
           )}
-          <button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/invoice/${viewingInvoice.id}`, '_blank')}><Printer size={14} /> Print</button>
+          <button type="button" className="btn btn-secondary" onClick={() => window.open(`/sales/invoice/${encodeURIComponent(viewingInvoice.id)}`, '_blank')}><Printer size={14} /> Print</button>
           <button type="button" className="btn btn-primary" onClick={() => setViewingInvoice(null)}>Close</button>
         </div>
       </div></div>}
@@ -1840,6 +1852,8 @@ Save it anyway?`,
         <InvoiceFormModal
           lines={lines} setLines={setLines} updateLine={updateLine}
           invoiceDate={invoiceDate} setInvoiceDate={setInvoiceDate}
+          invoiceNumber={invoiceNumber} setInvoiceNumber={setInvoiceNumber}
+          invoiceNumberError={!editingInvoice ? invoiceNumberProblem(invoiceNumber, invoices.map((row) => row.id)) : null}
           customer={customer} setCustomer={setCustomer}
           paymentStatus={paymentStatus} setPaymentStatus={setPaymentStatus}
           companyId={activeCompany?.id ?? ''} moneyChoice={moneyChoice} setMoneyChoice={setMoneyChoice}
