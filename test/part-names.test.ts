@@ -72,3 +72,9 @@ test('other names are tidied, and a word already on the part is not offered agai
   assert.equal(alreadyNamed('paani filter', 'Water Separator', ['Paani Filter']), true);
   assert.equal(looseMatch('pump', ['Hydraulic Pump']), null, 'a plain match needs no help');
 });
+
+test('the shop\'s own spellings and full stops between words', () => {
+  const rows = [part('filter set diesal'), part('GASKET.CYLINDER HEAD')];
+  assert.equal(searchParts('diesel filter', rows)[0]?.part.name, 'filter set diesal');
+  assert.equal(searchParts('packing cylinder', rows)[0]?.part.name, 'GASKET.CYLINDER HEAD');
+});
