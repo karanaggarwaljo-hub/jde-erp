@@ -2283,6 +2283,18 @@ Modal
 .part-picker-meta { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
 
 .part-picker-empty { padding: 10px; }
+/* After a part was found under a customer's word: offer to remember that word for it. */
+.part-picker-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-2);
+}
 
 /* Said under the line it is about, never as a blocking error: selling below cost or
    ahead of a delivery are both real, deliberate things to do here. */

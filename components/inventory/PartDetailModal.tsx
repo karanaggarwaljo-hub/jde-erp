@@ -210,6 +210,12 @@ export default function PartDetailModal({ companyId, productId, onOpenPart, onCl
                 {(part.other_numbers ?? []).map((number) => <span key={number} className="pn-chip">{number}</span>)}
               </div>
             )}
+            {part && (part.other_names ?? []).length > 0 && (
+              <div className="flex items-center gap-2" style={{ flexWrap: 'wrap', marginTop: 6 }}>
+                <span className="text-muted" style={{ fontSize: 12 }}>Customers also call it</span>
+                {(part.other_names ?? []).map((name) => <span key={name} className="brand-chip">{name}</span>)}
+              </div>
+            )}
           </div>
           <button className="btn btn-ghost btn-sm" aria-label="Close" onClick={onClose}><X size={16} /></button>
         </div>

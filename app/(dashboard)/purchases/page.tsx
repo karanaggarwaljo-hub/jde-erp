@@ -55,7 +55,7 @@ type PurchaseTab = 'purchases' | 'invoices';
 
 // Only this page reads these two: a product row as Inventory stores it, and the goods-received
 // note the save writes. Everything the dialogs also need lives in lib/purchase-types.ts.
-type Product = { id: string; company_id: string; part_number: string; other_numbers?: string[] | null; oem_number: string; hsn_code: string; brand: string; name: string; category: string; cost_price: number; sale_price: number; current_stock: number; image_url?: string | null };
+type Product = { id: string; company_id: string; part_number: string; other_numbers?: string[] | null; other_names?: string[] | null; oem_number: string; hsn_code: string; brand: string; name: string; category: string; cost_price: number; sale_price: number; current_stock: number; image_url?: string | null };
 type Grn = { id: string; company_id: string; po_number: string; supplier: string; received_at: string; status: string };
 
 /** Which purchase orders the table is showing. Purely a view filter — it never changes what is
@@ -177,6 +177,7 @@ export default function PurchasesPage() {
   const partOptions = useMemo(() => products.map((product) => ({
     value: labelOf(product),
     otherNumbers: product.other_numbers ?? [],
+    otherNames: product.other_names ?? [],
     price: Number(product.cost_price) || 0,
     salePrice: Number(product.sale_price) || 0,
     category: product.category,

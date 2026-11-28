@@ -49,6 +49,7 @@ export default function MergePartModal({ duplicate, products, companyId, onClose
         value: describe(p),
         partNumber: p.part_number,
         otherNumbers: p.other_numbers ?? [],
+        otherNames: p.other_names ?? [],
         name: p.name,
         brand: p.brand,
         stock: stockOf(p),

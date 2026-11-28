@@ -17,6 +17,7 @@ import { Plus, Sparkles } from 'lucide-react';
 import { money, wholeMoney } from '@/lib/money';
 import { compatibilitySuggestions } from '@/lib/product-search';
 import { brandLabel, cleanOtherNumbers, splitNumberList } from '@/lib/part-numbers';
+import { cleanOtherNames, splitNameList } from '@/lib/part-names';
 import { keepEnterInsideForm, SAVE_SHORTCUT_HINT } from '@/lib/form-keys';
 import type { PartDraftSummary, PartFormData, Product } from '@/lib/inventory-types';
 
@@ -207,6 +208,29 @@ export default function PartFormModal(props: PartFormModalProps) {
                       <label className="form-label">HSN Code</label>
                       <input className="form-input" placeholder="e.g. 84314990" value={formData.hsn_code} onChange={e => setFormData({ ...formData, hsn_code: e.target.value })} />
                     </div>
+                  </div>
+                  {/* What customers call this part, so a bill finds it under their word. */}
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="part-other-names">Other names (what customers call it)</label>
+                    <input
+                      id="part-other-names"
+                      className="form-input"
+                      placeholder="e.g. grari, gear wheel (put a comma between them)"
+                      value={formData.other_names}
+                      onChange={e => setFormData({ ...formData, other_names: e.target.value })}
+                    />
+                    {(() => {
+                      const kept = cleanOtherNames(splitNameList(formData.other_names), formData.name);
+                      if (kept.length === 0) {
+                        return <small className="text-muted">The word a customer asks for, if it is not the name above. Billing and Stock find the part by any of them.</small>;
+                      }
+                      return (
+                        <div className="flex items-center gap-2" style={{ flexWrap: 'wrap', marginTop: '6px' }}>
+                          <small className="text-muted">Also found as</small>
+                          {kept.map((name) => <span key={name} className="brand-chip">{name}</span>)}
+                        </div>
+                      );
+                    })()}
                   </div>
                   {/* Any number of other numbers, typed with commas between them. One box rather
                       than a row per number, so nothing half-typed is lost when Save is pressed. */}

@@ -160,6 +160,7 @@ export default function StockPlanning() {
     id: product.id,
     value: labelOf(product),
     otherNumbers: Array.isArray(product.other_numbers) ? (product.other_numbers as string[]) : [],
+    otherNames: Array.isArray(product.other_names) ? (product.other_names as string[]) : [],
     partNumber: String(product.part_number ?? ''),
     name: product.name,
     brand: String(product.brand ?? ''),

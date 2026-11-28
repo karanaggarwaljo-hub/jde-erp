@@ -19,19 +19,27 @@
  *   3. Out of stock never means hidden. A trader sells what they have to order in, and buying is
  *      precisely how a part with none on the shelf gets restocked.
  *
+ * And, since November 2026, by what the customer calls it: a part's other names, everyday shop
+ * words and slips of spelling (lib/part-names.ts), ranked below every plain match.
+ *
  * Pure and synchronous — no fetching, no React — so the ranking can be tested on its own.
  */
+import { looseMatch } from './part-names';
 
 /** The minimum a part has to expose to be findable. Both the sales catalogue and the purchases
  *  one satisfy this structurally, so neither screen's row type is imported here — this module
  *  ranks parts and knows nothing about what either screen does with the one that is picked. */
 export type SearchablePart = {
+  /** The part's row id, when the screen has it: lets the picker save a customer's name for it. */
+  id?: string;
   value: string;
   partNumber: string;
   /** Every other number the part is known by (lib/part-numbers.ts). Typed or scanned, any of them
    *  finds the part exactly as its part number does. */
   otherNumbers?: readonly string[];
   name: string;
+  /** What customers call it (lib/part-names.ts): found by any of them, like the name. */
+  otherNames?: readonly string[];
   brand: string;
   stock: number;
 };
@@ -50,16 +58,20 @@ export type MatchReason =
   | 'exact-code'
   | 'code-prefix'
   | 'name-prefix'
+  | 'other-name-prefix'
   | 'code-contains'
+  | 'other-name-contains'
   | 'name-contains'
   | 'brand'
-  | 'all-words';
+  | 'all-words'
+  | 'similar';
 
 export type PartMatch<T extends SearchablePart = SearchablePart> = {
   part: T;
   score: number;
   why: MatchReason;
-  /** The other number that matched, when it was not the part number, so the list can show it. */
+  /** The other number or other name that matched, so the list can show it; for a 'similar' match,
+   *  how the word was reached ("grari = gear", "bering ≈ bearing"). */
   via?: string;
 };
 
@@ -69,10 +81,14 @@ const SCORES: Record<MatchReason, number> = {
   'exact-code': 1000,
   'code-prefix': 500,
   'name-prefix': 320,
+  'other-name-prefix': 300,
   'code-contains': 240,
+  'other-name-contains': 200,
   'name-contains': 180,
   'brand': 120,
   'all-words': 80,
+  // Plus one for each word typed exactly as written, so the closer guess comes first.
+  'similar': 40,
 };
 
 /** How a typed code meets one of the part's numbers, strongest first, and which number it was. */
@@ -91,7 +107,7 @@ function codeReason(part: SearchablePart, code: string): { why: MatchReason; via
   return null;
 }
 
-function bestReason(part: SearchablePart, rawQuery: string): { why: MatchReason; via?: string } | null {
+function bestReason(part: SearchablePart, rawQuery: string): { why: MatchReason; via?: string; bonus?: number } | null {
   const code = normalizeCode(rawQuery);
   const byCode = codeReason(part, code);
   if (byCode && byCode.why !== 'code-contains') return byCode;
@@ -99,8 +115,13 @@ function bestReason(part: SearchablePart, rawQuery: string): { why: MatchReason;
   const query = normalizeText(rawQuery);
   const name = normalizeText(part.name);
   const brand = normalizeText(part.brand);
+  const otherNames = part.otherNames ?? [];
   if (name.startsWith(query)) return { why: 'name-prefix' };
+  const namedPrefix = otherNames.find((other) => normalizeText(other).startsWith(query));
+  if (namedPrefix) return { why: 'other-name-prefix', via: namedPrefix };
   if (byCode) return byCode;
+  const namedWithin = otherNames.find((other) => normalizeText(other).includes(query));
+  if (namedWithin) return { why: 'other-name-contains', via: namedWithin };
   if (name.includes(query)) return { why: 'name-contains' };
   if (brand.length > 0 && brand.includes(query)) return { why: 'brand' };
 
@@ -108,9 +129,13 @@ function bestReason(part: SearchablePart, rawQuery: string): { why: MatchReason;
   // "bearing pinion" find "BIG PINION BEARING 803149/10".
   const words = query.split(' ').filter(Boolean);
   if (words.length > 1) {
-    const haystack = `${normalizeText(part.partNumber)} ${(part.otherNumbers ?? []).map(normalizeText).join(' ')} ${name} ${brand}`;
+    const haystack = `${normalizeText(part.partNumber)} ${(part.otherNumbers ?? []).map(normalizeText).join(' ')} ${name} ${otherNames.map(normalizeText).join(' ')} ${brand}`;
     if (words.every((word) => haystack.includes(word))) return { why: 'all-words' };
   }
+
+  // What the customer calls it, a shop word for it, or a slip of spelling (lib/part-names.ts).
+  const loose = looseMatch(rawQuery, [part.name, ...otherNames, part.brand]);
+  if (loose) return { why: 'similar', via: loose.how, bonus: loose.exactWords };
   return null;
 }
 
@@ -125,7 +150,7 @@ export function searchParts<T extends SearchablePart>(rawQuery: string, parts: T
   const matches: PartMatch<T>[] = [];
   for (const part of parts) {
     const reason = bestReason(part, query);
-    if (reason) matches.push({ part, score: SCORES[reason.why], why: reason.why, ...(reason.via ? { via: reason.via } : {}) });
+    if (reason) matches.push({ part, score: SCORES[reason.why] + (reason.bonus ?? 0), why: reason.why, ...(reason.via ? { via: reason.via } : {}) });
   }
 
   matches.sort((a, b) => {

@@ -17,6 +17,8 @@ export type Product = {
   part_number: string;
   /** Its other numbers (lib/part-numbers.ts): the picker finds the part by any of them. */
   other_numbers?: string[] | null;
+  /** What customers call it (lib/part-names.ts): the picker finds the part by any of them. */
+  other_names?: string[] | null;
   name: string;
   brand: string;
   hsn_code: string;
@@ -162,6 +164,8 @@ export type InvoiceLine = { part: string; qty: number; price: number; discount?:
 /** A part as offered in the "type a part" datalist: the label the owner picks, plus everything
  *  the form fills in behind it once picked. */
 export type PartOption = {
+  /** The part's row id, so a customer's word for it can be saved from the bill. */
+  id?: string;
   value: string;
   price: number;
   /** Catalogue cost, for the below-cost warning while a rate is being typed. */
@@ -170,6 +174,8 @@ export type PartOption = {
   partNumber: string;
   /** Its other numbers, so the picker finds the part by any of them. */
   otherNumbers?: readonly string[];
+  /** What customers call it, so the picker finds the part by any of those words too. */
+  otherNames?: readonly string[];
   /** The catalogue name on its own, so search can rank a name match apart from a code match. */
   name: string;
   brand: string;

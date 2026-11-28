@@ -38,6 +38,8 @@ export type PartOption = {
   partNumber: string;
   /** Its other numbers, so the picker finds the part by any of them. */
   otherNumbers?: readonly string[];
+  /** What customers call it, so the picker finds the part by any of those words too. */
+  otherNames?: readonly string[];
   name: string;
   brand: string;
   stock: number;
