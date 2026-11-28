@@ -62,7 +62,7 @@ export const SHOP_WORDS: readonly (readonly string[])[] = [
   ['key', 'chabi', 'chaabi'],
   ['handle', 'hattha', 'hatha'],
   ['ring', 'chhalla', 'challa'],
-  ['diesel', 'disel', 'deasel'],
+  ['diesel', 'disel', 'deasel', 'diesal'],
   ['brake', 'break'],
   ['hub', 'hos', 'hus'],
   ['king pin carrier', 'kpc'],
@@ -76,9 +76,10 @@ function wordKey(raw: string): string {
   return word.length > 3 && word.endsWith('s') && !word.endsWith('ss') ? word.slice(0, -1) : word;
 }
 
-/** The words of a piece of text, as compared. "N/M" is one word ("nm"), as the shop writes it. */
+/** The words of a piece of text, as compared. "N/M" is one word ("nm"), as the shop writes it;
+ *  a full stop separates words ("GASKET.CYLINDER HEAD"). */
 export function wordsOf(text: string): string[] {
-  return text.split(/[\s,()&+]+/).map(wordKey).filter(Boolean);
+  return text.split(/[\s,.()&+]+/).map(wordKey).filter(Boolean);
 }
 
 const GROUP_OF = new Map<string, readonly string[]>();
