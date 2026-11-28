@@ -16,13 +16,15 @@ function safeDecode(value: string): string {
   try { return decodeURIComponent(value); } catch { return value; }
 }
 
-/** Remembered on this device only: whether printing a bill also prints the office copy. */
-const OFFICE_COPY_KEY = 'jde.print.officeCopy';
+/** Remembered on this device only: whether printing a bill also prints the office copy. On unless
+ *  it has been unticked here: the owner wants the CA's copy printed with every bill (November
+ *  2026). A new key, so a device that had it off from before starts with it on. */
+const OFFICE_COPY_KEY = 'jde.print.officeCopy.v2';
 
 /** A sales invoice, printed as a GST Tax Invoice. The saved PDF draws the same
  *  thing (lib/tally-invoice.ts builds both), so the two never disagree. The customer's copy is
- *  marked "Original for Recipient"; ticked, a second page marked "Office Copy" prints after it, for
- *  the file the CA collects at month end. */
+ *  marked "Original for Recipient"; a second page marked "Office Copy" prints after it, for the file
+ *  the CA collects at month end, unless "Also print an office copy" is unticked. */
 export default function SalesInvoicePrintPage() {
   const { id: rawId } = useParams<{ id: string }>();
   // A typed invoice number can hold "/" (JDE/25-26/001), which arrives here still encoded (%2F).
@@ -34,14 +36,14 @@ export default function SalesInvoicePrintPage() {
   const { rows: customers } = useCompanyTable<Customer>('customers');
   const { rows: salesReturns } = useCompanyTable<SalesReturnRow>('sales_returns');
   const { rows: parts } = useCompanyTable<PartHsn>('products');
-  const [officeCopy, setOfficeCopy] = useState(false);
+  const [officeCopy, setOfficeCopy] = useState(true);
 
   useEffect(() => {
     try {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- read once from this device after mount
-      if (window.localStorage.getItem(OFFICE_COPY_KEY) === '1') setOfficeCopy(true);
+      if (window.localStorage.getItem(OFFICE_COPY_KEY) === '0') setOfficeCopy(false);
     } catch {
-      // Storage blocked (private window): start unticked.
+      // Storage blocked (private window): both copies, the default.
     }
   }, []);
   const chooseOfficeCopy = (on: boolean) => {
@@ -77,7 +79,7 @@ export default function SalesInvoicePrintPage() {
         <div className="flex gap-2 items-center" style={{ flexWrap: 'wrap' }}>
           <label className="text-sm flex items-center gap-2" style={{ cursor: 'pointer' }} title="Prints a second page marked Office Copy, for the CA's file">
             <input id="print-office-copy" type="checkbox" checked={officeCopy} onChange={(event) => chooseOfficeCopy(event.target.checked)} />
-            Also print an office copy
+            Also print an office copy (for the CA)
           </label>
           {activeCompany && (
             <a className="btn btn-secondary btn-sm" target="_blank" rel="noopener"
