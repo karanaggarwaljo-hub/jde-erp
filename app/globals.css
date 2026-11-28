@@ -2072,6 +2072,18 @@ Modal
     color: #000000 !important;
   }
 
+  /* On screen the page is one window high and scrolls inside itself (html, body: height 100%,
+     body overflow). On paper that cut everything after the first page off, so a bill's office copy,
+     or every bill after the first in a month's print, came out blank. Paper is as long as it needs. */
+  html, body,
+  .erp-root, .erp-main, .erp-content {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+  .invoice-sheet { overflow: visible !important; }
+
   .invoice-sheet {
     max-width: 100% !important;
     margin: 0 !important;
