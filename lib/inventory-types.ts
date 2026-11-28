@@ -20,6 +20,8 @@ export type Product = {
   /** Every other number this part is known by (a supplier's code, an old number). Searched
    *  wherever the part number is. Tidied by the database; see lib/part-numbers.ts. */
   other_numbers?: string[] | null;
+  /** What customers call it (lib/part-names.ts): found by every part search, like the name. */
+  other_names?: string[] | null;
   oem_number: string;
   hsn_code: string;
   name: string;
@@ -42,6 +44,8 @@ export type PartFormData = {
   part_number: string;
   /** The part's other numbers as typed, separated by commas (lib/part-numbers.ts splitNumberList). */
   other_numbers: string;
+  /** What customers call it, as typed, separated by commas (lib/part-names.ts splitNameList). */
+  other_names: string;
   oem_number: string;
   hsn_code: string;
   name: string;

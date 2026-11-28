@@ -21,6 +21,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Search, Plus, AlertTriangle } from 'lucide-react';
 import { money } from '@/lib/money';
 import { isAmbiguousCode, searchParts, scannedPart, type SearchablePart } from '@/lib/part-search';
+import { alreadyNamed } from '@/lib/part-names';
 import type { LastTraded } from '@/lib/trade-history';
 import PartPhoto from '@/components/PartPhoto';
 
@@ -35,6 +36,9 @@ export type PartPickerProps<T extends PickablePart> = {
   onPick: (part: T) => void;
   /** Recording something that is not in the catalogue. Omitted hides the option entirely. */
   onCustom?: (description: string) => void;
+  /** Saves the word typed as another name for the part it found (lib/part-names.ts). Given, a
+   *  part found under a shop word or a near spelling offers to remember that word. */
+  onRememberName?: (part: T, name: string) => Promise<void>;
   /** What this customer or supplier last traded this part at, keyed by part label. */
   lastTraded?: Map<string, LastTraded>;
   /** How that figure is introduced on a row: "last" when selling, "last paid" when buying. */
@@ -46,7 +50,7 @@ export type PartPickerProps<T extends PickablePart> = {
 
 const MAX_RESULTS = 8;
 
-export default function PartPicker<T extends PickablePart>({ parts, onPick, onCustom, lastTraded, lastLabel = 'last', disabled, autoFocus }: PartPickerProps<T>) {
+export default function PartPicker<T extends PickablePart>({ parts, onPick, onCustom, onRememberName, lastTraded, lastLabel = 'last', disabled, autoFocus }: PartPickerProps<T>) {
   const [query, setQuery] = useState('');
   const [highlight, setHighlight] = useState(0);
   const [open, setOpen] = useState(false);
@@ -55,6 +59,15 @@ export default function PartPicker<T extends PickablePart>({ parts, onPick, onCu
   const [chose, setChose] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
+  // The list closes a moment after the box loses focus (so a click on a result still lands). That
+  // close is called off if the box is back in use first, or it would shut the list just opened.
+  const closeTimer = useRef<number | undefined>(undefined);
+  const keepOpen = () => { window.clearTimeout(closeTimer.current); setOpen(true); };
+  // Offered after a part was found under a word it is not called by (a shop word or a near
+  // spelling): one click saves that word as another name for it, so next time it is found as
+  // typed. Stays until it is answered, dismissed, or the next part is picked.
+  const [offer, setOffer] = useState<{ part: T; name: string } | null>(null);
+  const [offerState, setOfferState] = useState<'ask' | 'saving' | 'saved' | 'failed'>('ask');
 
   const matches = useMemo(() => searchParts(query, parts, MAX_RESULTS), [query, parts]);
   // A picture column only once any part has a picture; until then it would be a row of empty boxes.
@@ -70,6 +83,14 @@ export default function PartPicker<T extends PickablePart>({ parts, onPick, onCu
   }, [autoFocus]);
 
   const pick = (part: T) => {
+    const typed = query.trim();
+    const match = matches.find((candidate) => candidate.part === part);
+    if (onRememberName && part.id && match?.why === 'similar' && typed.length >= 3 && !alreadyNamed(typed, part.name, part.otherNames)) {
+      setOffer({ part, name: typed });
+      setOfferState('ask');
+    } else {
+      setOffer(null);
+    }
     onPick(part);
     setQuery('');
     setOpen(false);
@@ -142,11 +163,11 @@ export default function PartPicker<T extends PickablePart>({ parts, onPick, onCu
           autoComplete="off"
           disabled={disabled}
           value={query}
-          onChange={(event) => { setQuery(event.target.value); setHighlight(0); setChose(false); setOpen(true); }}
+          onChange={(event) => { setQuery(event.target.value); setHighlight(0); setChose(false); keepOpen(); }}
           onKeyDown={onKeyDown}
-          onFocus={() => setOpen(true)}
+          onFocus={keepOpen}
           // A click on a result would otherwise be lost to the blur that closes the list first.
-          onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+          onBlur={() => { closeTimer.current = window.setTimeout(() => setOpen(false), 120); }}
         />
       </div>
 
@@ -172,7 +193,7 @@ export default function PartPicker<T extends PickablePart>({ parts, onPick, onCu
                   <span className="part-picker-name">{part.name}</span>
                   {/* The brand as a tag, so the same part in two brands is told apart at a glance. */}
                   {part.brand && <span className="badge badge-info">{part.brand}</span>}
-                  {match.via && <span className="text-muted text-sm">found as {match.via}</span>}
+                  {match.via && <span className="text-muted text-sm">{match.why === 'similar' ? match.via : `found as ${match.via}`}</span>}
                 </div>
                 <div className="part-picker-meta">
                   <span className={outOfStock ? 'text-danger text-sm' : 'text-muted text-sm'}>
@@ -188,6 +209,35 @@ export default function PartPicker<T extends PickablePart>({ parts, onPick, onCu
             );
           })}
         </ul>
+      )}
+
+      {offer && (
+        <div className="part-picker-remember text-sm" role="status">
+          {offerState === 'saved'
+            ? <span>Saved. Typing “{offer.name}” now finds {offer.part.name}.</span>
+            : offerState === 'failed'
+              ? <span className="text-danger">“{offer.name}” was not saved. Add it in Stock under the part&apos;s other names.</span>
+              : (
+                <>
+                  <span>Customers call it “{offer.name}”?</span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    disabled={offerState === 'saving'}
+                    onClick={async () => {
+                      setOfferState('saving');
+                      try {
+                        await onRememberName?.(offer.part, offer.name);
+                        setOfferState('saved');
+                      } catch {
+                        setOfferState('failed');
+                      }
+                    }}
+                  >{offerState === 'saving' ? 'Saving…' : `Remember it for ${offer.part.name}`}</button>
+                </>
+              )}
+          <button type="button" className="btn btn-ghost btn-sm" aria-label="Close" onClick={() => setOffer(null)}>✕</button>
+        </div>
       )}
 
       {nothingFound && (

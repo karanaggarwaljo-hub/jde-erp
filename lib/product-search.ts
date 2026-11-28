@@ -13,7 +13,10 @@
  *  So code-like fields — part number, OEM number, compatibility — are also compared with
  *  punctuation and spacing removed, exactly as the import matcher already does. Names and brands
  *  are prose and stay plain substring: stripping punctuation there would merge different parts.
+ *
+ *  Other names, shop words and slips of spelling (lib/part-names.ts) are tried last.
  */
+import { looseMatch } from './part-names';
 
 export type SearchableProduct = {
   name?: string | null;
@@ -24,6 +27,8 @@ export type SearchableProduct = {
   brand?: string | null;
   compatibility?: string | null;
   category?: string | null;
+  /** What customers call it (lib/part-names.ts). */
+  other_names?: readonly string[] | null;
 };
 
 const plain = (value: unknown): string => (typeof value === 'string' ? value.toLowerCase() : '');
@@ -56,7 +61,27 @@ export function matchesProductSearch(product: SearchableProduct, query: string):
   for (const number of product.other_numbers ?? []) {
     if (squashed(number).includes(squashedTerm)) return true;
   }
+  for (const other of product.other_names ?? []) {
+    if (plain(other).includes(term)) return true;
+  }
   return false;
+}
+
+/** The second try, for when nothing matched as typed: what the customer calls it, a shop word
+ *  for it, or a slip of spelling (lib/part-names.ts). Kept apart so a search that does find parts
+ *  as typed is not padded out with near misses. */
+export function looselyMatchesProductSearch(product: SearchableProduct, query: string): boolean {
+  const term = query.trim();
+  if (!term) return true;
+  return looseMatch(term, [product.name, ...(product.other_names ?? []), product.brand, product.category, product.compatibility]) !== null;
+}
+
+/** Stock's search: the parts that match as typed, or, when none do, the close matches. */
+export function searchProducts<T extends SearchableProduct>(products: readonly T[], query: string): { rows: T[]; loose: boolean } {
+  const exact = products.filter((product) => matchesProductSearch(product, query));
+  if (exact.length > 0 || !query.trim()) return { rows: exact, loose: false };
+  const loose = products.filter((product) => looselyMatchesProductSearch(product, query));
+  return { rows: loose, loose: loose.length > 0 };
 }
 
 /** Every distinct compatibility already in use, most-used first, for offering as suggestions

@@ -6,6 +6,7 @@ export type PartDetailPart = {
   id: string;
   part_number: string;
   other_numbers?: string[] | null;
+  other_names?: string[] | null;
   oem_number: string;
   hsn_code: string;
   name: string;

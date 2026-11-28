@@ -82,6 +82,8 @@ export type InvoiceFormModalProps = {
   selectedCustomer: Customer | undefined;
   creditSaleNeedsCustomer: boolean;
   partOptions: PartOption[];
+  /** Saves a customer's word for a part, offered after the part is found under it. */
+  rememberPartName?: (part: PartOption, name: string) => Promise<void>;
   customers: Customer[];
   placeOfSupply: string;
   halfGstPercent: number;
@@ -121,7 +123,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
     editingInvoice, setEditingInvoice, editingDraft, invoiceError, savingInvoice, savingDraft,
     selectedCustomer, creditSaleNeedsCustomer, partOptions, customers, placeOfSupply, halfGstPercent, supplyKind, localTax,
     placeOfSupplyCode, setPlaceOfSupplyChoice, dispatch, setDispatch, notice,
-    lastSold, setShowInvoiceModal, setShowAddCustomer, saveInvoice, saveDraftInvoice,
+    lastSold, setShowInvoiceModal, setShowAddCustomer, saveInvoice, saveDraftInvoice, rememberPartName,
   } = props;
 
   const {
@@ -232,6 +234,7 @@ export default function InvoiceFormModal(props: InvoiceFormModalProps) {
                   parts={partOptions}
                   onPick={handlePick}
                   onCustom={handleCustom}
+                  onRememberName={rememberPartName}
                   lastTraded={lastSold}
                   disabled={savingInvoice || savingDraft}
                   autoFocus

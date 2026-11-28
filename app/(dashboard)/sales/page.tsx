@@ -3,7 +3,7 @@ import { currentIdentity, indexProductsById, savedLineLabel } from '@/lib/trade-
 import type { MoneyChoice } from '@/lib/money-book';
 import { checkBillCredit } from '@/lib/credit';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Plus,
   Printer,
@@ -28,6 +28,7 @@ import {
   History,
 } from 'lucide-react';
 import { cleanInvoiceNumber, invoiceNumberProblem } from '@/lib/invoice-number';
+import { cleanOtherNames } from '@/lib/part-names';
 import { saveSalesInvoice, deleteCustomerPayment, writeOffInvoiceBalance, receiveCustomerPayment, getInvoiceCost } from '@/lib/client-sales';
 import { realisedProfit, type InvoiceCost } from '@/lib/invoice-profit';
 import { invoiceBalanceDue, invoiceWrittenOff, wasSettledShort } from '@/lib/invoice-balance';
@@ -134,7 +135,7 @@ function formatDateTime(timestamp: string): string {
 const SALES_ENTRY_KINDS = ['sale', 'payment', 'return'] as const;
 
 export default function SalesPage() {
-  const { rows: products, loading: productsLoading, reload: reloadProducts, activeCompany } = useCompanyTable<Product>('products');
+  const { rows: products, loading: productsLoading, reload: reloadProducts, update: updateProduct, activeCompany } = useCompanyTable<Product>('products');
   const photoFor = usePartPhotos();
   const { rows: customers, create: createCustomer, reload: reloadCustomers } = useCompanyTable<Customer>('customers');
   const { rows: invoices, loading: invoicesLoading, reload: reloadInvoices } = useCompanyTable<Invoice>('invoices');
@@ -160,8 +161,10 @@ export default function SalesPage() {
   // is matched back to its part by this label, so every lookup below uses the same one.
   const labelOf = useMemo(() => partLabeler(products), [products]);
   const partOptions = useMemo(() => products.map((product) => ({
+    id: product.id,
     value: labelOf(product),
     otherNumbers: product.other_numbers ?? [],
+    otherNames: product.other_names ?? [],
     price: Number(product.sale_price) || 0,
     costPrice: Number(product.cost_price) || 0,
     category: product.category,
@@ -172,6 +175,14 @@ export default function SalesPage() {
     hsn: product.hsn_code,
     photo: photoFor(product)?.url ?? null,
   })), [products, photoFor, labelOf]);
+
+  // A customer's word for a part, saved from the bill the first time the part is found under it
+  // (components/PartPicker.tsx), so next time it is found straight away.
+  const rememberPartName = useCallback(async (part: PartOption, name: string) => {
+    const product = products.find((row) => row.id === part.id);
+    if (!product) throw new Error('That part was not found in Stock.');
+    await updateProduct(product.id, { other_names: cleanOtherNames([...(product.other_names ?? []), name], product.name) });
+  }, [products, updateProduct]);
 
   const [activeTab, setActiveTab] = useState<SalesTab>('invoices');
   const [search, setSearch] = useState('');
@@ -1626,7 +1637,7 @@ Save it anyway?`,
             <h4 style={{ fontSize: '13px', fontWeight: 600, marginBottom: '10px' }}>Quoted Parts</h4>
             {partOptions.length === 0
               ? <p className="text-muted text-sm">Add parts in Stock before creating a quotation.</p>
-              : <PartPicker parts={partOptions} onPick={addQuotePart} onCustom={addQuoteCustomLine} disabled={savingQuotation || savingQuoteDraft} />}
+              : <PartPicker parts={partOptions} onPick={addQuotePart} onCustom={addQuoteCustomLine} onRememberName={rememberPartName} disabled={savingQuotation || savingQuoteDraft} />}
             <div style={{ overflowX: 'auto', marginTop: '10px' }}>
               <table className="erp-table" style={{ minWidth: '620px' }}>
                 <thead><tr>
@@ -1887,6 +1898,7 @@ Save it anyway?`,
             : undefined}
           setShowInvoiceModal={setShowInvoiceModal} setShowAddCustomer={setShowAddCustomer}
           saveInvoice={saveInvoice} saveDraftInvoice={saveDraftInvoice}
+          rememberPartName={rememberPartName}
         />
       )}
 

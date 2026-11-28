@@ -25,7 +25,8 @@ import { parseInventoryFile, readSheetForCostUpdate, extractCostRows, sheetFromS
 import { fieldsInSheet, priceListCsv, priceListFileName, sheetSaveSteps, type SheetRowPlan } from '@/lib/stock-sheet';
 import { planCostUpdates, findExistingProduct, type CostMatch } from '@/lib/cost-import';
 import { planDetailUpdates, looksLikeAnInventedCode } from '@/lib/detail-import';
-import { matchesProductSearch, compatibilitySuggestions } from '@/lib/product-search';
+import { searchProducts, compatibilitySuggestions } from '@/lib/product-search';
+import { cleanOtherNames, splitNameList } from '@/lib/part-names';
 import { cleanOtherNumbers, partNumberUsers, partsAnsweringTo, sameBrand, splitNumberList } from '@/lib/part-numbers';
 import { averageMarginPercent, marginPercent } from '@/lib/margin';
 import { buildPartsWorksheet, countUnanswered, worksheetToCsv, worksheetFileName } from '@/lib/parts-worksheet';
@@ -208,6 +209,7 @@ export default function InventoryPage() {
   const [formData, setFormData] = useState<PartFormData>({
     part_number: '',
     other_numbers: '',
+    other_names: '',
     oem_number: '',
     hsn_code: '',
     name: '',
@@ -299,13 +301,13 @@ export default function InventoryPage() {
   // How much of the job is left, for the button and the confirmation to say honestly.
   const worksheetPending = countUnanswered(buildPartsWorksheet(products));
 
-  const filteredProducts = products.filter(p => {
-    // Now also searches what a part FITS, and ignores punctuation in codes and models, so
-    // "BS4" reaches "N/M bs4" and "331-34392" reaches "331/34392". See lib/product-search.ts.
-    const matchesSearch = matchesProductSearch(p, search);
-    const matchesCategory = categoryFilter === 'all' || p.category === categoryFilter;
-    return matchesSearch && matchesCategory;
-  });
+  // Also searches what a part FITS, and ignores punctuation in codes and models, so "BS4" reaches
+  // "N/M bs4" and "331-34392" reaches "331/34392". When nothing matches as typed, it shows the
+  // close matches instead: what customers call a part, shop words, slips of spelling. See
+  // lib/product-search.ts and lib/part-names.ts.
+  const inCategory = products.filter((p) => categoryFilter === 'all' || p.category === categoryFilter);
+  const stockSearch = searchProducts(inCategory, search);
+  const filteredProducts = stockSearch.rows;
 
   // Tab counts are taken from the search/category result rather than the whole catalogue, so the
   // number on a tab is always exactly how many rows clicking it will show.
@@ -370,6 +372,7 @@ export default function InventoryPage() {
       // wins; it is only the stand-in that is no longer guessed here.
       part_number: '',
       other_numbers: '',
+    other_names: '',
       oem_number: '',
       hsn_code: '',
       name: '',
@@ -414,6 +417,7 @@ export default function InventoryPage() {
         ...formData,
         // Saved as a list; the database tidies it the same way (lib/part-numbers.ts).
         other_numbers: cleanOtherNumbers(splitNumberList(formData.other_numbers), formData.part_number),
+        other_names: cleanOtherNames(splitNameList(formData.other_names), formData.name),
         cost_price: newCostPrice,
         mrp: Number(formData.mrp),
         sale_price: Number(formData.sale_price),
@@ -470,6 +474,7 @@ export default function InventoryPage() {
           ...current,
           part_number: nextPartNumber(current.part_number),
           other_numbers: '',
+    other_names: '',
           name: '',
           hsn_code: '',
           compatibility: '',
@@ -512,6 +517,7 @@ export default function InventoryPage() {
     setFormData({
       part_number: product.part_number,
       other_numbers: (product.other_numbers ?? []).join(', '),
+      other_names: (product.other_names ?? []).join(', '),
       oem_number: product.oem_number,
       hsn_code: product.hsn_code || '',
       name: product.name,
@@ -540,6 +546,7 @@ export default function InventoryPage() {
     setFormData({
       part_number: product.part_number,
       other_numbers: (product.other_numbers ?? []).join(', '),
+      other_names: (product.other_names ?? []).join(', '),
       oem_number: product.oem_number || '',
       hsn_code: product.hsn_code || '',
       name: product.name,
@@ -1085,6 +1092,9 @@ export default function InventoryPage() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+            {stockSearch.loose && (
+              <span className="text-sm text-muted" role="status">Nothing is called “{search.trim()}”. Showing close matches.</span>
+            )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Filter size={16} color="var(--text-muted)" />
@@ -1151,8 +1161,15 @@ export default function InventoryPage() {
                       {photo
                         ? <PartPhoto url={photo.url} name={p.name} onClick={() => setDetailPartId(p.id)} title={`Open ${p.name}`} />
                         : <PartPhoto name={p.name} addable busy={photoSaving === p.id} onClick={() => pickPhotoFor(p.id)} title={`Add a photo of ${p.name}`} />}
-                      <button className="part-name-btn"
-                        title="See everything about this part" onClick={() => setDetailPartId(p.id)}>{p.name}</button>
+                      <div style={{ minWidth: 0 }}>
+                        <button className="part-name-btn"
+                          title="See everything about this part" onClick={() => setDetailPartId(p.id)}>{p.name}</button>
+                        {(p.other_names ?? []).length > 0 && (
+                          <div className="pn-also" title={`Customers also call it ${(p.other_names ?? []).join(', ')}`}>
+                            also called {(p.other_names ?? []).slice(0, 2).join(', ')}{(p.other_names ?? []).length > 2 ? ` +${(p.other_names ?? []).length - 2}` : ''}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </td>
                   <td>
